@@ -1,0 +1,19 @@
+# Rust
+target/
+
+# Node / Electron
+node_modules/
+dist/
+out/
+release/
+
+# Rendered audio / test artifacts
+renders/
+*.wav
+test-results/
+playwright-report/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
