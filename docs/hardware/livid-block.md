@@ -26,3 +26,11 @@ Status: stub. To be filled in once we probe the device's MIDI messages.
 
 The mapping logic lives in the daemon; a virtual Block implementation should be
 built alongside the real one (see [../validation.md](../validation.md)).
+
+## Remote engine
+
+The Block will usually be plugged into a laptop. When the engine runs on a
+remote server, the laptop's daemon runs as a bridge: it forwards button and
+knob input upstream and drives the LEDs from engine events. The bridge lights
+LEDs immediately on press and reconciles with engine state, so the grid feels
+instant despite network latency. See [../topology.md](../topology.md).

@@ -29,6 +29,14 @@ has been exercised through its real interface and the result observed.
 - Controller output (LED state) is observable via the CLI.
 - Real-device checks stay possible but are never the only way to validate.
 
+### Multi-daemon
+
+- Run an engine and one or more bridges on one machine over loopback, so
+  remote and collaborative setups are testable without extra hardware.
+- Inject latency, jitter, and disconnects between daemons; assert live input
+  still lands on time (within the latency buffer), LEDs reconcile, and clients
+  resync correctly after reconnect.
+
 ### UI
 
 - Playwright (with Electron support) drives the app.

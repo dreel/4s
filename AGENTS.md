@@ -17,7 +17,9 @@ and agents can drive and verify every part of it.
    by an agent: headless audio renders, a virtual controller, scripted UI tests.
 5. **Modular by design.** Instruments, mixer channels, effects, and MIDI devices
    are nodes in a graph; every parameter has a stable, addressable path.
-6. **Docs evolve with the code.** These principles are a starting point; update
+6. **Network-transparent.** Never assume clients, controllers, or files share
+   a machine with the engine. See [topology](docs/topology.md).
+7. **Docs evolve with the code.** These principles are a starting point; update
    them as we learn.
 
 ## Docs
@@ -26,6 +28,7 @@ and agents can drive and verify every part of it.
 - [Architecture](docs/architecture.md) -- daemon / CLI / UI split, graph model
 - [API parity](docs/api-parity.md) -- the 1:1 RPC <-> CLI <-> UI rule
 - [RPC](docs/rpc.md) -- JSON-RPC over WebSocket, shared types, ts-rs codegen
+- [Topology](docs/topology.md) -- engine/bridge roles, remote and collaborative setups
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
 

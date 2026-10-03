@@ -20,6 +20,10 @@
      audio output
 ```
 
+This shows the solo setup, with everything on one machine. The daemon can
+also run on a remote server, with a bridge daemon on each laptop handling
+local controllers. See [topology.md](topology.md).
+
 ## Components
 
 ### Daemon (`4sd`, working name)
@@ -35,6 +39,10 @@ The core Rust binary and the single source of truth. It owns:
 
 The real-time audio thread must stay lock-free and allocation-free. Control
 changes reach it through message queues; it reports back the same way.
+
+The same binary runs in one of two roles: **engine** (everything above) or
+**bridge** (local devices plus a proxy to a remote engine, no audio). See
+[topology.md](topology.md).
 
 ### CLI (`4s`, working name)
 
@@ -79,6 +87,8 @@ docs/
 
 - RPC layer: JSON-RPC 2.0 over WebSocket, types defined in Rust and generated
   for TypeScript with `ts-rs`. See [rpc.md](rpc.md).
+- Topology: one engine, hub-and-spoke bridges, clients always talk to the
+  local daemon. See [topology.md](topology.md).
 
 ## Open decisions
 

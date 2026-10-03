@@ -5,8 +5,10 @@ Status: decided. Details will be refined as we build.
 ## Decision
 
 - **Protocol**: JSON-RPC 2.0.
-- **Transport**: WebSocket on `127.0.0.1`, used by both the CLI and the UI.
-  A Unix domain socket may be added later for the CLI.
+- **Transport**: WebSocket, used by the CLI, the UI, and daemon-to-daemon
+  links (see [topology.md](topology.md)). Listens on `127.0.0.1` by default;
+  see "Remote operation" below. A Unix domain socket may be added later for
+  local CLI use.
 - **Server**: `jsonrpsee` (trait-based API definitions, WebSocket
   subscriptions). Fallback if it gets in the way: a small hand-rolled server on
   `tokio-tungstenite`.
@@ -68,6 +70,28 @@ Enforced mechanically, not by convention:
   and checked to come back unchanged.
 - **CLI coverage**: a test asserts every RPC method has a corresponding CLI
   command.
+
+## Remote operation
+
+The engine may run on a different machine from its clients (see
+[topology.md](topology.md)). The protocol must never assume a shared machine.
+
+- **Listen address**: configurable. Default `127.0.0.1`; exposing on a network
+  interface is an explicit opt-in.
+- **Auth**: a token presented in a first `hello` message (browser WebSockets
+  cannot set custom headers). Encryption initially via Tailscale or an SSH
+  tunnel; native `wss://` later.
+- **Version handshake**: `hello` exchanges protocol versions; a mismatch is
+  refused or warned about.
+- **Identity**: `hello` also carries a client id and display name. Events carry
+  the origin of the change.
+- **Resync**: subscriptions start with a full snapshot followed by
+  sequence-numbered deltas, so a client can reconnect and catch up reliably.
+- **Timestamps**: events carry engine-clock timestamps; a ping exchange lets
+  remote daemons estimate clock offset.
+- **Files**: projects, renders, and samples live on the engine host. The API
+  either names engine-side paths explicitly or transfers contents. Clients
+  never assume they can read the engine's disk.
 
 ## Alternatives considered
 

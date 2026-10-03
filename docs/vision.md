@@ -25,6 +25,10 @@ command line.
 - MIDI in/out to external gear and other controllers.
 - Pattern/song arrangement, project save/load.
 - Recording and export.
+- Headless engine on a remote server with its own audio out, controlled from
+  a laptop over the network.
+- Collaborative sessions: several people, each with their own controllers,
+  playing into one shared engine.
 
 ## Non-goals (for now)
 
