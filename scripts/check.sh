@@ -3,6 +3,7 @@
 # CLI end-to-end, and Electron end-to-end.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+command -v cargo >/dev/null || export PATH="$HOME/.cargo/bin:$PATH"
 
 echo "== cargo test"; cargo test -q
 echo "== cargo build"; cargo build -q
