@@ -89,10 +89,13 @@ docs/
   for TypeScript with `ts-rs`. See [rpc.md](rpc.md).
 - Topology: one engine, hub-and-spoke bridges, clients always talk to the
   local daemon. See [topology.md](topology.md).
+- Audio backend: `cpal` (CoreAudio on macOS; ALSA, JACK, or PipeWire on Linux,
+  e.g. for a server with a line out).
+- MIDI library: `midir` (CoreMIDI on macOS, ALSA on Linux; virtual ports are
+  useful for testing).
+- Project format: JSON directory bundle with versioned migrations. See
+  [project-format.md](project-format.md).
 
 ## Open decisions
 
-To be settled when we start building:
-
-- Audio backend (e.g. `cpal`) and MIDI library (e.g. `midir`).
-- Project file format.
+None currently.

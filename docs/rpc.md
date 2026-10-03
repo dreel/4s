@@ -23,7 +23,9 @@ Status: decided. Details will be refined as we build.
 - TypeScript types for the UI are generated from `protocol` with `ts-rs` into
   `ui/src/generated/`. Generated files are committed so diffs show up in review.
 - `schemars` emits a JSON Schema of the whole API, served at runtime by the
-  daemon and usable by any future non-Rust/TS client.
+  daemon and usable by any future non-Rust/TS client. It is the
+  language-neutral contract: any TS runtime validators (e.g. Zod) are generated
+  from it, never hand-written.
 
 ## API shape
 

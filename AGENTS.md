@@ -28,6 +28,7 @@ and agents can drive and verify every part of it.
 - [Architecture](docs/architecture.md) -- daemon / CLI / UI split, graph model
 - [API parity](docs/api-parity.md) -- the 1:1 RPC <-> CLI <-> UI rule
 - [RPC](docs/rpc.md) -- JSON-RPC over WebSocket, shared types, ts-rs codegen
+- [Project format](docs/project-format.md) -- JSON bundle, versioning, migrations
 - [Topology](docs/topology.md) -- engine/bridge roles, remote and collaborative setups
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
