@@ -1,0 +1,19 @@
+{
+  "format_version": 1,
+  "params": {
+    "drums.kick.decay": 0.6,
+    "mixer.3.volume": 0.35,
+    "sequencer.length": 16,
+    "transport.swing": 0.2,
+    "transport.tempo": 118.0
+  },
+  "patterns": {
+    "kick": "X---x---X---x---",
+    "snare": "----x-------x---",
+    "closed_hat": "x-x-x-x-x-x-x-xX"
+  },
+  "controller": {
+    "knob_mode": "volume",
+    "follow": true
+  }
+}

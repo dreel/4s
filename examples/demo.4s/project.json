@@ -1,0 +1,26 @@
+{
+  "format_version": 1,
+  "params": {
+    "drums.kick.decay": 0.65,
+    "drums.open_hat.decay": 0.35,
+    "mixer.4.volume": 0.65,
+    "mixer.5.volume": 0.6,
+    "mixer.8.pan": 0.3,
+    "mixer.8.volume": 0.55,
+    "transport.swing": 0.25,
+    "transport.tempo": 112.0
+  },
+  "patterns": {
+    "kick": "X-----x---X--x--",
+    "snare": "----X-------X---",
+    "clap": "------------x---",
+    "closed_hat": "x-x-x-x-x-x-x---",
+    "open_hat": "--------------x-",
+    "low_tom": "-----------x----",
+    "cowbell": "---x------x-----"
+  },
+  "controller": {
+    "knob_mode": "volume",
+    "follow": true
+  }
+}

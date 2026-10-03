@@ -1,0 +1,10 @@
+[package]
+name = "fours-engine"
+description = "Real-time audio engine for 4S: drum voices, sequencer, mixer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+fours-protocol.workspace = true
+rtrb.workspace = true
+hound.workspace = true

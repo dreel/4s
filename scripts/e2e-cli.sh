@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# End-to-end check of daemon + CLI: starts a headless 4sd on a random port,
+# drives it only through the `4s` CLI, and asserts on the results.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+BIN=target/debug
+TMP=$(mktemp -d)
+trap 'kill $PID 2>/dev/null || true; rm -rf "$TMP"' EXIT
+
+"$BIN/4sd" --no-audio --no-midi --listen 127.0.0.1:0 --data-dir "$TMP/data" > "$TMP/out" 2> "$TMP/err" &
+PID=$!
+for _ in $(seq 50); do grep -q "ws://" "$TMP/out" 2>/dev/null && break; sleep 0.1; done
+export FOURS_URL=$(grep -o 'ws://[0-9.:]*' "$TMP/out")
+s() { "$BIN/4s" "$@"; }
+pass=0
+check() { # check <description> <expected substring> <command...>
+  local desc=$1 want=$2; shift 2
+  local got; got=$("$@" 2>&1) || true
+  if [[ "$got" == *"$want"* ]]; then pass=$((pass + 1)); echo "ok   $desc";
+  else echo "FAIL $desc"; echo "  wanted: $want"; echo "  got: $got"; exit 1; fi
+}
+
+check "hello/status" "transport: stopped" s status
+check "set percent" "mixer.3.volume = 0.35" s set mixer.3.volume 35%
+check "get" "mixer.3.volume = 0.35" s get mixer.3.volume
+check "clamp" "transport.tempo = 300" s tempo 9999
+check "tempo" "transport.tempo = 120" s tempo 120
+check "negative value" "mixer.1.pan = -0.5" s set mixer.1.pan -0.5
+check "unknown param" "unknown parameter" s set nope 1
+check "pattern set" "kick        X--- x--- X--- x---" s pattern set kick "X---x---X---x---"
+check "leading hyphen" "snare       ---- x--- ---- x---" s pattern set snare "----x-------x---"
+check "toggle" "clap step 13 = on" s pattern toggle clap 13
+check "accent" "cowbell step 16 = accent" s pattern step cowbell 16 accent
+check "step range" "step must be 1..64" s pattern step kick 65 on
+check "virtual pad" "#" s controller press 2 1
+check "pad edited pattern" "snare       x--- x---" s pattern show snare
+check "knob mode" "knobs: Decay" s controller mode --knobs decay
+check "knob" "page: 1" s controller knob 1 100%
+check "knob set param" "drums.kick.decay = 1" s get drums.kick.decay
+check "play" "playing" s play
+check "playhead events" "playhead" s watch --type playhead --count 2
+check "stop" "stopped" s stop
+check "render: onsets match distinct hit times" "triggers: 9  detected onsets: 5" s render --bars 1 --out renders/e2e.wav
+check "save" "e2e.4s" s project save e2e
+check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
+check "load restores" "kick        X--- x--- X--- x---" bash -c "$BIN/4s project load e2e >/dev/null && $BIN/4s pattern show kick"
+check "json output" '"value": 0.35' s --json get mixer.3.volume
+check "raw call" '"backend": "null"' s call engine.status
+
+echo "all $pass checks passed"

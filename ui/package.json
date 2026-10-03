@@ -1,0 +1,33 @@
+{
+  "name": "fours-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "4S thin UI: Electron + React + Tailwind over the 4sd RPC API",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "gen": "cargo run -q -p fours-protocol --bin gen-bindings",
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p .",
+    "start": "vite build && electron .",
+    "electron": "electron .",
+    "test:e2e": "vite build && playwright test"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.5.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2"
+  }
+}

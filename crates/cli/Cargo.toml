@@ -1,0 +1,19 @@
+[package]
+name = "fours-cli"
+description = "4S command line client (4s)"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "4s"
+path = "src/main.rs"
+
+[dependencies]
+fours-protocol.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true

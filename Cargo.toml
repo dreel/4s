@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/protocol", "crates/engine", "crates/daemon", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+fours-protocol = { path = "crates/protocol" }
+fours-engine = { path = "crates/engine" }
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+cpal = "0.18"
+futures-util = "0.3"
+hound = "3"
+midir = "0.11"
+rtrb = "0.4"
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.30"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ts-rs = "12"
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.dev.package.fours-engine]
+opt-level = 2

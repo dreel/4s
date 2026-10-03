@@ -1,0 +1,15 @@
+[package]
+name = "fours-protocol"
+description = "Shared RPC, event, state, and project types for 4S"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+ts-rs.workspace = true
+
+[[bin]]
+name = "gen-bindings"
+path = "src/bin/gen_bindings.rs"

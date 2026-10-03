@@ -72,16 +72,33 @@ business logic: it renders daemon state, subscribes to events, and sends RPCs.
   `drums.kick.decay`, `transport.tempo`. Paths are the shared vocabulary of the
   RPC API, CLI, UI, and controller mappings.
 
-## Proposed repo layout (not yet created)
+## Repo layout
 
 ```
 crates/
-  daemon/     # 4sd
-  cli/        # 4s
-  protocol/   # shared RPC types
-ui/           # Electron app
+  protocol/   # shared types: API (api! macro), events, state, project format
+  engine/     # real-time engine: voices, sequencer, mixer, offline render
+  daemon/     # 4sd: core state, RPC server, audio output, MIDI, Livid Block
+  cli/        # 4s: CLI client
+ui/           # Electron + React + Tailwind; src/generated is codegen output
+schema/       # generated JSON Schema
+examples/     # example projects (demo.4s)
+scripts/      # check.sh, e2e-cli.sh
 docs/
 ```
+
+## Daemon internals
+
+- `Core` (`crates/daemon/src/core.rs`) holds all state behind one mutex. Every
+  mutation updates state, pushes a `Command` to the engine, and broadcasts an
+  event. Request handlers, MIDI input, and engine feedback all go through it.
+- Threads: the audio thread (cpal callback or null pacer) owns the engine;
+  a feedback thread drains engine feedback into `Core` (playhead, triggers,
+  meters, LED refresh); a MIDI worker handles input (midir callbacks only
+  enqueue); a scanner auto-connects Livid Blocks; a tokio runtime serves
+  WebSocket connections.
+- Offline renders copy state out of `Core` and run on a blocking task, never
+  holding the lock.
 
 ## Decided
 

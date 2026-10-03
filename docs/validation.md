@@ -6,6 +6,36 @@ Every component must be drivable and verifiable end-to-end by an agent, without
 a human listening, looking, or pressing buttons. A change is not done until it
 has been exercised through its real interface and the result observed.
 
+## Running it
+
+```
+scripts/check.sh        # everything below, in order
+cargo test              # Rust unit/integration tests
+scripts/e2e-cli.sh      # headless 4sd driven only through the 4s CLI
+cd ui && npm run test:e2e   # Electron app + real 4sd via Playwright
+```
+
+What exists today:
+
+- **Engine** (`crates/engine`): every voice sounds and decays to silence;
+  sequencer triggers land within 2 samples of the expected time; swing timing;
+  mute/solo; offline render onsets match sequencer triggers, including dense
+  mixed patterns and long tails that must not re-trigger.
+- **Protocol** (`crates/protocol`): wire formats, project file round trip,
+  v1 fixture loads, future versions rejected.
+- **Daemon** (`crates/daemon`): Livid Block LED/page logic and MIDI decoding.
+- **CLI** (`crates/cli`): every RPC method has a CLI command
+  (`cli_covers_every_method`); 1-based numbering and value parsing.
+- **CLI e2e** (`scripts/e2e-cli.sh`): ~26 checks covering params, patterns,
+  virtual pads/knobs, transport events, offline render analysis, and project
+  save/load.
+- **UI e2e** (`ui/e2e`): UI edits verified over RPC, RPC edits verified in the
+  UI, transport, Block mirror, project round trip, render; writes
+  `ui/test-results/groove.png` for visual review.
+
+Not yet: golden renders, spectral checks, multi-daemon tests (no bridge yet),
+latency/jitter injection.
+
 ## By component
 
 ### Daemon

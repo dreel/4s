@@ -1,102 +1,127 @@
 # RPC Layer
 
-Status: decided. Details will be refined as we build.
+Status: implemented (v1). Run `4s methods` for the live method list.
 
 ## Decision
 
 - **Protocol**: JSON-RPC 2.0.
-- **Transport**: WebSocket, used by the CLI, the UI, and daemon-to-daemon
-  links (see [topology.md](topology.md)). Listens on `127.0.0.1` by default;
-  see "Remote operation" below. A Unix domain socket may be added later for
-  local CLI use.
-- **Server**: `jsonrpsee` (trait-based API definitions, WebSocket
-  subscriptions). Fallback if it gets in the way: a small hand-rolled server on
-  `tokio-tungstenite`.
+- **Transport**: WebSocket, used by the CLI, the UI, and (later) daemon-to-daemon
+  links (see [topology.md](topology.md)). Listens on `127.0.0.1:4440` by
+  default; see "Remote operation" below.
+- **Server**: a small hand-rolled JSON-RPC layer on `tokio-tungstenite`
+  (`crates/daemon/src/server.rs`). We started with `jsonrpsee` as the plan but
+  went hand-rolled so that the API is one typed `Request` enum: that gives us
+  generated TS method types and a mechanical CLI parity test for free (below),
+  with less dependency surface.
 - **Types**: defined once in Rust, generated for TypeScript with `ts-rs`.
 
 ## Single source of truth
 
-- `crates/protocol` holds every request, response, and event type, using
-  `serde`.
-- The daemon and the CLI are both Rust and depend on `protocol` directly -- no
-  codegen needed on that side.
-- TypeScript types for the UI are generated from `protocol` with `ts-rs` into
-  `ui/src/generated/`. Generated files are committed so diffs show up in review.
-- `schemars` emits a JSON Schema of the whole API, served at runtime by the
-  daemon and usable by any future non-Rust/TS client. It is the
-  language-neutral contract: any TS runtime validators (e.g. Zod) are generated
-  from it, never hand-written.
+- `crates/protocol` holds every request, response, event, state, and project
+  type, using `serde`.
+- Every method is declared exactly once, in the `api!` macro in
+  `crates/protocol/src/api.rs`. The macro generates the `Request` enum, the
+  `METHODS` list, and the TypeScript `Methods` map (method -> params/result).
+- The daemon and the CLI depend on `protocol` directly.
+- `cargo run -p fours-protocol --bin gen-bindings` writes:
+  - `ui/src/generated/*.ts` -- one file per type, plus `methods.ts`.
+  - `schema/4s.schema.json` -- JSON Schema for requests, events, snapshots,
+    and project files. This is the language-neutral contract; any TS runtime
+    validators (e.g. Zod) must be generated from it, never hand-written.
+- Generated files are committed; `scripts/check.sh` regenerates them and fails
+  if anything changed.
+
+## Wire format
+
+Request: `{"jsonrpc": "2.0", "id": 1, "method": "param.set", "params": {"path": "mixer.3.volume", "value": 0.35}}`
+
+Events are notifications: `{"jsonrpc": "2.0", "method": "event", "params": {"seq": 42, "origin": "cli", "event": {"type": "param_changed", "path": "mixer.3.volume", "value": 0.35}}}`
+
+Missing `params` are treated as `{}`. Error codes: -32700 parse, -32600 invalid
+request, -32601 unknown method, -32602 invalid params, -32000 failed,
+-32001 unauthorized.
 
 ## API shape
 
-### Typed structural RPCs
+### Structural methods
 
-A small set of explicit methods for things that change the shape of the
-system: adding/removing instruments, routing, pattern edits, transport
-(play/stop/tempo), project load/save.
+Explicit methods for things that are not a single parameter: transport
+(`transport.play/stop`), pattern edits (`pattern.*`), auditioning
+(`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`), projects
+(`project.*`), rendering (`render.offline`), and status (`engine.status`).
 
 ### Generic parameters
 
-Most interaction is "set or read parameter X", so parameters are not individual
-RPCs. Instead:
+Everything that is a value is a parameter with a stable path, e.g.
+`transport.tempo`, `sequencer.length`, `drums.kick.decay`, `mixer.3.volume`,
+`mixer.master.volume`. Three methods cover them all:
 
+- `param.list {prefix?}` -- the registry: path, label, kind (continuous /
+  integer / toggle) with range, default, unit.
 - `param.get {path}`
-- `param.set {path, value}`
-- `param.subscribe {paths}` -- push updates when values change
+- `param.set {path, value}` -- clamped to range; returns the applied value.
 
-Paths are the stable names described in [architecture.md](architecture.md),
-e.g. `mixer.3.volume`, `drums.kick.decay`.
+Clients build their controls from the registry, so new parameters appear in
+the UI and CLI without client changes. See [engine.md](engine.md) for the
+current parameter set.
 
-### Parameter registry
+### Events and sync
 
-The daemon exposes `describe`, returning every parameter with its path, type,
-range, unit, and default. The CLI and UI discover parameters from it, so a new
-synth parameter appears everywhere without new client code. The CLI uses the
-live registry for validation and tab completion.
-
-### Events
-
-Subscriptions push state changes, playhead position, controller LED state, and
-meters (roughly 30-60 Hz). JSON is fine at these rates; a binary side channel
-for bulk data (waveforms, scopes) is deferred until needed.
+- `events.subscribe {types?}` starts `event` notifications (optionally
+  filtered by type); `events.unsubscribe` stops them.
+- Every event has a `seq`. `state.get` returns a snapshot with the current
+  `seq`. Clients **subscribe first, then fetch the snapshot**, then apply only
+  buffered events with `seq` greater than the snapshot's -- nothing is missed or
+  applied twice. The UI does exactly this on every (re)connect.
+- `reset` (project loaded/new) and `lagged` (subscriber fell behind) mean
+  "refetch `state.get`".
+- High-rate events: `playhead` (per step), `trigger` (per hit), `meters`
+  (~30 Hz, suppressed while silent). JSON is fine at these rates.
 
 ## Parity guarantees
 
-Enforced mechanically, not by convention:
+Enforced mechanically:
 
-- **Codegen check**: CI regenerates TS types and fails if they differ from what
-  is committed.
-- **Schema snapshot**: the daemon's JSON Schema is snapshot-tested, so any API
-  change is visible in review.
-- **Round-trip tests**: each message type is serialized in Rust, parsed in TS,
-  and checked to come back unchanged.
-- **CLI coverage**: a test asserts every RPC method has a corresponding CLI
-  command.
+- **CLI coverage**: `cli_covers_every_method` (in `crates/cli`) parses a list of
+  real CLI commands, maps them to `Request`s, and fails if any method in
+  `METHODS` has no dedicated CLI command. `4s call <method> <json>` additionally
+  reaches any method generically.
+- **Codegen check**: `scripts/check.sh` regenerates TS types and the schema and
+  fails on any diff.
+- **Wire-format tests** in `crates/protocol` pin the JSON shape of requests,
+  events, and project files.
+- **End-to-end**: `scripts/e2e-cli.sh` drives a real daemon only through the
+  CLI; `ui/e2e` drives the real Electron app and verifies results over RPC (and
+  vice versa).
 
 ## Remote operation
 
 The engine may run on a different machine from its clients (see
-[topology.md](topology.md)). The protocol must never assume a shared machine.
+[topology.md](topology.md)). The protocol never assumes a shared machine.
 
-- **Listen address**: configurable. Default `127.0.0.1`; exposing on a network
-  interface is an explicit opt-in.
-- **Auth**: a token presented in a first `hello` message (browser WebSockets
-  cannot set custom headers). Encryption initially via Tailscale or an SSH
-  tunnel; native `wss://` later.
-- **Version handshake**: `hello` exchanges protocol versions; a mismatch is
-  refused or warned about.
-- **Identity**: `hello` also carries a client id and display name. Events carry
-  the origin of the change.
-- **Resync**: subscriptions start with a full snapshot followed by
-  sequence-numbered deltas, so a client can reconnect and catch up reliably.
-- **Timestamps**: events carry engine-clock timestamps; a ping exchange lets
-  remote daemons estimate clock offset.
-- **Files**: projects, renders, and samples live on the engine host. The API
-  either names engine-side paths explicitly or transfers contents. Clients
-  never assume they can read the engine's disk.
+Implemented:
+
+- **Listen address**: `4sd --listen ADDR`. Default `127.0.0.1:4440`; a
+  non-loopback address without a token logs a warning.
+- **Auth**: `4sd --token T` (or `FOURS_TOKEN`) requires `session.hello` with
+  that token before any other call (browser WebSockets cannot set headers).
+  Encryption: use Tailscale or an SSH tunnel for now; native `wss://` later.
+- **Version handshake**: `session.hello` carries `protocol_version`; a
+  mismatch is refused.
+- **Identity**: `hello` carries a client name; events carry `origin` (client
+  name, `midi:<port>`, or `engine`).
+- **Resync**: snapshot + sequence-numbered events, as above.
+- **Files**: projects and renders are engine-side paths; relative paths
+  resolve under the daemon's data dir.
+
+Not yet implemented: engine-clock offset estimation (ping exchange) for
+bridges, and the bridge role itself.
 
 ## Alternatives considered
 
+- **jsonrpsee**: mature, but we get stronger typing and parity checks from a
+  single `Request` enum, and the server is ~200 lines. Revisit if we need
+  HTTP transport, batching, or other features it provides.
 - **Protobuf + gRPC/Connect**: schema-first and language-neutral, but heavier
   tooling, awkward mapping to Rust enums, binary by default, and needs a proxy
   or Connect for Electron renderers. Revisit if we need clients in other

@@ -29,9 +29,32 @@ and agents can drive and verify every part of it.
 - [API parity](docs/api-parity.md) -- the 1:1 RPC <-> CLI <-> UI rule
 - [RPC](docs/rpc.md) -- JSON-RPC over WebSocket, shared types, ts-rs codegen
 - [Project format](docs/project-format.md) -- JSON bundle, versioning, migrations
+- [Engine](docs/engine.md) -- voices, sequencer, mixer, parameter list
 - [Topology](docs/topology.md) -- engine/bridge roles, remote and collaborative setups
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
+
+## Build, run, verify
+
+```
+cargo build                                  # target/debug/4sd and 4s
+target/debug/4sd                             # daemon on ws://127.0.0.1:4440 (default audio device)
+target/debug/4sd --no-audio --no-midi \
+  --listen 127.0.0.1:0 --data-dir /tmp/4s    # headless, random port (prints its URL)
+FOURS_URL=ws://... target/debug/4s state     # drive it; `4s --help`, `4s methods`
+(cd ui && npm install && npm start)          # Electron UI (FOURS_URL selects the daemon)
+scripts/check.sh                             # all tests: Rust, codegen, CLI e2e, Electron e2e
+```
+
+- Changing anything in `crates/protocol`: run
+  `cargo run -p fours-protocol --bin gen-bindings` and commit the generated
+  `ui/src/generated/` and `schema/` output.
+- Adding an RPC method: add it to the `api!` macro in
+  `crates/protocol/src/api.rs`, handle it in `crates/daemon/src/core.rs`, add a
+  CLI command (the `cli_covers_every_method` test enforces this), then UI.
+- `4s render` writes a WAV on the engine host and reports peak, RMS, detected
+  onsets, and sequencer triggers -- use it to verify audio changes without
+  listening. `ui/test-results/groove.png` (from the Electron e2e) shows the UI.
 
 ## How agents should work here
 
