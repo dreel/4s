@@ -25,6 +25,7 @@ and agents can drive and verify every part of it.
 - [Vision](docs/vision.md) -- what 4S is, near-term goal, longer-term direction
 - [Architecture](docs/architecture.md) -- daemon / CLI / UI split, graph model
 - [API parity](docs/api-parity.md) -- the 1:1 RPC <-> CLI <-> UI rule
+- [RPC](docs/rpc.md) -- JSON-RPC over WebSocket, shared types, ts-rs codegen
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
 

@@ -75,13 +75,14 @@ ui/           # Electron app
 docs/
 ```
 
+## Decided
+
+- RPC layer: JSON-RPC 2.0 over WebSocket, types defined in Rust and generated
+  for TypeScript with `ts-rs`. See [rpc.md](rpc.md).
+
 ## Open decisions
 
 To be settled when we start building:
 
-- RPC transport and format (e.g. JSON-RPC over a local Unix socket and/or
-  WebSocket).
 - Audio backend (e.g. `cpal`) and MIDI library (e.g. `midir`).
-- Schema/type sharing between Rust and TypeScript (e.g. codegen from Rust
-  types).
 - Project file format.

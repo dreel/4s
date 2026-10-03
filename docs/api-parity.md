@@ -15,6 +15,9 @@ Example -- "set mixer channel 3 volume to 35%":
 
 (Exact names and syntax are illustrative until the API is built.)
 
+See [rpc.md](rpc.md) for the protocol and how parity is enforced
+mechanically (shared types, codegen checks, CLI coverage tests).
+
 ## Why
 
 - **Agents can do anything a human can.** The CLI is the agentic interface, so
