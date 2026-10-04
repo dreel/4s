@@ -19,7 +19,8 @@
 #   REVIEW_MAX_TURNS    cap on agent turns (default 40)
 # Writes .gates/review-<sha>.md.
 # Exit: 0 VERDICT: pass; 1 any other verdict; 3 invalid review output (wrong or
-# missing REVIEWED_SHA / DIFF_SHA256 / VERDICT); 2 usage or setup error.
+# missing REVIEWED_SHA / DIFF_SHA256 / VERDICT); 2 usage or setup error;
+# 4 the agent process itself failed (e.g. auth error, --max-turns reached).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -73,10 +74,11 @@ PROMPT=.gates/review-prompt-$HEAD.md
 
 OUT=.gates/review-$HEAD.md
 PROVIDER=${REVIEW_PROVIDER:-claude}
+rm -f "$OUT" "$OUT.tmp" # never leave an older review behind on failure
 echo "==> independent review of $HEAD (diff $HASH)" >&2
 if [[ -n ${REVIEW_CMD:-} ]]; then
   REVIEWER="custom ($REVIEW_CMD)"
-  bash -c "$REVIEW_CMD" < "$PROMPT" > "$OUT.tmp"
+  bash -c "$REVIEW_CMD" < "$PROMPT" > "$OUT.tmp" || { echo "review.sh: review command exited $?" >&2; exit 4; }
 else
   command -v claude >/dev/null || {
     echo "review.sh: 'claude' (the Claude Code CLI, used as the review harness) not found; install it or set REVIEW_CMD" >&2
@@ -121,7 +123,8 @@ else
       exit 2
       ;;
   esac
-  env ${ENV[@]+"${ENV[@]}"} claude -p "${FLAGS[@]}" < "$PROMPT" > "$OUT.tmp"
+  env ${ENV[@]+"${ENV[@]}"} claude -p "${FLAGS[@]}" < "$PROMPT" > "$OUT.tmp" ||
+    { echo "review.sh: agent exited $?" >&2; exit 4; }
 fi
 { echo "Reviewer: $REVIEWER"; echo; cat "$OUT.tmp"; } > "$OUT"
 rm -f "$OUT.tmp"

@@ -125,7 +125,7 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
     branch's principles and docs (`REVIEW_DOCS_ROOT`). It can only read
     files, and project settings in the PR are ignored. It refuses PRs that
     change agent configuration (`.claude/`, `.muse/`, `.mcp.json`,
-    `CLAUDE.md`); review those by hand.
+    `CLAUDE.md`, `CLAUDE.local.md`); review those by hand.
   - **Data use:** at the Contributor tier, Meta may train on prompts and
     completions, which here means the PR diff and repository docs. 4S is a
     public repository, so this content is public anyway.
