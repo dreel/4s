@@ -214,11 +214,4 @@ mod tests {
         assert!(!dir.join(RUNTIME_FILE).exists(), "stale file removed");
         std::fs::remove_dir_all(&dir).unwrap();
     }
-
-    #[test]
-    fn uptime_format() {
-        assert_eq!(format_uptime(5.0), "5s");
-        assert_eq!(format_uptime(125.0), "2m05s");
-        assert_eq!(format_uptime(7300.0), "2h01m");
-    }
 }

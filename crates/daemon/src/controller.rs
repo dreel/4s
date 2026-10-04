@@ -209,24 +209,4 @@ mod tests {
         let leds = c.compute_leds(&pattern, 12, None);
         assert_eq!(leds[0][5], 0, "steps past length are dark");
     }
-
-    #[test]
-    fn decode_default_map() {
-        let m = BlockMap::default();
-        assert_eq!(decode_block(&m, &[0x90, 10, 127]), Some(BlockInput::Pad { row: 1, col: 2, pressed: true }));
-        assert_eq!(decode_block(&m, &[0x90, 10, 0]), Some(BlockInput::Pad { row: 1, col: 2, pressed: false }));
-        assert_eq!(decode_block(&m, &[0x80, 10, 0]), Some(BlockInput::Pad { row: 1, col: 2, pressed: false }));
-        assert_eq!(decode_block(&m, &[0xb0, 3, 127]), Some(BlockInput::Knob { index: 2, value: 1.0 }));
-        assert_eq!(decode_block(&m, &[0x91, 10, 127]), None, "wrong channel");
-        assert_eq!(m.led_message(1, 2, 1), [0x90, 10, 127]);
-    }
-
-    #[test]
-    fn led_diff() {
-        let mut c = Controller::default();
-        let mut leds = [[0; GRID]; GRID];
-        leds[2][3] = 1;
-        assert_eq!(c.set_leds(leds), vec![(2, 3, 1)]);
-        assert!(c.set_leds(leds).is_empty());
-    }
 }

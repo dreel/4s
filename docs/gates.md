@@ -43,7 +43,9 @@ and the Electron end-to-end tests.
 
 The change was exercised through its real interface, by an agent, and the
 result was observed. Tests passing is G2; this is about showing the feature
-actually works the way a user (or agent) would use it.
+actually works the way a user (or agent) would use it. New user-visible
+behavior also gets an end-to-end test; see [testing.md](testing.md) for
+which harness to use, and which unit tests not to write.
 
 Good evidence:
 

@@ -66,6 +66,14 @@ check "play" "playing" s play
 check "playhead events" "playhead" s watch --type playhead --count 2
 check "stop" "stopped" s stop
 check "render: onsets match distinct hit times" "triggers: 9  detected onsets: 5" s render --bars 1 --out renders/e2e.wav
+# Mute and solo are audible, not just stored: the kick still triggers but its
+# step-8 hit (where nothing else plays) disappears from the audio.
+s set mixer.1.mute on >/dev/null
+check "mute removes kick from the audio" "triggers: 9  detected onsets: 4" s render --bars 1 --out renders/mute.wav
+s set mixer.1.mute off >/dev/null
+s set mixer.8.solo on >/dev/null
+check "solo leaves only the cowbell" "triggers: 9  detected onsets: 1" s render --bars 1 --out renders/solo.wav
+s set mixer.8.solo off >/dev/null
 check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e
 check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project reveal --no-open

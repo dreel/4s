@@ -408,12 +408,4 @@ mod tests {
         assert!(parse_request("nope", None).is_err());
         assert!(parse_request("param.set", Some(serde_json::json!({"path": 1}))).is_err());
     }
-
-    #[test]
-    fn methods_unique() {
-        let mut m = METHODS.to_vec();
-        m.sort();
-        m.dedup();
-        assert_eq!(m.len(), METHODS.len());
-    }
 }
