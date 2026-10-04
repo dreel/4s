@@ -667,6 +667,12 @@ async fn connect(cli: &Cli, url: &str) -> Result<Client> {
 async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> Result<()> {
     match cmd {
         DaemonCmd::Start(args) => {
+            if args.restart_if_stale
+                && let Some(old) = daemon_ctl::live(data_dir)
+                && daemon_ctl::is_stale(&old, args.bin.as_deref())
+            {
+                return restart_stale(cli, data_dir, args, old).await;
+            }
             let (info, started) = daemon_ctl::start(data_dir, args, cli.token.as_deref())?;
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&info)?);
@@ -743,6 +749,41 @@ async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> R
                 bail!("no log file at {}", path.display());
             }
             println!("{}", daemon_ctl::tail(&path, *lines));
+        }
+    }
+    Ok(())
+}
+
+/// Restart a daemon running an old build, carrying its session over: unsaved
+/// or modified work is saved to `<data-dir>/autosave/dev-session.4s` first.
+async fn restart_stale(cli: &Cli, data_dir: &std::path::Path, args: &StartArgs, old: DaemonInfo) -> Result<()> {
+    let mut c = Client::connect(&old.url, cli.token.clone(), "cli").await?;
+    let snap: Snapshot = serde_json::from_value(c.call(&Request::StateGet(Empty {})).await?)?;
+    let session = match (&snap.project.path, snap.project.dirty) {
+        (Some(p), false) => p.clone(),
+        _ => {
+            let p = data_dir.join("autosave").join("dev-session.4s").to_string_lossy().into_owned();
+            c.call(&Request::ProjectSave(ProjectSaveParams { path: Some(p.clone()) })).await?;
+            p
+        }
+    };
+    let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
+    drop(c);
+    if !daemon_ctl::wait_exit(old.pid, std::time::Duration::from_secs(5)) {
+        daemon_ctl::signal_stop(old.pid, false)?;
+    }
+    let mut args = args.clone();
+    let restored = args.project.is_none();
+    if restored {
+        args.project = Some(session.clone());
+    }
+    let (info, _) = daemon_ctl::start(data_dir, &args, cli.token.as_deref())?;
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&info)?);
+    } else {
+        println!("restarted 4sd (code changed; pid {} -> {}) on {}", old.pid, info.pid, info.url);
+        if restored {
+            println!("session restored from {session}");
         }
     }
     Ok(())

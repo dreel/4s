@@ -38,6 +38,9 @@ and agents can drive and verify every part of it.
 ## Build, run, verify
 
 ```
+scripts/dev.sh                               # build + daemon + UI with hot reload (humans)
+scripts/dev.sh --no-ui --headless            # build + current daemon only
+
 cargo build                                  # target/debug/4sd and 4s
 target/debug/4s daemon start                 # background daemon on ws://127.0.0.1:4440
 target/debug/4s state                        # drive it; `4s --help`, `4s methods`

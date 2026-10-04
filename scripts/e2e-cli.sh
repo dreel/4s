@@ -57,6 +57,11 @@ check "stopped status" "4sd not running" s daemon status
 check "commands hint at start" "4s daemon start" s state
 check "restart from stopped" "4sd started" s daemon restart --no-audio --no-midi --listen 127.0.0.1:0
 check "project survives restart" "kind:" bash -c "$BIN/4s project load e2e >/dev/null && echo kind: ok"
+check "not stale: start is a no-op" "already running" s daemon start --restart-if-stale --no-audio --no-midi
+s tempo 97 >/dev/null
+sleep 1; touch "$BIN/4sd"   # simulate a rebuild after the daemon started
+check "stale: restarted" "restarted 4sd (code changed" s daemon start --restart-if-stale --no-audio --no-midi --listen 127.0.0.1:0
+check "stale: unsaved session carried over" "transport.tempo = 97" s get transport.tempo
 check "final stop" "4sd stopped" s daemon stop
 
 echo "all $pass checks passed"

@@ -10,7 +10,7 @@ terminal open for it. Who starts it and who stops it depends on the mode.
 | Situation | Who starts 4sd | Who stops 4sd | Electron `FOURS_DAEMON` |
 |-----------|----------------|---------------|-------------------------|
 | Packaged app (end users) | the app, if none is running | the app on quit, **only if it started it** | `owned` (default when packaged) |
-| Development | `4s daemon start`, or the app if none is running | you (`4s daemon stop`) | `detached` (default in dev) |
+| Development | `scripts/dev.sh`, `4s daemon start`, or the app if none is running | you (`4s daemon stop`) | `detached` (default in dev) |
 | Remote / multiplayer | whoever runs the server | whoever runs the server | `external` (default for non-loopback URLs) |
 
 Rules that hold in every mode:
@@ -37,6 +37,19 @@ Rules that hold in every mode:
 `start` launches `4sd` in its own process group (closing the terminal or
 Ctrl-C does not affect it), waits until it is ready, and returns. It is a
 no-op if a daemon is already running for the data dir.
+
+## Development
+
+`scripts/dev.sh` is the one-command dev loop: `cargo build`, then
+`4s daemon start --restart-if-stale`, then the Vite dev server plus Electron
+(hot reload for renderer code). Closing the window or Ctrl-C stops the UI and
+leaves the daemon running.
+
+`--restart-if-stale` compares the `4sd` binary's modification time with the
+daemon's start time. If the binary is newer (you changed Rust code and
+rebuilt), it restarts the daemon and carries the session over: a saved,
+unmodified project is reloaded from its path; otherwise the session is saved
+to `<data-dir>/autosave/dev-session.4s` and loaded from there.
 
 ## Runtime file and discovery
 

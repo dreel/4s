@@ -12,6 +12,23 @@ See [AGENTS.md](AGENTS.md) for principles and [docs/](docs/) for design notes.
 
 Prerequisites: Rust (via [rustup](https://rustup.rs)) and Node.js 22+.
 
+### Development: one command
+
+```sh
+scripts/dev.sh
+```
+
+Builds everything, starts the daemon in the background (or restarts it if the
+Rust code changed, carrying your session over), and opens the Electron UI with
+hot reload. Closing the window leaves the daemon running; stop it with
+`target/debug/4s daemon stop`.
+
+Options: `--no-ui` (daemon only), `--headless` (no audio device or MIDI),
+`--fresh` (discard the running daemon's state), and `-- ARGS` to pass flags to
+`4s daemon start` (e.g. `scripts/dev.sh -- --project examples/demo.4s`).
+
+### Step by step
+
 ```sh
 cargo build
 target/debug/4s daemon start --project examples/demo.4s   # runs in the background

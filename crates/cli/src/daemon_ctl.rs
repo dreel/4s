@@ -26,6 +26,10 @@ pub struct StartArgs {
     /// Path to the 4sd binary (default: FOURSD_BIN, next to `4s`, or PATH).
     #[arg(long)]
     pub bin: Option<PathBuf>,
+    /// If the running daemon is older than the 4sd binary (code changed since
+    /// it started), restart it and carry the session over.
+    #[arg(long)]
+    pub restart_if_stale: bool,
 }
 
 pub fn default_data_dir() -> PathBuf {
@@ -57,7 +61,7 @@ pub fn live(data_dir: &Path) -> Option<DaemonInfo> {
     }
 }
 
-fn find_bin(explicit: Option<&Path>) -> Result<PathBuf> {
+pub fn find_bin(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(p) = explicit {
         return Ok(p.to_path_buf());
     }
@@ -73,6 +77,14 @@ fn find_bin(explicit: Option<&Path>) -> Result<PathBuf> {
         }
     }
     Ok(PathBuf::from("4sd")) // rely on PATH
+}
+
+/// True if the 4sd binary on disk was built after `info`'s daemon started.
+pub fn is_stale(info: &DaemonInfo, explicit_bin: Option<&Path>) -> bool {
+    let Ok(bin) = find_bin(explicit_bin) else { return false };
+    let Ok(modified) = std::fs::metadata(&bin).and_then(|m| m.modified()) else { return false };
+    let built = modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    built > info.started_at
 }
 
 pub fn tail(path: &Path, n: usize) -> String {
