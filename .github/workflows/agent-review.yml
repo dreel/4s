@@ -1,0 +1,75 @@
+# G4, canonical: a maintainer adds the `agent-review` label to re-run the
+# independent review in CI. The reviewer instructions and scripts come from
+# the base branch; the PR's code is only read, never executed.
+# Needs the ANTHROPIC_API_KEY repository secret.
+name: agent-review
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  agent-review:
+    if: github.event.label.name == 'agent-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: pr
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Independent review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret is not set" > review.md
+            exit 0
+          fi
+          cd pr
+          git fetch -q "https://github.com/${{ github.repository }}" "$BASE_SHA"
+          # Backstop: agent configuration in the PR is ignored by the reviewer
+          # (--restricted), but a human should look at such changes first.
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '(^|/)(\.claude/|\.mcp\.json$|CLAUDE\.md$)'; then
+            echo "This PR changes agent configuration (.claude/, .mcp.json, CLAUDE.md). Review those changes by hand; the automated review did not run." > ../review.md
+            exit 0
+          fi
+          set +e
+          REVIEW_BASE="$BASE_SHA" \
+            REVIEW_PROMPT_FILE="$GITHUB_WORKSPACE/base/docs/review/reviewer.md" \
+            REVIEW_DOCS_ROOT="$GITHUB_WORKSPACE/base" \
+            "$GITHUB_WORKSPACE/base/scripts/review.sh"
+          set -e
+          OUT=".gates/review-$HEAD_SHA.md"
+          # Never echo the key back, whatever the reviewed content asked for.
+          if [ -f "$OUT" ]; then sed "s|$ANTHROPIC_API_KEY|[redacted]|g" "$OUT" > ../review.md; else echo "Review produced no output." > ../review.md; fi
+      - name: Post review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Canonical independent review (CI)"
+            echo
+            echo "Reviewer instructions from \`${{ github.event.pull_request.base.ref }}\`; commit \`${{ github.event.pull_request.head.sha }}\`."
+            echo
+            cat review.md
+          } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file comment.md

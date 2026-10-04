@@ -32,6 +32,8 @@ and agents can drive and verify every part of it.
 - [Engine](docs/engine.md) -- voices, sequencer, mixer, parameter list
 - [Lifecycle](docs/lifecycle.md) -- starting/stopping the daemon; app, dev, and remote modes
 - [Topology](docs/topology.md) -- engine/bridge roles, remote and collaborative setups
+- [Contributing](CONTRIBUTING.md) and [Gates](docs/gates.md) -- change classes, RFCs, and what every PR must prove
+- [RFCs](docs/rfcs/README.md) -- how big changes get approved before code is written
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
 
@@ -80,3 +82,27 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   audio callback path.
 - **Update docs/** when a change alters a principle or a design decision, and
   keep this index in sync.
+
+## Before you open a PR
+
+1. **Classify the change** (see [CONTRIBUTING.md](CONTRIBUTING.md#change-classes)):
+   Fix, Extension, or Architecture / UX. If it is Architecture / UX -- audio
+   routing or processing model, real-time model, protocol or sync model,
+   lifecycle or topology, project format, the UI's overall structure, the
+   principles, or the gates -- **stop and draft an RFC** from
+   `docs/rfcs/0000-template.md` for a human to approve. Do not implement it
+   first.
+2. **Validate through real interfaces** and keep the commands and output
+   (CLI against a daemon in an isolated data dir, `4s render`, UI tests,
+   `virtual_block`).
+3. **Commit, then run `scripts/gates.sh`.** Fix what it reports and re-run
+   until it passes. Do not edit the review output.
+4. **Open the PR with the template**, pasting `.gates/report.md` and your
+   validation evidence.
+
+## If you are the independent reviewer
+
+Follow [docs/review/reviewer.md](docs/review/reviewer.md) only. You have no
+context from the author by design. Review the given diff against the
+principles and docs, stay read-only, and end with the required
+`REVIEWED_SHA` / `DIFF_SHA256` / `CHANGE_CLASS` / `VERDICT` lines.

@@ -21,7 +21,8 @@ Adding an instrument, a controller mapping, or fixing a bug does not need one.
    closes. Rejected RFCs are worth keeping; they record why.
 4. **Implement**: in one or more separate PRs, each linking the RFC and
    passing the gates. The `pr-gates` check verifies the linked RFC is
-   `accepted` on `main`.
+   `accepted` on `main`. If you opened the implementation PR before the RFC
+   merged, re-run the check (or edit the PR description) once it has.
 5. **Close out**: the final implementation PR sets `Status: implemented`
    and updates the design docs in `docs/` so they describe the new reality.
    The RFC stays as the record of why.
@@ -34,4 +35,4 @@ Adding an instrument, a controller mapping, or fixing a bug does not need one.
 
 | RFC | Title | Status |
 |-----|-------|--------|
-| [0001](0001-contribution-gates.md) | Contribution gates | accepted |
+| [0001](0001-contribution-gates.md) | Contribution gates | implemented |

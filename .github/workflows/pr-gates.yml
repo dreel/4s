@@ -1,0 +1,58 @@
+# G1/G4 evidence: the PR description must classify the change, link an
+# accepted RFC for architecture/UX changes, and include a passing independent
+# review that covers the PR's code. See docs/gates.md.
+name: pr-gates
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-gates:
+    runs-on: ubuntu-latest
+    steps:
+      # The PR's code, only to compute the diff hash. Nothing from it is executed.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: pr
+          persist-credentials: false
+      # The checker itself comes from the base branch, so a PR cannot change
+      # the rules it is checked against.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check PR description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # Bootstrap only: until the gate tooling is on main, the PR that adds it
+          # uses its own copy. Any other base without the tooling fails.
+          TOOLS=base/scripts/ci
+          if [ ! -f "$TOOLS/check-pr-body.mjs" ]; then
+            if [ "$BASE_REF" = main ] && [ -f pr/scripts/ci/check-pr-body.mjs ]; then
+              echo "::warning::bootstrap: gate tooling not on main yet; using this PR's copy"
+              TOOLS=pr/scripts/ci
+            else
+              echo "::error::gate tooling missing on base branch $BASE_REF"
+              exit 1
+            fi
+          fi
+          TOOLS=$(cd "$TOOLS" && pwd)
+          cd pr
+          git fetch -q origin "$BASE_SHA" main
+          MERGE_BASE=$(git merge-base "$HEAD_SHA" "$BASE_SHA")
+          export DIFF_SHA256=$("$TOOLS/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | shasum -a 256 | cut -d' ' -f1)
+          export RFC_REF=origin/main
+          node "$TOOLS/check-pr-body.mjs"

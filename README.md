@@ -83,8 +83,9 @@ prove it works.
   the TypeScript client types, JSON Schema, and CLI coverage check all derive
   from it, so the UI and engine cannot silently drift apart.
 
-Coming: review gates and contribution workflows designed for agent-authored
-changes.
+- **Gates keep it coherent.** Every PR is reviewed by a fresh agent with no
+  context from the author, checked by CI, and big changes need a
+  human-approved RFC first. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -138,6 +139,16 @@ cd ui && npm install && npm start
   UI (Electron) ----> 4sd (Rust engine) ----> audio out
   CLI / agents  ---->   one source of truth
 ```
+
+## Contributing
+
+Contributions are welcome, and most are written with coding agents. Every PR
+passes a set of gates: automated checks, evidence that the change works
+through its real interfaces, and an **independent review by a fresh agent**
+that has none of the author's context, only the repo's principles. Big
+architectural or UX changes start as an RFC approved by a human. Run
+`scripts/gates.sh` and paste its report into your PR. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Learn more
 
