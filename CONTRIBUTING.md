@@ -24,8 +24,9 @@ your PR.**
 5. **Open a PR** using the template. Paste the gate report, your validation
    evidence, and the change class. A maintainer reviews and merges.
 
-New commits after the review need a fresh review: the report's
-`REVIEWED_SHA` must match your PR's head commit.
+New commits after the review need a fresh review. The `pr-gates` check
+accepts a review only if its `REVIEWED_SHA` is the PR's head commit, or its
+`DIFF_SHA256` still matches the PR's diff (e.g. after a clean rebase).
 
 ## Change classes
 

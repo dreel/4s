@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { checkBody, checkedClasses } from "./check-pr-body.mjs";
 
@@ -52,4 +53,18 @@ test("empty validation section warns", () => {
   const r = run(b);
   assert.deepEqual(r.errors, []);
   assert.match(r.warnings.join(), /Validation section looks empty/);
+});
+
+test("the PR template's placeholder RFC link does not count", () => {
+  const template = readFileSync(new URL("../../.github/pull_request_template.md", import.meta.url), "utf8");
+  const arch = template.replace("- [ ] Architecture / UX", "- [x] Architecture / UX") + report();
+  const accepted = rfc({ "0002": "accepted" });
+  assert.match(run(arch, { rfcStatus: accepted }).errors.join(), /must link an accepted RFC/);
+  const linked = arch.replace("RFC: <!--", "RFC: docs/rfcs/0002-audio-routing.md <!--");
+  assert.deepEqual(run(linked, { rfcStatus: accepted }).errors, []);
+});
+
+test("a verdict inside a comment does not count", () => {
+  const b = body("fix", "<!-- gate-report -->\n<!-- VERDICT: pass -->\n");
+  assert.match(run(b).errors.join(), /no independent review verdict/);
 });

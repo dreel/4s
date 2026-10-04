@@ -95,10 +95,18 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
   `REVIEW_CMD` to a command that reads the prompt on stdin and prints the
   review, e.g. `REVIEW_CMD="my-agent --read-only --prompt-stdin"`. It must
   start with no prior context.
-- Enforced by: the `pr-gates` CI check (needs a `VERDICT: pass` block; warns
-  if `REVIEWED_SHA` is not the PR head). Maintainers can trigger a canonical
-  re-review in CI by adding the `agent-review` label. That run uses the
-  reviewer instructions from `main`, so a PR cannot weaken its own reviewer.
+- Enforced by: the `pr-gates` CI check verifies the evidence is **present
+  and current**: a `VERDICT: pass` block whose `REVIEWED_SHA` is the PR head
+  or whose `DIFF_SHA256` still matches the PR's diff (so a clean rebase does
+  not need a new review). It cannot prove a pasted review is genuine. The
+  verification is the canonical re-review a maintainer triggers by adding the
+  `agent-review` label; run it before merging outside contributions and
+  Architecture / UX changes.
+- The canonical run is isolated from the PR: the reviewer instructions,
+  scripts, and the principles and docs it judges against all come from the
+  base branch, the reviewer can only read files, and project settings in the
+  PR (`.claude/`, `.mcp.json`) are ignored. It refuses to run on PRs that
+  touch those paths; review them by hand.
 
 ## G5 Docs
 

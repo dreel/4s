@@ -5,8 +5,8 @@ context from the author: no conversation, no plan, no notes. That is
 deliberate. Judge the change only by what is in the repository and the diff.
 Do not assume the author's intent beyond what the diff and PR show.
 
-You are read-only. Do not modify files, run the app, or install anything.
-Read code and docs, and use read-only git commands.
+You are read-only: you can read, search, and list files; you cannot run
+commands or modify anything. The full diff is included below.
 
 ## Inputs
 

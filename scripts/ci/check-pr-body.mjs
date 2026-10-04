@@ -37,14 +37,16 @@ export function checkBody({ body, headSha, diffSha256, rfcStatus }) {
   const errors = [];
   const warnings = [];
   body = body ?? "";
+  // Template placeholders live in HTML comments; never count them as evidence.
+  const text = body.replace(/<!--[\s\S]*?-->/g, "");
 
   // G1: exactly one change class; RFC-class needs an accepted RFC on main.
-  const classes = checkedClasses(body);
+  const classes = checkedClasses(text);
   if (classes.length !== 1) {
     errors.push(`G1: tick exactly one change class (found ${classes.length}): Fix, Extension, or Architecture / UX`);
   }
   if (classes.includes("architecture")) {
-    const rfcs = [...new Set([...body.matchAll(/docs\/rfcs\/(\d{4})-[\w.-]+\.md/g)].map((m) => m[1]))].filter(
+    const rfcs = [...new Set([...text.matchAll(/docs\/rfcs\/(\d{4})-[\w.-]+\.md/g)].map((m) => m[1]))].filter(
       (n) => n !== "0000",
     );
     if (rfcs.length === 0) {
@@ -59,9 +61,9 @@ export function checkBody({ body, headSha, diffSha256, rfcStatus }) {
   if (!body.includes("<!-- gate-report -->")) {
     errors.push("G2/G4: paste the gate report from scripts/gates.sh (.gates/report.md)");
   }
-  const verdict = field(body, "VERDICT");
-  const reviewedSha = field(body, "REVIEWED_SHA");
-  const reviewedDiff = field(body, "DIFF_SHA256");
+  const verdict = field(text, "VERDICT");
+  const reviewedSha = field(text, "REVIEWED_SHA");
+  const reviewedDiff = field(text, "DIFF_SHA256");
   if (!verdict) {
     errors.push("G4: no independent review verdict found (VERDICT: line)");
   } else if (verdict !== "pass") {
@@ -74,8 +76,8 @@ export function checkBody({ body, headSha, diffSha256, rfcStatus }) {
   }
 
   // G3: validation evidence present (light check; humans judge quality).
-  const evidence = body.split(/^##+\s*Validation/im)[1]?.split(/^##\s/m)[0] ?? "";
-  if (evidence.replace(/<!--[\s\S]*?-->/g, "").trim().length < 40) {
+  const evidence = text.split(/^##+\s*Validation/im)[1]?.split(/^##\s/m)[0] ?? "";
+  if (evidence.trim().length < 40) {
     warnings.push("G3: the Validation section looks empty; include commands and observed output");
   }
   return { errors, warnings };

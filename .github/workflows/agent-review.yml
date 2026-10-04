@@ -46,8 +46,16 @@ jobs:
           fi
           cd pr
           git fetch -q "https://github.com/${{ github.repository }}" "$BASE_SHA"
+          # Backstop: agent configuration in the PR is ignored by the reviewer
+          # (--restricted), but a human should look at such changes first.
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '(^|/)(\.claude/|\.mcp\.json$|CLAUDE\.md$)'; then
+            echo "This PR changes agent configuration (.claude/, .mcp.json, CLAUDE.md). Review those changes by hand; the automated review did not run." > ../review.md
+            exit 0
+          fi
           set +e
-          REVIEW_BASE="$BASE_SHA" REVIEW_PROMPT_FILE="$GITHUB_WORKSPACE/base/docs/review/reviewer.md" \
+          REVIEW_BASE="$BASE_SHA" \
+            REVIEW_PROMPT_FILE="$GITHUB_WORKSPACE/base/docs/review/reviewer.md" \
+            REVIEW_DOCS_ROOT="$GITHUB_WORKSPACE/base" \
             "$GITHUB_WORKSPACE/base/scripts/review.sh"
           set -e
           OUT=".gates/review-$HEAD_SHA.md"

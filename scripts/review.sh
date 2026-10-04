@@ -9,6 +9,8 @@
 #   REVIEW_CMD          agent command reading the prompt on stdin (default: claude -p ...)
 #   REVIEW_PROMPT_FILE  reviewer instructions (default: docs/review/reviewer.md;
 #                       CI uses the copy from main)
+#   REVIEW_DOCS_ROOT    read principles/docs from this checkout instead of the
+#                       one under review (CI: the base branch)
 # Writes .gates/review-<sha>.md. Exit 0 only on VERDICT: pass.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -44,6 +46,11 @@ PROMPT=.gates/review-prompt-$HEAD.md
   echo "- Head commit (REVIEWED_SHA): $HEAD"
   echo "- Diff SHA-256 (DIFF_SHA256): $HASH"
   echo "- Generated files (ui/src/generated, schema, lockfiles) are excluded from the diff below."
+  if [[ -n ${REVIEW_DOCS_ROOT:-} ]]; then
+    echo "- Judge against the principles and docs of the base branch: read AGENTS.md,"
+    echo "  CONTRIBUTING.md, and docs/ from $REVIEW_DOCS_ROOT, not from the checkout under"
+    echo "  review (the change may modify them; review those modifications as part of the diff)."
+  fi
   echo
   echo "### Changed files"
   echo '```'
@@ -65,14 +72,15 @@ else
     echo "review.sh: 'claude' not found; install Claude Code or set REVIEW_CMD" >&2
     exit 2
   }
-  # --bare also skips personal memory, hooks, and plugins, but needs an API
-  # key (it does not use the interactive login). Without it the session still
-  # starts with no conversation context.
-  BARE=()
-  [[ -n ${ANTHROPIC_API_KEY:-} ]] && BARE=(--bare)
-  claude -p ${BARE[@]+"${BARE[@]}"} --no-session-persistence \
-    --allowedTools "Read" "Grep" "Glob" "Bash(git log:*)" "Bash(git show:*)" "Bash(git diff:*)" \
-    --disallowedTools "Edit" "Write" "NotebookEdit" "WebFetch" "WebSearch" \
+  # Locked down: --restricted removes every command-running tool and WebFetch,
+  # ignores user/project/local settings files (so a PR cannot grant its
+  # reviewer permissions via .claude/settings.json), and confines file tools
+  # to the working directories. --bare additionally skips memory, hooks, and
+  # plugins, but needs an API key (it does not use the interactive login).
+  FLAGS=(--restricted --strict-mcp-config --disable-slash-commands --tools Read Grep Glob --no-session-persistence)
+  [[ -n ${ANTHROPIC_API_KEY:-} ]] && FLAGS=(--bare "${FLAGS[@]}")
+  [[ -n ${REVIEW_DOCS_ROOT:-} ]] && FLAGS+=(--add-dir "$REVIEW_DOCS_ROOT")
+  claude -p "${FLAGS[@]}" \
     < "$PROMPT" > "$OUT"
 fi
 
