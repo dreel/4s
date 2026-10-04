@@ -101,7 +101,8 @@ impl Engine {
         self.playing
     }
 
-    /// Load full state (non-real-time; used before the engine starts).
+    /// Load full state (non-real-time; used before the engine starts, e.g.
+    /// for offline renders).
     pub fn load(&mut self, params: &[f32], pattern: &[[u8; MAX_STEPS]; NUM_TRACKS]) {
         self.params.copy_from_slice(params);
         self.pattern = *pattern;

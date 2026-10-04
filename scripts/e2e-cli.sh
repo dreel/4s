@@ -39,6 +39,8 @@ check "toggle" "clap step 13 = on" s pattern toggle clap 13
 check "accent" "cowbell step 16 = accent" s pattern step cowbell 16 accent
 check "step range" "step must be 1..64" s pattern step kick 65 on
 check "steps are 1-based" "step must be 1..64" s pattern step kick 0 on
+check "voice by alias" "closed_hat  " s pattern show ch
+check "voice by 1-based track number" "cowbell     " s pattern show 8
 check "virtual pad" "#" s controller press 2 1
 check "pad edited pattern" "snare       x--- x---" s pattern show snare
 check "knob mode" "knobs: Decay" s controller mode --knobs decay

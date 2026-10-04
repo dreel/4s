@@ -23,7 +23,8 @@ Always use an isolated data dir and a random port (`FOURS_DATA_DIR`,
 Mute and solo are a good example of the default. They are checked by
 rendering with a track muted and asserting the hit disappears from the
 *audio*, not by asserting a flag was stored. That test immediately found a
-real bug: freshly loaded mixes leaked for ~10 ms.
+real bug: offline renders of a muted or soloed mix leaked the silenced
+tracks for ~10 ms.
 
 ## Unit tests: only where they pay
 
@@ -57,10 +58,9 @@ Examples:
 - duplicating a check an e2e test already makes.
 
 Ask: *what realistic bug would this catch that the e2e suites would not?*
-If there is no good answer, don't write it. The tests removed under RFC
-0002 are examples: `led_diff`, `decode_default_map`, `uptime_format`,
-`voice_parse`, `methods_unique`, `values_and_numbering`, and `mute_and_solo`
-(which duplicated the e2e render checks and could not catch the load leak).
+If there is no good answer, don't write it. RFC 0002 lists the tests removed
+under this policy.
+
 When you delete a test, check that an e2e test really covers the same path,
 and that the e2e check can actually fail (an expected substring like `= 0`
 also matches `= 0.4`).
