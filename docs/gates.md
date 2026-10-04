@@ -99,7 +99,10 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
 - Enforced by: the `pr-gates` CI check verifies the evidence is **present
   and current**: a `VERDICT: pass` block whose `REVIEWED_SHA` is the PR head
   or whose `DIFF_SHA256` still matches the PR's diff (so a clean rebase does
-  not need a new review). It cannot prove a pasted review is genuine. The
+  not need a new review). It cannot prove a pasted review is genuine. It
+  always checks the PR as it is now against the rules on the current base
+  branch, so after the rules change, re-running it on an older PR can fail
+  where it passed before. The
   verification is the canonical re-review a maintainer triggers by adding the
   `agent-review` label; run it before merging outside contributions and
   Architecture / UX changes.

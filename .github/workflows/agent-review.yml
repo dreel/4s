@@ -17,9 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Reviewer instructions, scripts, and principles from the current tip of
+      # the base branch (pull_request.base.sha is not advanced when main moves).
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.ref }}
           path: base
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -37,7 +39,7 @@ jobs:
       - name: Independent review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
@@ -45,10 +47,11 @@ jobs:
             exit 0
           fi
           cd pr
-          git fetch -q "https://github.com/${{ github.repository }}" "$BASE_SHA"
+          git fetch -q "https://github.com/${{ github.repository }}" "$BASE_REF"
+          BASE_SHA=$(git rev-parse FETCH_HEAD)
           # Backstop: agent configuration in the PR is ignored by the reviewer
           # (--restricted), but a human should look at such changes first.
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '(^|/)(\.claude/|\.mcp\.json$|CLAUDE\.md$)'; then
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qE '(^|/)(\.claude/|\.mcp\.json$|CLAUDE\.md$)'; then
             echo "This PR changes agent configuration (.claude/, .mcp.json, CLAUDE.md). Review those changes by hand; the automated review did not run." > ../review.md
             exit 0
           fi
@@ -68,7 +71,7 @@ jobs:
           {
             echo "### Canonical independent review (CI)"
             echo
-            echo "Reviewer instructions from \`${{ github.event.pull_request.base.ref }}\`; commit \`${{ github.event.pull_request.head.sha }}\`."
+            echo "Reviewer instructions from the current \`${{ github.event.pull_request.base.ref }}\`; commit \`${{ github.event.pull_request.head.sha }}\`."
             echo
             cat review.md
           } > comment.md

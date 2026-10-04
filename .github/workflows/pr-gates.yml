@@ -1,6 +1,19 @@
 # G1/G4 evidence: the PR description must classify the change, link an
 # accepted RFC for architecture/UX changes, and include a passing independent
 # review that covers the PR's code. See docs/gates.md.
+#
+# Runs check the PR against the current rules:
+# - the checker scripts come from the tip of the base branch (not the PR's
+#   recorded base.sha, which GitHub does not advance when main moves), so a
+#   PR's own copies of the scripts are never used, and fixes to the rules
+#   reach open PRs. (This workflow file itself is taken from the PR's merge
+#   commit, as for any pull_request workflow; CODEOWNERS on /.github/ is the
+#   backstop for edits to it.)
+# - the PR description is read from the API at run time, because re-runs
+#   replay the original event payload;
+# - the commit checked is the event's head commit (the one this check is
+#   attached to); if the PR has moved on, the run fails as superseded.
+# - RFC statuses are read from main.
 name: pr-gates
 on:
   pull_request:
@@ -8,52 +21,60 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-gates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   pr-gates:
     runs-on: ubuntu-latest
     steps:
-      # The PR's code, only to compute the diff hash. Nothing from it is executed.
+      - name: Fetch the PR as it is now
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" > pr.json
+          jq -r '.body // ""' pr.json > body.md
+          LIVE_HEAD=$(jq -r .head.sha pr.json)
+          EVENT_HEAD="${{ github.event.pull_request.head.sha }}"
+          if [ "$LIVE_HEAD" != "$EVENT_HEAD" ]; then
+            echo "::error::superseded: this run is for $EVENT_HEAD but the PR head is now $LIVE_HEAD; see the run for the latest commit"
+            exit 1
+          fi
+          echo "HEAD_SHA=$EVENT_HEAD" >> "$GITHUB_ENV"
+          echo "BASE_REF=$(jq -r .base.ref pr.json)" >> "$GITHUB_ENV"
+      # The checker, from the current tip of the (live) base branch.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ env.BASE_REF }}
+          path: base
+          persist-credentials: false
+      # The PR's code at the head commit (fork commits are available in this
+      # repository via refs/pull/N/head), only to compute the diff hash and
+      # changed files. Nothing from it is executed.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0
           path: pr
-          persist-credentials: false
-      # The checker itself comes from the base branch, so a PR cannot change
-      # the rules it is checked against.
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: base
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Check PR description
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          # Bootstrap only: until the gate tooling is on main, the PR that adds it
-          # uses its own copy. Any other base without the tooling fails.
-          TOOLS=base/scripts/ci
-          if [ ! -f "$TOOLS/check-pr-body.mjs" ]; then
-            if [ "$BASE_REF" = main ] && [ -f pr/scripts/ci/check-pr-body.mjs ]; then
-              echo "::warning::bootstrap: gate tooling not on main yet; using this PR's copy"
-              TOOLS=pr/scripts/ci
-            else
-              echo "::error::gate tooling missing on base branch $BASE_REF"
-              exit 1
-            fi
-          fi
-          TOOLS=$(cd "$TOOLS" && pwd)
+          TOOLS=$(cd base/scripts/ci && pwd)
+          BASE_TIP=$(git -C base rev-parse HEAD)
           cd pr
-          git fetch -q origin "$BASE_SHA" main
-          MERGE_BASE=$(git merge-base "$HEAD_SHA" "$BASE_SHA")
+          git fetch -q origin "$BASE_TIP"
+          MERGE_BASE=$(git merge-base "$HEAD_SHA" "$BASE_TIP")
           export DIFF_SHA256=$("$TOOLS/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | shasum -a 256 | cut -d' ' -f1)
-          export RFC_REF=origin/main
           export CHANGED_FILES=$(git diff --name-only --no-renames "$MERGE_BASE" "$HEAD_SHA")
-          node "$TOOLS/check-pr-body.mjs"
+          export PR_BODY="$(cat ../body.md)"
+          echo "PR head $HEAD_SHA; checker from $BASE_REF @ ${BASE_TIP:0:7}"
+          # RFC statuses are read from the current main.
+          cd ../base
+          git fetch -q "https://github.com/${{ github.repository }}" main
+          RFC_REF=FETCH_HEAD node "$TOOLS/check-pr-body.mjs"

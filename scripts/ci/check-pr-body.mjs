@@ -1,7 +1,7 @@
 // Checks a PR description for the gate evidence required by docs/gates.md.
 //
 // CLI (used by .github/workflows/pr-gates.yml):
-//   PR_BODY=... HEAD_SHA=... DIFF_SHA256=... RFC_REF=origin/main CHANGED_FILES=... \
+//   PR_BODY=... HEAD_SHA=... DIFF_SHA256=... RFC_REF=<ref of main> CHANGED_FILES=... \
 //     node scripts/ci/check-pr-body.mjs
 // Exits 1 with a list of problems if any gate evidence is missing.
 
