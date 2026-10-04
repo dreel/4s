@@ -102,10 +102,11 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
   verification is the canonical re-review a maintainer triggers by adding the
   `agent-review` label; run it before merging outside contributions and
   Architecture / UX changes.
-- The canonical run is isolated from the PR: the reviewer instructions,
-  scripts, and the principles and docs it judges against all come from the
-  base branch, the reviewer can only read files, and project settings in the
-  PR (`.claude/`, `.mcp.json`) are ignored. It refuses to run on PRs that
+- The canonical run is isolated from the PR: the reviewer instructions and
+  scripts come from the base branch, the reviewer is instructed to judge
+  against the base branch's principles and docs (`REVIEW_DOCS_ROOT`), it can
+  only read files, and project settings in the PR (`.claude/`, `.mcp.json`)
+  are ignored. It refuses to run on PRs that
   touch those paths; review them by hand.
 
 ## G5 Docs

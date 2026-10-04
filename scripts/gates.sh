@@ -17,7 +17,7 @@ mkdir -p .gates
 
 echo "==> G2: scripts/check.sh (log: .gates/check.log)"
 if scripts/check.sh > .gates/check.log 2>&1; then CHECK=PASS; else CHECK=FAIL; fi
-SUMMARY=$(grep -E "checks passed|[0-9]+ passed \(|all checks passed|FAIL|failed" .gates/check.log | grep -v "0 failed" | sed 's/^ *//' | head -8)
+SUMMARY=$(grep -E "checks passed|[0-9]+ passed \(|all checks passed|FAIL|failed" .gates/check.log | grep -vE '(^|[^0-9])0 failed' | sed 's/^ *//' | head -8)
 echo "    $CHECK"
 
 echo "==> G4: scripts/review.sh"

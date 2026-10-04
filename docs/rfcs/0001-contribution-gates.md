@@ -1,6 +1,6 @@
 # RFC 0001: Contribution gates
 
-- Status: accepted
+- Status: implemented
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC
