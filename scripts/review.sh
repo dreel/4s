@@ -126,8 +126,9 @@ fi
 { echo "Reviewer: $REVIEWER"; echo; cat "$OUT.tmp"; } > "$OUT"
 rm -f "$OUT.tmp"
 
-field() { grep -E "^$1:" "$OUT" | tail -1 | sed -E "s/^$1:[[:space:]]*//" | tr -d '[:space:]'; }
+field() { { grep -E "^$1:" "$OUT" || true; } | tail -1 | sed -E "s/^$1:[[:space:]]*//" | tr -d '[:space:]'; }
 VERDICT=$(field VERDICT)
+case $VERDICT in pass | changes-requested | needs-rfc) ;; *) VERDICT= ;; esac
 if [[ $(field REVIEWED_SHA) != "$HEAD" || $(field DIFF_SHA256) != "$HASH" || -z $VERDICT ]]; then
   echo "review.sh: review output is missing or has wrong REVIEWED_SHA/DIFF_SHA256/VERDICT lines; see $OUT" >&2
   exit 3

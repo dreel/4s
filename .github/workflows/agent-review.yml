@@ -126,9 +126,10 @@ jobs:
           # just the text: 0 pass, 1 another valid verdict, 3 invalid output,
           # 124 timeout.
           RAW=$(grep -E '^VERDICT:' ../review.md | tail -1 | sed -E 's/^VERDICT:[[:space:]]*//' | tr -d '[:space:]' || true)
+          # Only known verdicts pass through; the model's text never does.
           case $STATUS in
             0) VERDICT=pass ;;
-            1) VERDICT=${RAW:-none} ;;
+            1) case $RAW in changes-requested | needs-rfc) VERDICT=$RAW ;; *) VERDICT=error ;; esac ;;
             3) VERDICT=invalid ;;
             124) VERDICT=timeout ;;
             *) VERDICT=error ;;
@@ -165,6 +166,10 @@ jobs:
 
       - name: Fail on a non-passing verdict
         if: steps.review.outputs.verdict != '' && steps.review.outputs.verdict != 'pass'
+        env:
+          # Step outputs go through env, never ${{ }} in a script: derived
+          # values must not become shell code in this privileged job.
+          VERDICT: ${{ steps.review.outputs.verdict }}
         run: |
-          echo "::error::independent review verdict: ${{ steps.review.outputs.verdict }}"
+          echo "::error::independent review verdict: $VERDICT"
           exit 1

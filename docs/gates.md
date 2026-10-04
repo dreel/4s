@@ -93,9 +93,10 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
 
 - Default agent: Claude Code (`claude -p`, a new process with no
   conversation or session context). `REVIEW_PROVIDER=muse` runs the same
-  harness against Meta's Muse model with your own `META_API_KEY`. With `ANTHROPIC_API_KEY` set it also runs
-  `--bare`, which skips personal memory, hooks, and plugins; with the
-  interactive login, your user-level instructions may still load. To use another agent, set
+  harness against Meta's Muse model with your own `META_API_KEY`. The default provider also runs `--bare`
+  (skipping personal memory, hooks, and plugins) when `ANTHROPIC_API_KEY` is
+  set; with the interactive login, your user-level instructions may still
+  load. The `muse` provider always runs `--bare`. To use another agent, set
   `REVIEW_CMD` to a command that reads the prompt on stdin and prints the
   review, e.g. `REVIEW_CMD="my-agent --read-only --prompt-stdin"`. It must
   start with no prior context.
@@ -118,6 +119,7 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
     `agent-review` label. To force a re-run when the label is already on,
     remove it and add it again. A skipped run posts "Not reviewed" and its
     check stays green, so green without a verdict does not mean reviewed.
+    The maintainer should set a spending limit on the Meta key.
   - Isolation: the reviewer instructions and scripts come from the current
     base branch, and the reviewer is instructed to judge against the base
     branch's principles and docs (`REVIEW_DOCS_ROOT`). It can only read

@@ -42,4 +42,4 @@ fixing a bug does not need one. New instrument types do (see
 |-----|-------|--------|
 | [0001](0001-contribution-gates.md) | Contribution gates | implemented |
 | [0002](0002-testing-philosophy.md) | Testing philosophy | implemented |
-| [0003](0003-ci-agent-review.md) | Automatic CI agent review (Muse Contributor tier) | implemented |
+| [0003](0003-ci-agent-review.md) | Automatic CI agent review (Muse Contributor tier) | accepted |
