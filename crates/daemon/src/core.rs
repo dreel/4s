@@ -387,11 +387,16 @@ impl Core {
         Ok(self.midi_ports())
     }
 
-    /// Hotplug: connect any Livid Block that appeared, drop vanished ports.
-    pub fn midi_autoconnect(&mut self) {
+    /// Hotplug: drop vanished ports and, if `auto`, connect any Livid Block
+    /// that appeared.
+    pub fn midi_autoconnect(&mut self, auto: bool) {
         let (inputs, _) = list_ports();
         let mut changed = self.midi.prune(&inputs);
-        if self.midi.block_name().is_none()
+        if changed {
+            tracing::info!("MIDI device disconnected");
+        }
+        if auto
+            && self.midi.block_name().is_none()
             && let Some(name) = inputs.iter().find(|n| n.to_lowercase().contains("block"))
         {
             match self.midi.connect(name, None, DeviceKind::LividBlock, self.midi_tx.clone()) {

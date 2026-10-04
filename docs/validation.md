@@ -29,8 +29,10 @@ What exists today:
 - **CLI e2e** (`scripts/e2e-cli.sh`): ~39 checks covering the daemon
   lifecycle (start/status/stop/restart, single instance, runtime-file
   discovery, logs), params, patterns, virtual pads/knobs, transport events,
-  offline render analysis, and project save/load. Uses an isolated data dir
-  and random port.
+  offline render analysis, project save/load, and MIDI hotplug with a virtual
+  device (`crates/daemon/examples/virtual_block.rs`): appears after startup,
+  connects, pad input edits the pattern, LED output arrives, unplug is
+  pruned. Uses an isolated data dir and random port.
 - **UI e2e** (`ui/e2e`): UI edits verified over RPC, RPC edits verified in the
   UI, transport, Block mirror, project round trip, render; writes
   `ui/test-results/groove.png` for visual review. Lifecycle tests: the app

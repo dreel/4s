@@ -3,6 +3,8 @@
 # drives it only through the `4s` CLI, and asserts on the results.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+command -v cargo >/dev/null || export PATH="$HOME/.cargo/bin:$PATH"
+cargo build -q -p fours-daemon --example virtual_block
 
 BIN=target/debug
 TMP=$(mktemp -d)
@@ -41,6 +43,25 @@ check "pad edited pattern" "snare       x--- x---" s pattern show snare
 check "knob mode" "knobs: Decay" s controller mode --knobs decay
 check "knob" "page: 1" s controller knob 1 100%
 check "knob set param" "drums.kick.decay = 1" s get drums.kick.decay
+# MIDI hotplug: a virtual device that appears after the daemon started must be
+# seen, connectable, and pruned when it goes away (macOS CoreMIDI regression).
+VDEV="4S E2E Pad $$"
+mkfifo "$TMP/vdev.in"
+target/debug/examples/virtual_block "$VDEV" < "$TMP/vdev.in" > "$TMP/vdev.out" 2>&1 &
+exec 7> "$TMP/vdev.in"
+for _ in $(seq 50); do grep -q ready "$TMP/vdev.out" && break; sleep 0.1; done
+# CoreMIDI announces new devices asynchronously; give it a moment.
+for _ in $(seq 30); do s midi ports | grep -q "$VDEV" && break; sleep 0.1; done
+check "hotplugged device listed" "$VDEV" s midi ports
+check "connect virtual block" "$VDEV (LividBlock)" s midi connect "$VDEV" --kind block
+s pattern clear kick >/dev/null
+echo "pad 0 2" >&7; sleep 0.5
+check "pad press from device edits pattern" "kick        --x- ---- ---- ----" s pattern show kick
+check "device receives LED updates" "recv 90 02 7F" cat "$TMP/vdev.out"
+exec 7>&-; sleep 3
+check "unplugged device pruned" "(none)" s midi ports
+s pattern set kick "X---x---X---x---" >/dev/null   # restore for later checks
+
 check "play" "playing" s play
 check "playhead events" "playhead" s watch --type playhead --count 2
 check "stop" "stopped" s stop

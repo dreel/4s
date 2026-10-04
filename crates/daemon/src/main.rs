@@ -29,7 +29,7 @@ struct Args {
     /// Run without an audio device (engine still runs in real time).
     #[arg(long)]
     no_audio: bool,
-    /// Disable MIDI device auto-connect.
+    /// Disable Livid Block auto-connect (manual `midi connect` still works).
     #[arg(long)]
     no_midi: bool,
     /// Data directory (projects, renders, controller maps, runtime file).
@@ -135,6 +135,8 @@ fn run(args: Args) -> Result<()> {
     };
     let fours_engine::EngineLink { commands, mut feedback } = link;
 
+    // Must precede any other MIDI use so hotplugged devices are seen.
+    midi::start_device_watcher();
     let (midi_tx, midi_rx) = std::sync::mpsc::channel();
     let core = Arc::new(Mutex::new(core::Core::new(commands, midi_tx, data_dir.clone(), audio_status)));
     tracing::info!("data dir: {}", data_dir.display());
@@ -182,12 +184,14 @@ fn run(args: Args) -> Result<()> {
         })?;
     }
 
-    // MIDI hotplug: auto-connect a Livid Block when one appears.
-    if !args.no_midi {
+    // MIDI hotplug: drop unplugged devices, and auto-connect a Livid Block
+    // when one appears (unless --no-midi).
+    {
         let core = core.clone();
+        let auto = !args.no_midi;
         std::thread::Builder::new().name("4s-midi-scan".into()).spawn(move || {
             loop {
-                core.lock().unwrap().midi_autoconnect();
+                core.lock().unwrap().midi_autoconnect(auto);
                 std::thread::sleep(Duration::from_secs(2));
             }
         })?;

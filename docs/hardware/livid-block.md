@@ -18,6 +18,20 @@ been verified on the device yet** -- see "Calibrating" below.
   Disable with `--no-midi`.
 - Manual: `4s midi connect "block Controls"` (or the MIDI panel in the UI).
 - Disconnected devices are dropped automatically; replugging reconnects.
+- macOS note: CoreMIDI only tells a process about newly plugged-in devices
+  via a run loop on the thread that created its first MIDI client. 4sd runs a
+  dedicated `4s-coremidi` thread for this (`midi::start_device_watcher`);
+  without it, devices plugged in after startup never appear.
+
+## Testing without the device
+
+`cargo run -p fours-daemon --example virtual_block [NAME]` creates a virtual
+MIDI device (default name "Virtual Block") from a separate process. It prints
+the LED messages 4sd sends it and accepts stdin commands (`pad ROW COL`,
+`knob INDEX VALUE`, `raw HEX..`) to press pads and turn knobs. A name
+containing "block" is auto-connected like the real device.
+`scripts/e2e-cli.sh` uses it to test hotplug, pad input, LED output, and
+unplug.
 
 ## Layout
 

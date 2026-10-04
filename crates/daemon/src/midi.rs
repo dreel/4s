@@ -26,6 +26,47 @@ pub struct Midi {
     conns: Vec<Conn>,
 }
 
+/// macOS: CoreMIDI only updates a process's view of MIDI devices through
+/// notifications delivered on the run loop of the thread that created the
+/// process's *first* MIDI client. Without a running run loop, devices plugged
+/// in after startup never appear. Call this once at startup, before any other
+/// MIDI use: it creates that first client on a dedicated thread that runs a
+/// CoreFoundation run loop forever.
+#[cfg(target_os = "macos")]
+pub fn start_device_watcher() {
+    use std::ffi::c_void;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        static kCFRunLoopDefaultMode: *const c_void;
+        fn CFRunLoopRunInMode(mode: *const c_void, seconds: f64, return_after_source_handled: u8) -> i32;
+    }
+    const FINISHED: i32 = 1; // kCFRunLoopRunFinished: no sources on this run loop
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("4s-coremidi".into())
+        .spawn(move || {
+            let client = MidiInput::new(CLIENT);
+            if let Err(e) = &client {
+                tracing::warn!("MIDI unavailable: {e}");
+            }
+            let _ = tx.send(());
+            let _keep = client;
+            loop {
+                let r = unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, 0) };
+                if r == FINISHED {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+            }
+        })
+        .expect("spawn CoreMIDI thread");
+    let _ = rx.recv();
+}
+
+/// Other platforms (ALSA) see hotplugged devices without extra work.
+#[cfg(not(target_os = "macos"))]
+pub fn start_device_watcher() {}
+
 pub fn list_ports() -> (Vec<String>, Vec<String>) {
     let inputs = MidiInput::new(CLIENT)
         .map(|m| m.ports().iter().filter_map(|p| m.port_name(p).ok()).collect())
