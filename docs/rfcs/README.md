@@ -36,3 +36,4 @@ Adding an instrument, a controller mapping, or fixing a bug does not need one.
 | RFC | Title | Status |
 |-----|-------|--------|
 | [0001](0001-contribution-gates.md) | Contribution gates | implemented |
+| [0002](0002-testing-philosophy.md) | Testing philosophy | accepted |
