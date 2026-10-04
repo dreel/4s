@@ -55,14 +55,26 @@ Parameters are addressed by path (`drums.kick.decay`, `mixer.3.pan`) and
 stored in a flat array indexed by `ParamId`
 (`crates/engine/src/params.rs`).
 
-1. Extend the index layout: add a constant (or extend `VoiceParam` /
-   `MixerParam` and bump `VOICE_PARAMS` / `MIXER_PARAMS`), and add the
-   matching `ParamInfo` entry, **in the same order**, in `registry()`.
-   `layout_matches_registry` will catch a mismatch. Add your path to it.
+1. Extend the index layout. The offsets are derived from each other
+   (`VOICE_BASE`, `MIXER_BASE`, `MASTER_VOLUME`, `NUM_PARAMS =
+   MASTER_VOLUME + 1`), so:
+   - a new **per-voice** parameter: add a `VoiceParam` variant, bump
+     `VOICE_PARAMS`, add the field to `VoiceParams`
+     (`crates/engine/src/voices.rs`), and fill it in `Engine::voice_params`;
+   - a new **per-channel** parameter: add a `MixerParam` variant and bump
+     `MIXER_PARAMS`;
+   - a new **global** parameter: add a constant after `MASTER_VOLUME` and
+     update `NUM_PARAMS`.
+   Then add the matching `ParamInfo` entry **in the same position** in
+   `registry()`. `layout_matches_registry` catches a mismatch; add your path
+   to it.
 2. Use the value in the engine (`Engine` reads `self.params[...]`).
-3. Nothing else needed for clients: `param.list`, `4s params`, `4s get/set`,
-   project files, and the UI knobs (built from the registry) pick it up
-   automatically.
+3. Clients: `param.list`, `4s params`, `4s get/set`, and project files pick
+   it up automatically. **The UI does not**: controls are placed by path.
+   Add a `ParamKnob` for it (e.g. in a mixer strip in
+   `ui/src/components/Mixer.tsx`, or in `Transport.tsx`). Range, label, and
+   default come from the registry. Without that, the parameter has no UI
+   control, which breaks UI/CLI parity.
 
 Pitfalls:
 - Paths are a public contract (projects, scripts, agents). Renaming or
@@ -80,8 +92,10 @@ Validate:
 ## 3. Support a new MIDI controller
 
 Controllers are MIDI devices whose input the daemon decodes into the same
-actions the UI and CLI use. The Livid Block is the reference
-implementation.
+actions the UI and CLI use. The Livid Block is the reference for a grid
+controller with feedback; `DeviceKind::GenericDrums` (note-on triggers
+voices, in `Core::handle_midi`) is the simpler reference for note-only
+devices.
 
 1. Add a `DeviceKind` variant in `crates/protocol/src/types.rs` and
    regenerate bindings (`cargo run -p fours-protocol --bin gen-bindings`).
@@ -92,9 +106,14 @@ implementation.
 3. Turn input into existing core actions (`set_step`, `set_param`,
    `controller_pad`, `controller_knob`) so events fire and all clients sync.
    Don't add a parallel state path.
-4. Feedback (LEDs, displays): send from `refresh_controller`, diffing so
-   only changes go out.
-5. Auto-connect, if appropriate: match the port name in `midi_autoconnect`.
+4. Feedback (LEDs, displays): today's output path is Block-specific
+   (`Midi::send_block`, `BlockMap::led_message`, `Midi::block_name`, called
+   from `refresh_controller`). A second device kind with feedback needs a
+   per-kind send path in `crates/daemon/src/midi.rs`, still diffing so only
+   changes go out.
+5. Auto-connect, if appropriate: `midi_autoconnect` currently matches only
+   "block" and connects as `LividBlock`; extend it with your device's name
+   match.
 6. Expose it in `4s midi connect --kind ...` and the UI's MIDI panel (the
    kind list).
 7. Document the mapping in `docs/hardware/<device>.md`, following
@@ -141,8 +160,8 @@ Validate:
 1. Add a component in `ui/src/components/`, reading state with `useApp` /
    `useLive` selectors (return primitives or stable references) and acting
    through `client.call`, `setParam`, or `act`.
-2. Build controls from the parameter registry where possible (see
-   `ParamKnob` in `Mixer.tsx`), so new parameters appear without UI work.
+2. Use `ParamKnob` (`Mixer.tsx`) for parameters, so range, label, and
+   default come from the registry instead of being duplicated.
 3. Give interactive elements a `data-testid`.
 4. Everything the panel does must already be an RPC with a CLI command
    (recipe 4). Local desktop actions are the only exception
