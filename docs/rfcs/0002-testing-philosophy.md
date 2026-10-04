@@ -3,7 +3,8 @@
 - Status: accepted
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-04
-- Discussion: the PR that introduces this RFC
+- Discussion: the PR that introduces this RFC. Merging that PR is the
+  maintainer's approval (status set to `accepted` in the same PR).
 
 ## Summary
 
@@ -67,15 +68,54 @@ Add a unit test as well only if the root cause is complex logic.
 behavior as **blocking**, and flags change-detector tests as a suggestion
 to delete.
 
+Scope of "missing e2e is blocking":
+
+- It applies to behavior a user or agent can observe through the CLI, the
+  UI, rendered audio, or MIDI.
+- For DSP and sound changes, `4s render` analysis (or an engine-level render
+  test) counts as end to end.
+- Exceptions: behavior no existing harness can express. Examples are
+  multi-daemon setups (no bridge yet), real-hardware-only paths, and
+  real-time-safety properties that are invisible at the interfaces. For
+  these, the PR either adds the harness or explains why not, and the human
+  reviewer decides.
+
 ### Existing tests
 
-The implementing PR removes current change detectors whose behavior is
-already covered end to end, and closes any e2e gap that removal reveals.
+The implementing PR removes these change detectors. Their behavior is
+already covered end to end:
+
+- `led_diff` and `decode_default_map` (`crates/daemon/src/controller.rs`):
+  the `virtual_block` e2e covers pad input and LED output.
+- `uptime_format` (`crates/cli/src/daemon_ctl.rs`): trivial formatting.
+- `voice_parse` (`crates/protocol/src/types.rs`): an alias table; the CLI
+  e2e uses ids, aliases, and numbers.
+- `methods_unique` (`crates/protocol/src/api.rs`): duplicates would already
+  break serde and the parity test.
+- `values_and_numbering` (`crates/cli/src/main.rs`): percentages, negative
+  values, and 1-based steps are covered in `scripts/e2e-cli.sh`.
+
+Kept: DSP, timing, swing, onset detection, parsers and round trips,
+migration fixtures, wire-format contracts, LED/playhead inversion and
+paging, stale runtime-file handling, the PR-body checker tests, and
+`cli_covers_every_method`.
+
+The implementing PR also closes the e2e gap this reveals: mute/solo
+audibility is only unit-tested, so it adds a CLI e2e check using
+`4s render`.
+
+### Docs the implementing PR updates
+
+- New `docs/testing.md`, linked from the AGENTS.md docs index and the
+  "How agents should work here" rules.
+- `docs/review/reviewer.md` check 5 (Validation).
+- `docs/gates.md` G3, and `CONTRIBUTING.md`.
+- `docs/validation.md` ("By component", aligned with this policy).
 
 ## Impact on the principles
 
 - Strengthens "Close the loop" (validation through real interfaces).
-- Agent-drivable, multiplayer, real-time safety: no impact.
+- Agent-drivable, multiplayer, real-time safety, modularity: no impact.
 - No runtime impact.
 
 ## Alternatives
