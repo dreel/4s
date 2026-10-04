@@ -14,6 +14,9 @@ Adding an instrument, a controller mapping, or fixing a bug does not need one.
 1. **Propose**: open a PR adding `docs/rfcs/NNNN-short-title.md` (next free
    number) from [0000-template.md](0000-template.md), with
    `Status: proposed`. An issue to discuss the idea first is welcome.
+   Tick "Architecture / UX" in the PR template; a PR that only changes
+   `docs/rfcs/` is recognized as a proposal, so `pr-gates` does not require
+   an already-accepted RFC.
 2. **Discuss**: on the PR. Revise the RFC; agents can help draft and analyze,
    but a human must approve.
 3. **Accept or reject**: a maintainer (CODEOWNERS: @dreel) sets

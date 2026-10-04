@@ -55,4 +55,5 @@ jobs:
           MERGE_BASE=$(git merge-base "$HEAD_SHA" "$BASE_SHA")
           export DIFF_SHA256=$("$TOOLS/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | shasum -a 256 | cut -d' ' -f1)
           export RFC_REF=origin/main
+          export CHANGED_FILES=$(git diff --name-only --no-renames "$MERGE_BASE" "$HEAD_SHA")
           node "$TOOLS/check-pr-body.mjs"

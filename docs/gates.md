@@ -24,7 +24,8 @@ implementation PR can merge.
 - Proof: the change class checkbox in the PR, plus the RFC link or one line
   on why none is needed.
 - Enforced by: the `pr-gates` CI check (an RFC-class PR must link an RFC file
-  whose status on `main` is `accepted`), the independent reviewer (which
+  whose status on `main` is `accepted`; a PR that only changes `docs/rfcs/`
+  is an RFC proposal and is exempt, since merging it is the approval), the independent reviewer (which
   flags misclassified changes with `VERDICT: needs-rfc`), and CODEOWNERS on
   `docs/rfcs/`.
 
