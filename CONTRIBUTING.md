@@ -12,8 +12,10 @@ your PR.**
 
 1. **Classify your change** (below). If it is RFC-class, stop and write an RFC
    first; implementation PRs for RFC-class changes need an *accepted* RFC.
-2. **Build it** following [AGENTS.md](AGENTS.md) and the design docs in
-   [docs/](docs/). Point your agent at AGENTS.md first.
+2. **Build it** following [AGENTS.md](AGENTS.md), the design docs in
+   [docs/](docs/), and for extensions the recipes in
+   [docs/extending.md](docs/extending.md). Point your agent at AGENTS.md
+   first.
 3. **Validate it through its real interface**: drive the daemon with the CLI,
    render audio with `4s render`, run the UI tests, use the virtual Livid
    Block. Keep the commands and what you observed; they go in the PR.
@@ -33,12 +35,12 @@ accepts a review only if its `REVIEWED_SHA` is the PR's head commit, or its
 | Class | Examples | RFC? |
 |-------|----------|------|
 | **Fix** | bug fix, test, docs fix, refactor with no behavior change | No |
-| **Extension** | a new instrument or drum voice, a MIDI controller mapping, new parameters, a new CLI command with matching RPC and UI control, a new UI panel that follows existing patterns | No |
-| **Architecture / UX** | how the engine routes or processes audio; the threading or real-time model; the RPC protocol shape or sync model; daemon lifecycle or topology; the project format beyond an additive migration; the UI's overall structure or interaction model (e.g. a windowing system); the core principles; these gates | **Yes** |
+| **Extension** | a new or improved drum voice model, new parameters, a MIDI controller mapping, a new CLI command with matching RPC and UI control, a new UI panel that follows existing patterns -- see [docs/extending.md](docs/extending.md) for recipes | No |
+| **Architecture / UX** | new instrument types (there is no instrument framework yet; see [docs/extending.md](docs/extending.md#not-an-extension-needs-an-rfc)); how the engine routes or processes audio; the threading or real-time model; the RPC protocol shape or sync model; daemon lifecycle or topology; the project format beyond an additive migration; the UI's overall structure or interaction model (e.g. a windowing system); the core principles; these gates | **Yes** |
 
 If you are unsure, treat it as RFC-class and open an issue to ask. An
-Extension that turns out to need new core concepts (say, an instrument that
-needs a new kind of routing) becomes RFC-class.
+Extension that turns out to need new core concepts (say, a voice that needs
+a new kind of routing) becomes RFC-class.
 
 ## RFCs
 

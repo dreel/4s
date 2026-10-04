@@ -32,6 +32,7 @@ and agents can drive and verify every part of it.
 - [Engine](docs/engine.md) -- voices, sequencer, mixer, parameter list
 - [Lifecycle](docs/lifecycle.md) -- starting/stopping the daemon; app, dev, and remote modes
 - [Topology](docs/topology.md) -- engine/bridge roles, remote and collaborative setups
+- [Extending](docs/extending.md) -- recipes: drum voices, parameters, controllers, RPC/CLI/UI features
 - [Contributing](CONTRIBUTING.md) and [Gates](docs/gates.md) -- change classes, RFCs, and what every PR must prove
 - [RFCs](docs/rfcs/README.md) -- how big changes get approved before code is written
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing

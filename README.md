@@ -153,6 +153,7 @@ architectural or UX changes start as an RFC approved by a human. Run
 ## Learn more
 
 - [AGENTS.md](AGENTS.md) -- principles and how to work in this repo
+- [docs/extending.md](docs/extending.md) -- how to add voices, parameters, controllers, and features
 - [docs/architecture.md](docs/architecture.md) -- how the pieces fit
 - [docs/engine.md](docs/engine.md) -- voices, sequencer, parameters
 - [docs/rpc.md](docs/rpc.md) and [docs/api-parity.md](docs/api-parity.md) -- the API and the 1:1 UI/CLI rule
