@@ -909,19 +909,4 @@ mod tests {
         let missing: Vec<_> = all.difference(&covered).collect();
         assert!(missing.is_empty(), "RPC methods without a CLI command: {missing:?}");
     }
-
-    #[test]
-    fn values_and_numbering() {
-        assert_eq!(parse_value("35%").unwrap(), 0.35);
-        assert_eq!(parse_value("on").unwrap(), 1.0);
-        assert_eq!(parse_value("0.5").unwrap(), 0.5);
-        assert!(parse_value("loud").is_err());
-        let cli = Cli::try_parse_from(["4s", "pattern", "step", "kick", "1", "on"]).unwrap();
-        match &plan(&cli.cmd).unwrap()[0] {
-            Request::PatternSetStep(p) => assert_eq!(p.step, 0),
-            other => panic!("{other:?}"),
-        }
-        let cli = Cli::try_parse_from(["4s", "pattern", "step", "kick", "0", "on"]).unwrap();
-        assert!(plan(&cli.cmd).is_err());
-    }
 }

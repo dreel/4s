@@ -19,17 +19,19 @@ What exists today:
 
 - **Engine** (`crates/engine`): every voice sounds and decays to silence;
   sequencer triggers land within 2 samples of the expected time; swing timing;
-  mute/solo; offline render onsets match sequencer triggers, including dense
+  offline render onsets match sequencer triggers, including dense
   mixed patterns and long tails that must not re-trigger.
 - **Protocol** (`crates/protocol`): wire formats, project file round trip,
   v1 fixture loads, future versions rejected.
-- **Daemon** (`crates/daemon`): Livid Block LED/page logic and MIDI decoding.
+- **Daemon** (`crates/daemon`): Livid Block LED paging and playhead
+  inversion.
 - **CLI** (`crates/cli`): every RPC method has a CLI command
-  (`cli_covers_every_method`); 1-based numbering and value parsing.
-- **CLI e2e** (`scripts/e2e-cli.sh`): ~39 checks covering the daemon
+  (`cli_covers_every_method`); stale runtime-file handling.
+- **CLI e2e** (`scripts/e2e-cli.sh`): checks covering the daemon
   lifecycle (start/status/stop/restart, single instance, runtime-file
   discovery, logs), params, patterns, virtual pads/knobs, transport events,
-  offline render analysis, project save/load, and MIDI hotplug with a virtual
+  offline render analysis (including that mute and solo are audible),
+  project save/load, and MIDI hotplug with a virtual
   device (`crates/daemon/examples/virtual_block.rs`): appears after startup,
   connects, pad input edits the pattern, LED output arrives, unplug is
   pruned. Uses an isolated data dir and random port.
@@ -47,9 +49,10 @@ latency/jitter injection.
 
 ### Daemon
 
-- Unit tests for DSP, sequencing, and state logic.
-- Integration tests that start a daemon and drive it via the CLI/RPC, asserting
-  on returned state and emitted events.
+- End-to-end tests that start a daemon and drive it via the CLI/RPC,
+  asserting on returned state, emitted events, and rendered audio.
+- Unit tests only for complex logic (DSP, timing, parsing) and silent
+  invariants; see [testing.md](testing.md).
 
 ### Audio
 

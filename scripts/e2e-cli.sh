@@ -33,11 +33,15 @@ check "clamp" "transport.tempo = 300" s tempo 9999
 check "tempo" "transport.tempo = 120" s tempo 120
 check "negative value" "mixer.1.pan = -0.5" s set mixer.1.pan -0.5
 check "unknown param" "unknown parameter" s set nope 1
+check "invalid value" "invalid value 'loud'" s set mixer.1.volume loud
 check "pattern set" "kick        X--- x--- X--- x---" s pattern set kick "X---x---X---x---"
 check "leading hyphen" "snare       ---- x--- ---- x---" s pattern set snare "----x-------x---"
 check "toggle" "clap step 13 = on" s pattern toggle clap 13
 check "accent" "cowbell step 16 = accent" s pattern step cowbell 16 accent
 check "step range" "step must be 1..64" s pattern step kick 65 on
+check "steps are 1-based" "step must be 1..64" s pattern step kick 0 on
+check "voice by alias" "closed_hat  " s pattern show ch
+check "voice by 1-based track number" "cowbell     " s pattern show 8
 check "virtual pad" "#" s controller press 2 1
 check "pad edited pattern" "snare       x--- x---" s pattern show snare
 check "knob mode" "knobs: Decay" s controller mode --knobs decay
@@ -55,8 +59,14 @@ for _ in $(seq 30); do s midi ports | grep -q "$VDEV" && break; sleep 0.1; done
 check "hotplugged device listed" "$VDEV" s midi ports
 check "connect virtual block" "$VDEV (LividBlock)" s midi connect "$VDEV" --kind block
 s pattern clear kick >/dev/null
-echo "pad 0 2" >&7; sleep 0.5
-check "pad press from device edits pattern" "kick        --x- ---- ---- ----" s pattern show kick
+echo "pad 0 2" >&7
+echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
+sleep 0.5
+check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
+# Knob 2 (CC 2) in decay mode -> snare decay. 127 -> 1.0, which the default
+# (0.4) cannot match.
+echo "knob 1 127" >&7; sleep 0.5
+check "knob turn from device sets its parameter" "drums.snare.decay = 1" s get drums.snare.decay
 check "device receives LED updates" "recv 90 02 7F" cat "$TMP/vdev.out"
 exec 7>&-; sleep 3
 check "unplugged device pruned" "(none)" s midi ports
@@ -66,6 +76,14 @@ check "play" "playing" s play
 check "playhead events" "playhead" s watch --type playhead --count 2
 check "stop" "stopped" s stop
 check "render: onsets match distinct hit times" "triggers: 9  detected onsets: 5" s render --bars 1 --out renders/e2e.wav
+# Mute and solo are audible, not just stored: the kick still triggers but its
+# step-9 hit (where nothing else plays) disappears from the audio.
+check "mute kick" "mixer.1.mute = 1" s set mixer.1.mute on
+check "mute removes kick from the audio" "triggers: 9  detected onsets: 4" s render --bars 1 --out renders/mute.wav
+check "unmute kick" "mixer.1.mute = 0" s set mixer.1.mute off
+check "solo cowbell" "mixer.8.solo = 1" s set mixer.8.solo on
+check "solo leaves only the cowbell" "triggers: 9  detected onsets: 1" s render --bars 1 --out renders/solo.wav
+check "unsolo cowbell" "mixer.8.solo = 0" s set mixer.8.solo off
 check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e
 check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project reveal --no-open

@@ -431,17 +431,6 @@ mod tests {
     }
 
     #[test]
-    fn voice_parse() {
-        assert_eq!(Voice::parse("ch"), Some(Voice::ClosedHat));
-        assert_eq!(Voice::parse("3"), Some(Voice::Clap));
-        assert_eq!(Voice::parse("closed_hat"), Some(Voice::ClosedHat));
-        assert_eq!(Voice::parse("9"), None);
-        for v in Voice::ALL {
-            assert_eq!(Voice::parse(v.id()), Some(v));
-        }
-    }
-
-    #[test]
     fn event_wire_format() {
         let e = EventEnvelope {
             seq: 3,

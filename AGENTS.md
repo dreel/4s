@@ -37,6 +37,7 @@ and agents can drive and verify every part of it.
 - [Extending](docs/extending.md) -- recipes: drum voices, parameters, controllers, RPC/CLI/UI features
 - [Contributing](CONTRIBUTING.md) and [Gates](docs/gates.md) -- change classes, RFCs, and what every PR must prove
 - [RFCs](docs/rfcs/README.md) -- how big changes get approved before code is written
+- [Testing](docs/testing.md) -- e2e first; which unit tests are worth writing (RFC 0002)
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
 
@@ -79,6 +80,10 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 - **Do not claim done until verified.** Exercise changes through their real
   interface (CLI against a running daemon, a headless render, a UI test) and
   report what you actually observed.
+- **Test end to end, not implementation details.** Cover new behavior through
+  the CLI/UI/render/virtual-MIDI harnesses; unit-test only complex logic and
+  silent invariants; never write change-detector tests. See
+  [docs/testing.md](docs/testing.md).
 - **API first.** New features start as an RPC, then get a CLI command, then UI.
   Never add a capability that only the UI can reach.
 - **Keep the audio thread real-time safe.** No locks, allocations, or I/O on the

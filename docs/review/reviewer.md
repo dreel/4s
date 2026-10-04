@@ -49,10 +49,18 @@ For each item, decide: OK, a finding, or not applicable.
 4. **Real-time safety.** Nothing on the audio path (engine `render`,
    `RtEngine::process`, voices, the audio callback) allocates, locks, blocks,
    or does I/O. Control reaches the engine only through the command queue.
-5. **Validation.** There are tests for the new behavior, and the change is
-   covered through its real interface: CLI e2e checks (`scripts/e2e-cli.sh`),
-   Electron e2e (`ui/e2e`), offline render analysis, or the virtual Block as
-   appropriate. A bug fix includes a test that would have caught it.
+5. **Validation** (apply `docs/testing.md`). User-visible behavior --
+   anything observable through the CLI, the UI, rendered audio, or MIDI --
+   is covered end to end through its real interface: CLI e2e checks
+   (`scripts/e2e-cli.sh`), Electron e2e (`ui/e2e`), `4s render` analysis,
+   or `virtual_block`. Missing e2e coverage of such behavior is
+   **blocking**, unless no existing harness can express it and the PR says
+   why. A bug fix reproduces the bug at the highest level that can express
+   it. Unit tests belong only to complex logic with non-obvious output
+   (DSP, timing, parsers, regexes, migrations) or silent invariants. A
+   change-detector unit test (restating a match arm, a lookup table, a
+   getter, trivial formatting, or duplicating an e2e check) is a
+   suggestion to delete.
 6. **Generated code and types.** Protocol changes regenerate
    `ui/src/generated/` and `schema/`. No hand edits to generated files. TS
    types come from Rust, not duplicated by hand.

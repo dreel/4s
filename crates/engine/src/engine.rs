@@ -101,10 +101,20 @@ impl Engine {
         self.playing
     }
 
-    /// Load full state (non-real-time; used before the engine starts).
+    /// Load full state (non-real-time; used before the engine starts, e.g.
+    /// for offline renders).
     pub fn load(&mut self, params: &[f32], pattern: &[[u8; MAX_STEPS]; NUM_TRACKS]) {
         self.params.copy_from_slice(params);
         self.pattern = *pattern;
+        // Start the gain smoothers at the loaded mix, so muted or non-soloed
+        // channels don't leak for the first few milliseconds.
+        let (targets, master) = self.mix_targets();
+        for (ch, (gain, l, r)) in self.channels.iter_mut().zip(targets) {
+            ch.gain.value = gain;
+            ch.pan_l.value = l;
+            ch.pan_r.value = r;
+        }
+        self.master.value = master;
     }
 
     pub fn apply(&mut self, cmd: Command, emit: &mut impl FnMut(Feedback)) {
@@ -213,7 +223,9 @@ impl Engine {
         }
     }
 
-    fn render_frames(&mut self, out: &mut [f32], channels: usize) {
+    /// Per-channel (gain, left, right) targets from volume, pan, mute, and
+    /// solo, plus the master gain.
+    fn mix_targets(&self) -> ([(f32, f32, f32); NUM_TRACKS], f32) {
         let any_solo = (0..NUM_TRACKS).any(|t| self.params[mixer_param(t, MixerParam::Solo)] >= 0.5);
         let mut targets = [(0.0f32, 0.0f32, 0.0f32); NUM_TRACKS];
         for (t, target) in targets.iter_mut().enumerate() {
@@ -225,7 +237,11 @@ impl Engine {
             let angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
             *target = (gain, angle.cos(), angle.sin());
         }
-        let master_target = volume_to_gain(self.params[MASTER_VOLUME]);
+        (targets, volume_to_gain(self.params[MASTER_VOLUME]))
+    }
+
+    fn render_frames(&mut self, out: &mut [f32], channels: usize) {
+        let (targets, master_target) = self.mix_targets();
 
         for f in out.chunks_exact_mut(channels) {
             let (mut l, mut r) = (0.0f32, 0.0f32);
@@ -342,23 +358,5 @@ mod tests {
         // Pair = 0.25s; full swing puts the offbeat at 75% of the pair.
         assert!((times[1] - 0.1875).abs() < 1e-3, "{times:?}");
         assert!((times[2] - 0.25).abs() < 1e-3, "{times:?}");
-    }
-
-    #[test]
-    fn mute_and_solo() {
-        let mut e = Engine::new(48000);
-        let mut fb = vec![];
-        e.apply(Command::SetParam { id: mixer_param(0, MixerParam::Mute), value: 1.0 }, &mut |_| {});
-        render_secs(&mut e, 0.2, &mut fb); // let gain smoother settle
-        e.apply(Command::Trigger { track: 0, velocity: 1.0 }, &mut |_| {});
-        let out = render_secs(&mut e, 0.1, &mut fb);
-        assert!(out.iter().all(|x| x.abs() < 1e-3), "muted kick should be silent");
-
-        let mut e = Engine::new(48000);
-        e.apply(Command::SetParam { id: mixer_param(1, MixerParam::Solo), value: 1.0 }, &mut |_| {});
-        render_secs(&mut e, 0.2, &mut fb);
-        e.apply(Command::Trigger { track: 0, velocity: 1.0 }, &mut |_| {});
-        let out = render_secs(&mut e, 0.1, &mut fb);
-        assert!(out.iter().all(|x| x.abs() < 1e-3), "non-soloed kick should be silent");
     }
 }

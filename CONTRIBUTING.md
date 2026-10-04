@@ -18,7 +18,9 @@ your PR.**
    first.
 3. **Validate it through its real interface**: drive the daemon with the CLI,
    render audio with `4s render`, run the UI tests, use the virtual Livid
-   Block. Keep the commands and what you observed; they go in the PR.
+   Block. Keep the commands and what you observed; they go in the PR. Add
+   end-to-end tests for new behavior, and skip change-detector unit tests;
+   see [docs/testing.md](docs/testing.md).
 4. **Run the gates**: `scripts/gates.sh`. It runs every check, then has a
    fresh agent -- with none of your agent's context -- review your diff
    against the project's principles. It writes a report to
