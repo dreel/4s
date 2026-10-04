@@ -35,7 +35,17 @@ review without a maintainer having to ask.
 - We keep the review harness we already validated: the Claude Code CLI with
   `--restricted` (no command-running tools, no WebFetch, repository
   settings ignored, file tools confined), `--tools Read Grep Glob`,
-  `--strict-mcp-config`, `--bare`. Only the model endpoint changes.
+  `--strict-mcp-config`, `--bare`. The model endpoint and credentials
+  change:
+  - `ANTHROPIC_BASE_URL=https://api.meta.ai`;
+  - `ANTHROPIC_AUTH_TOKEN=$META_API_KEY` (bearer), with `ANTHROPIC_API_KEY`
+    unset;
+  - `--model muse-spark-1.3-contributor`, also used for any background or
+    small-model requests, so nothing asks for a Claude model id;
+  - `--bare` stays on for this provider. It is what skips personal memory,
+    hooks, and plugins, and the current "only with `ANTHROPIC_API_KEY`"
+    condition must cover the bearer-token case;
+  - redaction in CI covers `META_API_KEY` (and any Anthropic key).
 - Not the `muse exec` CLI: it loads project-local rules, skills, and hooks
   for trusted workspaces, and documents no way to disable that. In CI it
   would run on untrusted PR content with the key present. Revisit if Meta
@@ -48,6 +58,14 @@ review without a maintainer having to ask.
 - `pull_request_target` on opened, synchronize, reopened, and
   ready_for_review. Drafts are skipped. Adding the `agent-review` label
   forces a re-run.
+- **Volume limit**: `pull_request_target` is not covered by GitHub's
+  "require approval for fork PR workflows" setting, so automatic runs are
+  limited to authors who already have standing in the repository
+  (`author_association` of OWNER, MEMBER, COLLABORATOR, or CONTRIBUTOR).
+  For first-time contributors (FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, NONE),
+  the workflow posts a note, and a maintainer runs the review by adding the
+  `agent-review` label, which only users with write access can do. The
+  maintainer should also set a spending limit on the Meta key.
 - One run per PR at a time; a new push cancels the old run, so only the
   latest commit is reviewed.
 - Unchanged isolation: the reviewer instructions, scripts, and principles
