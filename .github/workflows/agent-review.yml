@@ -1,78 +1,160 @@
-# G4, canonical: a maintainer adds the `agent-review` label to re-run the
-# independent review in CI. The reviewer instructions and scripts come from
-# the base branch; the PR's code is only read, never executed.
-# Needs the ANTHROPIC_API_KEY repository secret.
+# G4 in CI (RFC 0003): the independent agent review runs on every PR's latest
+# commit and is posted as one comment, updated in place. Powered by Meta's
+# Muse model at the Contributor tier (META_API_KEY secret) through the same
+# locked-down harness as scripts/review.sh.
+#
+# Isolation: the reviewer instructions, scripts, and principles come from the
+# current base branch; the PR's code is read, never executed; PRs that change
+# agent configuration are refused until a human has looked.
+#
+# Volume: pull_request_target is not covered by GitHub's "approve fork PR
+# workflows" setting, so automatic runs are limited to authors with standing
+# in the repo. For first-time contributors a maintainer adds the
+# `agent-review` label (only users with write access can label).
 name: agent-review
 on:
   pull_request_target:
-    types: [labeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  # One review per PR; a new push cancels the old run. Unrelated label events
+  # get their own group so they never cancel a review in progress.
+  group: >-
+    agent-review-${{ github.event.pull_request.number }}-${{
+    (github.event.action == 'labeled' && github.event.label.name != 'agent-review') && github.run_id || 'review' }}
+  cancel-in-progress: true
+
 jobs:
   agent-review:
-    if: github.event.label.name == 'agent-review'
+    if: >-
+      !github.event.pull_request.draft &&
+      (github.event.action != 'labeled' || github.event.label.name == 'agent-review')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      MAX_DIFF_LINES: 4000
     steps:
-      # Reviewer instructions, scripts, and principles from the current tip of
-      # the base branch (pull_request.base.sha is not advanced when main moves).
+      - name: Decide whether to review
+        id: decide
+        env:
+          ACTION: ${{ github.event.action }}
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          HAS_KEY: ${{ secrets.META_API_KEY != '' }}
+        run: |
+          forced=false
+          [ "$ACTION" = labeled ] && forced=true
+          echo "forced=$forced" >> "$GITHUB_OUTPUT"
+          if [ "$HAS_KEY" != true ]; then
+            echo "skip=The META_API_KEY repository secret is not set, so the automatic review did not run." >> "$GITHUB_OUTPUT"
+          elif [ "$forced" != true ]; then
+            case "$ASSOCIATION" in
+              OWNER|MEMBER|COLLABORATOR|CONTRIBUTOR) ;;
+              *) echo "skip=First-time contributor: a maintainer can run the review by adding the \`agent-review\` label." >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.decide.outputs.skip == ''
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           path: base
           persist-credentials: false
       - uses: actions/checkout@v4
+        if: steps.decide.outputs.skip == ''
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           path: pr
           persist-credentials: false
+
+      - name: Check the diff
+        id: diff
+        if: steps.decide.outputs.skip == ''
+        env:
+          FORCED: ${{ steps.decide.outputs.forced }}
+        run: |
+          cd pr
+          git fetch -q origin "$BASE_REF"
+          BASE_SHA=$(git rev-parse FETCH_HEAD)
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          if git diff --name-only "$MERGE_BASE" "$HEAD_SHA" | grep -qE '(^|/)(\.claude/|\.muse/|\.mcp\.json$|CLAUDE\.md$)'; then
+            echo "skip=This PR changes agent configuration (.claude/, .muse/, .mcp.json, CLAUDE.md). Review those changes by hand; the automated review did not run." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          LINES=$("$GITHUB_WORKSPACE/base/scripts/ci/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | wc -l)
+          if [ "$LINES" -gt "$MAX_DIFF_LINES" ] && [ "$FORCED" != true ]; then
+            echo "skip=The diff is $LINES lines (limit $MAX_DIFF_LINES, excluding generated code). Split the PR, or a maintainer can force the review with the \`agent-review\` label." >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.decide.outputs.skip == '' && steps.diff.outputs.skip == ''
         with:
           node-version: 22
-      - name: Install Claude Code
+      - name: Install the review harness
+        if: steps.decide.outputs.skip == '' && steps.diff.outputs.skip == ''
         run: npm install -g @anthropic-ai/claude-code
+
       - name: Independent review
+        id: review
+        if: steps.decide.outputs.skip == '' && steps.diff.outputs.skip == ''
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          META_API_KEY: ${{ secrets.META_API_KEY }}
+          BASE_SHA: ${{ steps.diff.outputs.base_sha }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "ANTHROPIC_API_KEY secret is not set" > review.md
-            exit 0
-          fi
           cd pr
-          git fetch -q "https://github.com/${{ github.repository }}" "$BASE_REF"
-          BASE_SHA=$(git rev-parse FETCH_HEAD)
-          # Backstop: agent configuration in the PR is ignored by the reviewer
-          # (--restricted), but a human should look at such changes first.
-          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qE '(^|/)(\.claude/|\.mcp\.json$|CLAUDE\.md$)'; then
-            echo "This PR changes agent configuration (.claude/, .mcp.json, CLAUDE.md). Review those changes by hand; the automated review did not run." > ../review.md
-            exit 0
-          fi
           set +e
-          REVIEW_BASE="$BASE_SHA" \
+          REVIEW_PROVIDER=muse \
+            REVIEW_BASE="$BASE_SHA" \
             REVIEW_PROMPT_FILE="$GITHUB_WORKSPACE/base/docs/review/reviewer.md" \
             REVIEW_DOCS_ROOT="$GITHUB_WORKSPACE/base" \
-            "$GITHUB_WORKSPACE/base/scripts/review.sh"
+            timeout 900 "$GITHUB_WORKSPACE/base/scripts/review.sh"
+          STATUS=$?
           set -e
           OUT=".gates/review-$HEAD_SHA.md"
-          # Never echo the key back, whatever the reviewed content asked for.
-          if [ -f "$OUT" ]; then sed "s|$ANTHROPIC_API_KEY|[redacted]|g" "$OUT" > ../review.md; else echo "Review produced no output." > ../review.md; fi
-      - name: Post review
+          {
+            if [ -f "$OUT" ]; then cat "$OUT"; else echo "The review produced no output (exit $STATUS); see the workflow log."; fi
+          } | perl -pe 's/\Q$ENV{META_API_KEY}\E/[redacted]/g' > ../review.md
+          VERDICT=$(grep -E '^VERDICT:' ../review.md | tail -1 | sed -E 's/^VERDICT:[[:space:]]*//' | tr -d '[:space:]')
+          echo "verdict=${VERDICT:-none}" >> "$GITHUB_OUTPUT"
+
+      - name: Post or update the review comment
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          SKIP: ${{ steps.decide.outputs.skip }}${{ steps.diff.outputs.skip }}
+          VERDICT: ${{ steps.review.outputs.verdict }}
         run: |
+          MARK='<!-- agent-review -->'
           {
-            echo "### Canonical independent review (CI)"
+            echo "$MARK"
+            echo "### Independent agent review (CI)"
             echo
-            echo "Reviewer instructions from the current \`${{ github.event.pull_request.base.ref }}\`; commit \`${{ github.event.pull_request.head.sha }}\`."
-            echo
-            cat review.md
+            if [ -n "$SKIP" ]; then
+              echo "$SKIP"
+            else
+              echo "Commit \`$HEAD_SHA\` - verdict: **${VERDICT:-none}**. Reviewer instructions and principles from the current \`$BASE_REF\`."
+              echo
+              if [ -f review.md ]; then cat review.md; else echo "The review did not complete; see the workflow log."; fi
+            fi
           } > comment.md
-          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file comment.md
+          ID=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARK\"))) | .id" | tail -1)
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$ID" -F body=@comment.md > /dev/null
+          else
+            gh pr comment "$PR" --repo "${{ github.repository }}" --body-file comment.md
+          fi
+
+      - name: Fail on a non-passing verdict
+        if: steps.review.outputs.verdict != '' && steps.review.outputs.verdict != 'pass'
+        run: |
+          echo "::error::independent review verdict: ${{ steps.review.outputs.verdict }}"
+          exit 1

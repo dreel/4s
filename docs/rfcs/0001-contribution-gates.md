@@ -70,5 +70,6 @@ the PR-body checker.
 ## Open questions
 
 - Whether to run the canonical agent review automatically on every PR once
-  volume and cost are understood.
+  volume and cost are understood. Resolved by
+  [RFC 0003](0003-ci-agent-review.md): yes, with a Muse Contributor model.
 - Issue templates and `docs/extending.md` recipes for the no-RFC paths.
