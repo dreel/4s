@@ -29,17 +29,20 @@ jobs:
           gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" > pr.json
           jq -r '.body // ""' pr.json > body.md
           echo "HEAD_SHA=$(jq -r .head.sha pr.json)" >> "$GITHUB_ENV"
+          echo "HEAD_REPO=$(jq -r .head.repo.full_name pr.json)" >> "$GITHUB_ENV"
           echo "BASE_REF=$(jq -r .base.ref pr.json)" >> "$GITHUB_ENV"
-      # The checker, from the current tip of the base branch.
+      # The checker, from the current tip of the (live) base branch.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ env.BASE_REF }}
           path: base
           persist-credentials: false
-      # The PR's code, only to compute the diff hash and changed files.
-      # Nothing from it is executed.
+      # The PR's code at the live head commit, only to compute the diff hash
+      # and changed files. Nothing from it is executed.
       - uses: actions/checkout@v4
         with:
+          repository: ${{ env.HEAD_REPO }}
+          ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0
           path: pr
           persist-credentials: false
@@ -49,12 +52,15 @@ jobs:
       - name: Check PR description
         run: |
           TOOLS=$(cd base/scripts/ci && pwd)
+          BASE_TIP=$(git -C base rev-parse HEAD)
           cd pr
-          git fetch -q origin "pull/${{ github.event.pull_request.number }}/head" "$BASE_REF"
-          MERGE_BASE=$(git merge-base "$HEAD_SHA" "origin/$BASE_REF")
+          # The base commit comes from this repository (a fork's own branch may be stale).
+          git fetch -q "https://github.com/${{ github.repository }}" "$BASE_TIP"
+          MERGE_BASE=$(git merge-base "$HEAD_SHA" "$BASE_TIP")
           export DIFF_SHA256=$("$TOOLS/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | shasum -a 256 | cut -d' ' -f1)
           export CHANGED_FILES=$(git diff --name-only --no-renames "$MERGE_BASE" "$HEAD_SHA")
-          export RFC_REF=origin/main
           export PR_BODY="$(cat ../body.md)"
-          echo "PR head $HEAD_SHA; checker from $BASE_REF @ $(git -C ../base rev-parse --short HEAD)"
-          node "$TOOLS/check-pr-body.mjs"
+          echo "PR head $HEAD_SHA; checker and RFC statuses from $BASE_REF @ ${BASE_TIP:0:7}"
+          # RFC statuses are read from the base checkout (the current main).
+          cd ../base
+          RFC_REF=HEAD node "$TOOLS/check-pr-body.mjs"
