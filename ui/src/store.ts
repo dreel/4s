@@ -40,10 +40,17 @@ class Store<T> {
   };
 }
 
+const query = new URLSearchParams(window.location.search);
+
 function daemonUrl(): string {
-  const q = new URLSearchParams(window.location.search).get("daemon");
-  return q || "ws://127.0.0.1:4440";
+  return query.get("daemon") || "ws://127.0.0.1:4440";
 }
+
+/** How the Electron main process found the daemon (see electron/main.cjs). */
+export const launch = {
+  lifecycle: query.get("lifecycle") ?? "external",
+  error: query.get("daemonError"),
+};
 
 export const client = new RpcClient(daemonUrl());
 export const app = new Store<AppState>({ connection: "closed", snapshot: null, registry: [], error: null });

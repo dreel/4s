@@ -364,6 +364,11 @@ api! {
     RenderOffline = "render.offline" (RenderParams) -> RenderResult;
     /// Audio device status.
     EngineStatus = "engine.status" (Empty) -> AudioStatus;
+
+    /// Daemon identity: pid, version, URL, data dir, uptime.
+    DaemonInfo = "daemon.info" (Empty) -> DaemonInfo;
+    /// Shut the daemon down gracefully (responds first, then exits).
+    DaemonShutdown = "daemon.shutdown" (Empty) -> Empty;
 }
 
 /// Build a `Request` from a method name and JSON params (missing/null params

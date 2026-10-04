@@ -279,6 +279,27 @@ pub enum Role {
     Bridge,
 }
 
+/// Identity and location of a running daemon. Returned by `daemon.info` and
+/// also written to `<data-dir>/4sd.json` while the daemon runs, so local tools
+/// can find it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct DaemonInfo {
+    pub pid: u32,
+    pub version: String,
+    pub protocol_version: u32,
+    /// WebSocket URL the daemon is listening on.
+    pub url: String,
+    pub role: Role,
+    pub data_dir: String,
+    pub log_file: Option<String>,
+    /// Unix time (seconds) the daemon started.
+    pub started_at: f64,
+    pub uptime: f64,
+}
+
+/// Name of the runtime file inside the data dir.
+pub const RUNTIME_FILE: &str = "4sd.json";
+
 /// Full engine state. Subscribers apply events with `seq` greater than this.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct Snapshot {

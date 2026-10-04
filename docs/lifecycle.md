@@ -1,0 +1,78 @@
+# Daemon Lifecycle
+
+Status: implemented.
+
+`4sd` is a background service. You start and stop it; you do not keep a
+terminal open for it. Who starts it and who stops it depends on the mode.
+
+## Modes
+
+| Situation | Who starts 4sd | Who stops 4sd | Electron `FOURS_DAEMON` |
+|-----------|----------------|---------------|-------------------------|
+| Packaged app (end users) | the app, if none is running | the app on quit, **only if it started it** | `owned` (default when packaged) |
+| Development | `4s daemon start`, or the app if none is running | you (`4s daemon stop`) | `detached` (default in dev) |
+| Remote / multiplayer | whoever runs the server | whoever runs the server | `external` (default for non-loopback URLs) |
+
+Rules that hold in every mode:
+
+- The app first tries to connect. If a daemon is already running, the app uses
+  it and never stops it, even in `owned` mode.
+- In `owned` mode the daemon is started with `--parent-pid <app pid>` and
+  exits on its own if the app dies, so a crash never leaves an orphaned daemon
+  holding the audio device.
+- Stopping is an RPC (`daemon.shutdown`), so the CLI, the app, and remote
+  clients all stop a daemon the same way. SIGTERM and Ctrl-C also shut down
+  cleanly.
+
+## CLI
+
+```
+4s daemon start [--listen ADDR] [--no-audio] [--no-midi] [--project P]
+4s daemon status        # pid, URL, version, uptime, audio; exit code 3 if not running
+4s daemon stop [--force]
+4s daemon restart [...start flags]
+4s daemon logs [-n N]
+```
+
+`start` launches `4sd` in its own process group (closing the terminal or
+Ctrl-C does not affect it), waits until it is ready, and returns. It is a
+no-op if a daemon is already running for the data dir.
+
+## Runtime file and discovery
+
+While running, the daemon writes `<data-dir>/4sd.json` (pid, URL, version,
+data dir, log file, start time) and removes it on exit.
+
+- **One daemon per data dir.** `4sd` refuses to start if the runtime file
+  names a live process. Stale files are cleaned up automatically.
+- **Discovery.** CLI commands without `--url` use the runtime file's URL, so a
+  daemon on a random port (`--listen 127.0.0.1:0`) needs no configuration.
+  The Electron app does the same when `FOURS_URL` is not set.
+- If you pass a data dir explicitly (`--data-dir` / `FOURS_DATA_DIR`) and no
+  daemon is running for it, commands fail with a hint instead of falling back
+  to the default port (which might be a different daemon).
+
+## Logs
+
+Background daemons log to `<data-dir>/logs/4sd.log` (`4sd --log-file`).
+`4s daemon logs` prints the tail. Running `4sd` directly logs to stderr.
+
+## Configuration
+
+| Variable | Used by | Meaning |
+|----------|---------|---------|
+| `FOURS_DATA_DIR` | 4sd, 4s, app | data dir (default `~/.4s`) |
+| `FOURS_URL` | 4s, app | daemon URL (default: runtime file, else `ws://127.0.0.1:4440`) |
+| `FOURS_TOKEN` | 4sd, 4s, app | auth token |
+| `FOURS_DAEMON` | app | `owned`, `detached`, or `external` |
+| `FOURSD_BIN` | 4s, app | path to the `4sd` binary |
+| `FOURSD_ARGS` | app | extra daemon flags (e.g. `--no-audio --no-midi` in tests) |
+
+Binary lookup: `FOURSD_BIN`; in the packaged app `resources/bin/4sd`; in
+development `target/debug/4sd`; then `PATH`. The `4s daemon start` command
+looks next to the `4s` executable before `PATH`.
+
+## Packaging (future)
+
+The packaged app will ship `4sd` in its resources and run in `owned` mode, so
+from the user's perspective it just works: open the app, play, quit.

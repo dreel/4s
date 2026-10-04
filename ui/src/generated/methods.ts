@@ -2,6 +2,7 @@
 import type { AudioStatus } from "./AudioStatus";
 import type { ControllerModeParams } from "./ControllerModeParams";
 import type { ControllerState } from "./ControllerState";
+import type { DaemonInfo } from "./DaemonInfo";
 import type { Empty } from "./Empty";
 import type { HelloParams } from "./HelloParams";
 import type { HelloResult } from "./HelloResult";
@@ -64,6 +65,8 @@ export interface Methods {
   "project.list": { params: Empty; result: ProjectListResult };
   "render.offline": { params: RenderParams; result: RenderResult };
   "engine.status": { params: Empty; result: AudioStatus };
+  "daemon.info": { params: Empty; result: DaemonInfo };
+  "daemon.shutdown": { params: Empty; result: Empty };
 }
 
 export type MethodName = keyof Methods;
@@ -97,4 +100,6 @@ export const METHODS: MethodName[] = [
   "project.list",
   "render.offline",
   "engine.status",
+  "daemon.info",
+  "daemon.shutdown",
 ];

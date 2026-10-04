@@ -10,12 +10,20 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{Notify, broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
-pub async fn serve(core: Shared, listener: TcpListener, token: Option<String>) {
+/// Process-level context for connection handlers.
+pub struct Daemon {
+    pub info: Arc<DaemonInfo>,
+    pub shutdown: Arc<Notify>,
+    pub started: std::time::Instant,
+}
+
+pub async fn serve(core: Shared, listener: TcpListener, token: Option<String>, info: Arc<DaemonInfo>, shutdown: Arc<Notify>) {
     let ids = Arc::new(AtomicU64::new(1));
+    let daemon = Arc::new(Daemon { info, shutdown, started: std::time::Instant::now() });
     loop {
         let (stream, addr) = match listener.accept().await {
             Ok(x) => x,
@@ -26,7 +34,7 @@ pub async fn serve(core: Shared, listener: TcpListener, token: Option<String>) {
         };
         let id = ids.fetch_add(1, Ordering::Relaxed);
         tracing::debug!("connection {id} from {addr}");
-        tokio::spawn(handle_connection(core.clone(), stream, id, token.clone()));
+        tokio::spawn(handle_connection(core.clone(), daemon.clone(), stream, id, token.clone()));
     }
 }
 
@@ -37,7 +45,7 @@ struct Conn {
     subscription: Option<JoinHandle<()>>,
 }
 
-async fn handle_connection(core: Shared, stream: TcpStream, id: u64, token: Option<String>) {
+async fn handle_connection(core: Shared, daemon: Arc<Daemon>, stream: TcpStream, id: u64, token: Option<String>) {
     let ws = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
         Err(e) => {
@@ -59,8 +67,14 @@ async fn handle_connection(core: Shared, stream: TcpStream, id: u64, token: Opti
     while let Some(msg) = source.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                if let Some(resp) = handle_text(&core, &mut conn, &tx, token.as_deref(), text.as_str()).await {
+                let (resp, then_shutdown) = handle_text(&core, &daemon, &mut conn, &tx, token.as_deref(), text.as_str()).await;
+                if let Some(resp) = resp {
                     let _ = tx.send(resp);
+                }
+                if then_shutdown {
+                    // Let the writer flush the response before the process exits.
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    daemon.shutdown.notify_one();
                 }
             }
             Ok(Message::Close(_)) | Err(_) => break,
@@ -83,32 +97,37 @@ fn response(id: &Value, result: Result<Value, RpcError>) -> String {
     body.to_string()
 }
 
+/// Returns the response (if the request had an id) and whether the daemon
+/// should shut down after sending it.
 async fn handle_text(
     core: &Shared,
+    daemon: &Daemon,
     conn: &mut Conn,
     tx: &mpsc::UnboundedSender<String>,
     token: Option<&str>,
     text: &str,
-) -> Option<String> {
+) -> (Option<String>, bool) {
     let v: Value = match serde_json::from_str(text) {
         Ok(v) => v,
-        Err(e) => return Some(response(&Value::Null, Err(RpcError { code: -32700, message: e.to_string() }))),
+        Err(e) => return (Some(response(&Value::Null, Err(RpcError { code: -32700, message: e.to_string() }))), false),
     };
     let id = v.get("id").cloned();
     let reply = |r: Result<Value, RpcError>| id.as_ref().map(|id| response(id, r));
     let Some(method) = v.get("method").and_then(Value::as_str) else {
-        return reply(Err(RpcError { code: -32600, message: "missing method".into() }));
+        return (reply(Err(RpcError { code: -32600, message: "missing method".into() })), false);
     };
     let req = match parse_request(method, v.get("params").cloned()) {
         Ok(r) => r,
         Err(e) => {
             let code = if METHODS.contains(&method) { -32602 } else { -32601 };
-            return reply(Err(RpcError { code, message: e }));
+            return (reply(Err(RpcError { code, message: e })), false);
         }
     };
     if !conn.authed && !matches!(req, Request::Hello(_)) {
-        return reply(Err(RpcError { code: -32001, message: "unauthorized: call session.hello with a token first".into() }));
+        let err = RpcError { code: -32001, message: "unauthorized: call session.hello with a token first".into() };
+        return (reply(Err(err)), false);
     }
+    let shutdown = matches!(req, Request::DaemonShutdown(_));
 
     let result = match req {
         Request::Hello(p) => hello(conn, token, p),
@@ -120,12 +139,21 @@ async fn handle_text(
             Ok(json!({}))
         }
         Request::RenderOffline(p) => render(core, p).await,
+        Request::DaemonInfo(_) => {
+            let mut info = (*daemon.info).clone();
+            info.uptime = daemon.started.elapsed().as_secs_f64();
+            Ok(serde_json::to_value(info).unwrap())
+        }
+        Request::DaemonShutdown(_) => {
+            tracing::info!("shutdown requested by {}", conn.name);
+            Ok(json!({}))
+        }
         other => {
             let mut c = core.lock().unwrap();
             c.handle(other, &conn.name)
         }
     };
-    reply(result)
+    (reply(result), shutdown)
 }
 
 fn hello(conn: &mut Conn, token: Option<&str>, p: HelloParams) -> Result<Value, RpcError> {

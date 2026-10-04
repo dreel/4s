@@ -6,12 +6,10 @@ cd "$(dirname "$0")/.."
 
 BIN=target/debug
 TMP=$(mktemp -d)
-trap 'kill $PID 2>/dev/null || true; rm -rf "$TMP"' EXIT
-
-"$BIN/4sd" --no-audio --no-midi --listen 127.0.0.1:0 --data-dir "$TMP/data" > "$TMP/out" 2> "$TMP/err" &
-PID=$!
-for _ in $(seq 50); do grep -q "ws://" "$TMP/out" 2>/dev/null && break; sleep 0.1; done
-export FOURS_URL=$(grep -o 'ws://[0-9.:]*' "$TMP/out")
+# The daemon is found through the runtime file in this data dir; no URL needed.
+export FOURS_DATA_DIR="$TMP/data"
+unset FOURS_URL
+trap '"$BIN/4s" daemon stop --force >/dev/null 2>&1 || true; rm -rf "$TMP"' EXIT
 s() { "$BIN/4s" "$@"; }
 pass=0
 check() { # check <description> <expected substring> <command...>
@@ -21,6 +19,11 @@ check() { # check <description> <expected substring> <command...>
   else echo "FAIL $desc"; echo "  wanted: $want"; echo "  got: $got"; exit 1; fi
 }
 
+check "not running yet" "4sd not running" s daemon status
+check "daemon start returns" "4sd started" s daemon start --no-audio --no-midi --listen 127.0.0.1:0
+check "second start is a no-op" "already running" s daemon start --no-audio --no-midi
+check "daemon status" "4sd running (pid $(python3 -c "import json;print(json.load(open('$FOURS_DATA_DIR/4sd.json'))['pid'])"))" s daemon status
+check "direct 4sd refused" "already running" "$BIN/4sd" --no-audio --no-midi --listen 127.0.0.1:0
 check "hello/status" "transport: stopped" s status
 check "set percent" "mixer.3.volume = 0.35" s set mixer.3.volume 35%
 check "get" "mixer.3.volume = 0.35" s get mixer.3.volume
@@ -47,5 +50,13 @@ check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project ne
 check "load restores" "kick        X--- x--- X--- x---" bash -c "$BIN/4s project load e2e >/dev/null && $BIN/4s pattern show kick"
 check "json output" '"value": 0.35' s --json get mixer.3.volume
 check "raw call" '"backend": "null"' s call engine.status
+check "daemon logs" "listening on ws://" s daemon logs
+check "daemon stop" "4sd stopped" s daemon stop
+check "runtime file removed" "absent" bash -c "test -e '$FOURS_DATA_DIR/4sd.json' && echo present || echo absent"
+check "stopped status" "4sd not running" s daemon status
+check "commands hint at start" "4s daemon start" s state
+check "restart from stopped" "4sd started" s daemon restart --no-audio --no-midi --listen 127.0.0.1:0
+check "project survives restart" "kind:" bash -c "$BIN/4s project load e2e >/dev/null && echo kind: ok"
+check "final stop" "4sd stopped" s daemon stop
 
 echo "all $pass checks passed"

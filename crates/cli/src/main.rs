@@ -5,19 +5,26 @@
 //! pages), matching how musicians count. The RPC API is 0-based.
 
 mod client;
+mod daemon_ctl;
 
 use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use client::Client;
+use daemon_ctl::StartArgs;
+use std::path::PathBuf;
 use fours_protocol::*;
 use serde_json::Value;
 
 #[derive(Parser)]
 #[command(name = "4s", version, about = "Control the 4S daemon (4sd)")]
 struct Cli {
-    /// Daemon URL.
-    #[arg(long, env = "FOURS_URL", default_value = concat!("ws://", "127.0.0.1:4440"), global = true)]
-    url: String,
+    /// Daemon URL. Default: the running daemon for --data-dir, else
+    /// ws://127.0.0.1:4440.
+    #[arg(long, env = "FOURS_URL", global = true)]
+    url: Option<String>,
+    /// Data directory of the local daemon (runtime file, logs). Default: ~/.4s
+    #[arg(long, env = "FOURS_DATA_DIR", global = true)]
+    data_dir: Option<PathBuf>,
     /// Auth token, if the daemon requires one.
     #[arg(long, env = "FOURS_TOKEN", global = true)]
     token: Option<String>,
@@ -98,10 +105,36 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ControllerCmd>,
     },
+    /// Start, stop, and inspect the background daemon.
+    Daemon {
+        #[command(subcommand)]
+        cmd: DaemonCmd,
+    },
     /// Call any RPC method with JSON params.
     Call { method: String, params: Option<String> },
     /// List all RPC methods.
     Methods,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum DaemonCmd {
+    /// Start 4sd in the background (no-op if already running).
+    Start(StartArgs),
+    /// Stop the daemon (graceful; --force kills it if it does not respond).
+    Stop {
+        #[arg(long)]
+        force: bool,
+    },
+    /// Show whether the daemon is running, and its pid, URL, and uptime.
+    /// Exits with code 3 when not running.
+    Status,
+    /// Stop (if running) and start again.
+    Restart(StartArgs),
+    /// Print the end of the daemon log.
+    Logs {
+        #[arg(short = 'n', long, default_value_t = 40)]
+        lines: usize,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -355,6 +388,12 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 follow,
             })],
         },
+        Cmd::Daemon { cmd } => match cmd {
+            DaemonCmd::Status => vec![Request::DaemonInfo(e.clone()), Request::EngineStatus(e)],
+            DaemonCmd::Stop { .. } => vec![Request::DaemonShutdown(e)],
+            // Local process management; no RPC.
+            DaemonCmd::Start(_) | DaemonCmd::Restart(_) | DaemonCmd::Logs { .. } => vec![],
+        },
         Cmd::Call { method, params } => {
             let p = params.as_deref().map(serde_json::from_str::<Value>).transpose()?;
             vec![parse_request(method, p).map_err(|e| anyhow!(e))?]
@@ -597,6 +636,118 @@ async fn main() {
     }
 }
 
+/// Explicit --url / FOURS_URL, else the local daemon's runtime file, else the
+/// default address -- but only for the default data dir. An explicitly chosen
+/// data dir with no daemon is an error, so commands never silently reach some
+/// other daemon on the default port.
+fn resolve_url(cli: &Cli, data_dir: &std::path::Path) -> Result<String> {
+    if let Some(u) = &cli.url {
+        return Ok(u.clone());
+    }
+    match daemon_ctl::live(data_dir) {
+        Some(info) => Ok(info.url),
+        None if cli.data_dir.is_some() => Err(anyhow!(
+            "no 4sd running for data dir {}\nhint: start the daemon with `4s daemon start`",
+            data_dir.display()
+        )),
+        None => Ok(format!("ws://{}", DEFAULT_LISTEN)),
+    }
+}
+
+async fn connect(cli: &Cli, url: &str) -> Result<Client> {
+    Client::connect(url, cli.token.clone(), "cli").await.map_err(|e| {
+        if cli.url.is_none() {
+            anyhow!("{e:#}\nhint: start the daemon with `4s daemon start`")
+        } else {
+            e
+        }
+    })
+}
+
+async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> Result<()> {
+    match cmd {
+        DaemonCmd::Start(args) => {
+            let (info, started) = daemon_ctl::start(data_dir, args, cli.token.as_deref())?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else if started {
+                println!("4sd started (pid {}) on {}", info.pid, info.url);
+            } else {
+                println!("4sd already running (pid {}) on {}", info.pid, info.url);
+            }
+        }
+        DaemonCmd::Stop { force } => {
+            let Some(info) = daemon_ctl::live(data_dir) else {
+                if cli.url.is_some() {
+                    // Remote daemon: we can only ask it to stop.
+                    let url = resolve_url(cli, data_dir)?;
+                    connect(cli, &url).await?.call(&Request::DaemonShutdown(Empty {})).await?;
+                    println!("shutdown requested");
+                } else {
+                    println!("4sd not running");
+                }
+                return Ok(());
+            };
+            let graceful = match Client::connect(&info.url, cli.token.clone(), "cli").await {
+                Ok(mut c) => c.call(&Request::DaemonShutdown(Empty {})).await.is_ok(),
+                Err(_) => false,
+            };
+            if !(graceful && daemon_ctl::wait_exit(info.pid, std::time::Duration::from_secs(5))) {
+                daemon_ctl::signal_stop(info.pid, *force)?;
+            }
+            let _ = daemon_ctl::live(data_dir); // clears a stale runtime file
+            println!("4sd stopped (pid {})", info.pid);
+        }
+        DaemonCmd::Status => {
+            if cli.url.is_none() && daemon_ctl::live(data_dir).is_none() {
+                if cli.json {
+                    println!("{{\"running\": false}}");
+                } else {
+                    println!("4sd not running (data dir {})", data_dir.display());
+                }
+                std::process::exit(3);
+            }
+            let url = resolve_url(cli, data_dir)?;
+            let mut client = connect(cli, &url).await?;
+            let info: DaemonInfo = serde_json::from_value(client.call(&Request::DaemonInfo(Empty {})).await?)?;
+            let audio: AudioStatus = serde_json::from_value(client.call(&Request::EngineStatus(Empty {})).await?)?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "running": true, "info": info, "audio": audio }))?);
+            } else {
+                println!("4sd running (pid {}) on {}", info.pid, info.url);
+                println!("version {} (protocol {}), up {}", info.version, info.protocol_version, daemon_ctl::format_uptime(info.uptime));
+                println!("audio: {} {} @ {} Hz", audio.backend, audio.device.as_deref().unwrap_or("-"), audio.sample_rate);
+                println!("data dir: {}", info.data_dir);
+                if let Some(l) = &info.log_file {
+                    println!("log: {l}");
+                }
+            }
+        }
+        DaemonCmd::Restart(args) => {
+            if let Some(info) = daemon_ctl::live(data_dir) {
+                if let Ok(mut c) = Client::connect(&info.url, cli.token.clone(), "cli").await {
+                    let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
+                }
+                if !daemon_ctl::wait_exit(info.pid, std::time::Duration::from_secs(5)) {
+                    daemon_ctl::signal_stop(info.pid, false)?;
+                }
+            }
+            let (info, _) = daemon_ctl::start(data_dir, args, cli.token.as_deref())?;
+            println!("4sd started (pid {}) on {}", info.pid, info.url);
+        }
+        DaemonCmd::Logs { lines } => {
+            let path = daemon_ctl::live(data_dir)
+                .and_then(|i| i.log_file.map(PathBuf::from))
+                .unwrap_or_else(|| daemon_ctl::log_path(data_dir));
+            if !path.exists() {
+                bail!("no log file at {}", path.display());
+            }
+            println!("{}", daemon_ctl::tail(&path, *lines));
+        }
+    }
+    Ok(())
+}
+
 async fn run(cli: Cli) -> Result<()> {
     if let Cmd::Methods = cli.cmd {
         for (m, doc) in METHOD_DOCS {
@@ -604,8 +755,13 @@ async fn run(cli: Cli) -> Result<()> {
         }
         return Ok(());
     }
+    let data_dir = cli.data_dir.clone().unwrap_or_else(daemon_ctl::default_data_dir);
+    if let Cmd::Daemon { cmd } = &cli.cmd {
+        return run_daemon(&cli, cmd, &data_dir).await;
+    }
     let reqs = plan(&cli.cmd)?;
-    let mut client = Client::connect(&cli.url, cli.token.clone(), "cli").await?;
+    let url = resolve_url(&cli, &data_dir)?;
+    let mut client = connect(&cli, &url).await?;
 
     let stream_count = match &cli.cmd {
         Cmd::Watch { count, .. } => Some(*count),
@@ -661,6 +817,7 @@ mod tests {
             "project save beat", "project load beat", "project list", "midi ports",
             "midi connect Block", "midi disconnect Block", "midi monitor", "controller",
             "controller press 1 1", "controller knob 1 50%", "controller mode --knobs tune",
+            "daemon status", "daemon stop",
         ];
         let mut covered: BTreeSet<&str> = commands.iter().flat_map(|c| methods_for(c)).collect();
         covered.insert("session.hello"); // sent by every command on connect

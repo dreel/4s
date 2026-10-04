@@ -36,6 +36,10 @@ Remote engine / collaboration
                             [MIDI gear]
 ```
 
+Lifecycle: a remote engine is managed by whoever runs the server; local
+clients use `external` mode and never start or stop it. See
+[lifecycle.md](lifecycle.md).
+
 ## Hub and spoke, not mesh
 
 - The engine is the single source of truth and the single clock.

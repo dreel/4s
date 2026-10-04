@@ -1433,6 +1433,40 @@
           "params"
         ],
         "type": "object"
+      },
+      {
+        "description": "Daemon identity: pid, version, URL, data dir, uptime.",
+        "properties": {
+          "method": {
+            "const": "daemon.info",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Shut the daemon down gracefully (responds first, then exits).",
+        "properties": {
+          "method": {
+            "const": "daemon.shutdown",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
       }
     ],
     "title": "Request"

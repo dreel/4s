@@ -647,7 +647,9 @@ impl Core {
             Request::Hello(_)
             | Request::EventsSubscribe(_)
             | Request::EventsUnsubscribe(_)
-            | Request::RenderOffline(_) => Err(RpcError::failed("handled by connection")),
+            | Request::RenderOffline(_)
+            | Request::DaemonInfo(_)
+            | Request::DaemonShutdown(_) => Err(RpcError::failed("handled by connection")),
         }
     }
 }

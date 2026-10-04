@@ -48,7 +48,8 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop`), pattern edits (`pattern.*`), auditioning
 (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`), projects
-(`project.*`), rendering (`render.offline`), and status (`engine.status`).
+(`project.*`), rendering (`render.offline`), status (`engine.status`), and the
+daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).
 
 ### Generic parameters
 

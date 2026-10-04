@@ -2,6 +2,7 @@
 export * from "./AudioStatus";
 export * from "./ControllerModeParams";
 export * from "./ControllerState";
+export * from "./DaemonInfo";
 export * from "./DeviceKind";
 export * from "./Empty";
 export * from "./Event";

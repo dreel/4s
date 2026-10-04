@@ -26,12 +26,17 @@ What exists today:
 - **Daemon** (`crates/daemon`): Livid Block LED/page logic and MIDI decoding.
 - **CLI** (`crates/cli`): every RPC method has a CLI command
   (`cli_covers_every_method`); 1-based numbering and value parsing.
-- **CLI e2e** (`scripts/e2e-cli.sh`): ~26 checks covering params, patterns,
-  virtual pads/knobs, transport events, offline render analysis, and project
-  save/load.
+- **CLI e2e** (`scripts/e2e-cli.sh`): ~39 checks covering the daemon
+  lifecycle (start/status/stop/restart, single instance, runtime-file
+  discovery, logs), params, patterns, virtual pads/knobs, transport events,
+  offline render analysis, and project save/load. Uses an isolated data dir
+  and random port.
 - **UI e2e** (`ui/e2e`): UI edits verified over RPC, RPC edits verified in the
   UI, transport, Block mirror, project round trip, render; writes
-  `ui/test-results/groove.png` for visual review.
+  `ui/test-results/groove.png` for visual review. Lifecycle tests: the app
+  starts and stops an owned daemon, an owned daemon exits when the app is
+  killed, a detached daemon survives the app, and an existing daemon is never
+  stopped.
 
 Not yet: golden renders, spectral checks, multi-daemon tests (no bridge yet),
 latency/jitter injection.

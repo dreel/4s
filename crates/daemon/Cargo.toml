@@ -16,6 +16,7 @@ clap.workspace = true
 cpal.workspace = true
 futures-util.workspace = true
 hound.workspace = true
+libc = "0.2"
 midir.workspace = true
 rtrb.workspace = true
 serde.workspace = true

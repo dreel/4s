@@ -3,7 +3,14 @@ import { Mixer } from "./components/Mixer";
 import { MidiPanel, ProjectPanel, RenderPanel } from "./components/Panels";
 import { Sequencer } from "./components/Sequencer";
 import { Transport } from "./components/Transport";
-import { app, client, useApp } from "./store";
+import { app, client, launch, useApp } from "./store";
+
+const LIFECYCLE_LABELS: Record<string, string> = {
+  connected: "using running daemon",
+  "started-owned": "daemon started by app (stops on quit)",
+  "started-detached": "daemon started in background",
+  external: "external daemon",
+};
 
 function Header() {
   const connection = useApp((s) => s.connection);
@@ -18,6 +25,9 @@ function Header() {
       <div className="flex items-center gap-2 text-xs text-zinc-400" data-testid="connection" data-state={connection}>
         <div className={`w-2 h-2 rounded-full ${color}`} />
         {connection} <span className="text-zinc-600">{client.url}</span>
+      </div>
+      <div className="text-xs text-zinc-500" data-testid="lifecycle" data-lifecycle={launch.lifecycle}>
+        {LIFECYCLE_LABELS[launch.lifecycle] ?? launch.lifecycle}
       </div>
       {audio && (
         <div className="text-xs text-zinc-500" data-testid="audio-status" title={audio.error ?? ""}>
@@ -40,7 +50,11 @@ export function App() {
     <div className="flex flex-col h-full">
       <Header />
       {!ready ? (
-        <div className="m-auto text-zinc-500 text-sm">waiting for 4sd at {client.url} ...</div>
+        <div className="m-auto flex flex-col items-center gap-2 text-sm text-zinc-500" data-testid="waiting">
+          <div>waiting for 4sd at {client.url} ...</div>
+          {launch.error && <div className="text-red-400" data-testid="daemon-error">{launch.error}</div>}
+          {launch.lifecycle === "external" && <div>start it with: 4s daemon start</div>}
+        </div>
       ) : (
         <main className="flex flex-col gap-3 p-4 overflow-auto *:shrink-0">
           <Transport />

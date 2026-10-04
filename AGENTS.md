@@ -30,6 +30,7 @@ and agents can drive and verify every part of it.
 - [RPC](docs/rpc.md) -- JSON-RPC over WebSocket, shared types, ts-rs codegen
 - [Project format](docs/project-format.md) -- JSON bundle, versioning, migrations
 - [Engine](docs/engine.md) -- voices, sequencer, mixer, parameter list
+- [Lifecycle](docs/lifecycle.md) -- starting/stopping the daemon; app, dev, and remote modes
 - [Topology](docs/topology.md) -- engine/bridge roles, remote and collaborative setups
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
@@ -38,13 +39,22 @@ and agents can drive and verify every part of it.
 
 ```
 cargo build                                  # target/debug/4sd and 4s
-target/debug/4sd                             # daemon on ws://127.0.0.1:4440 (default audio device)
-target/debug/4sd --no-audio --no-midi \
-  --listen 127.0.0.1:0 --data-dir /tmp/4s    # headless, random port (prints its URL)
-FOURS_URL=ws://... target/debug/4s state     # drive it; `4s --help`, `4s methods`
-(cd ui && npm install && npm start)          # Electron UI (FOURS_URL selects the daemon)
+target/debug/4s daemon start                 # background daemon on ws://127.0.0.1:4440
+target/debug/4s state                        # drive it; `4s --help`, `4s methods`
+target/debug/4s daemon stop
+
+# Isolated headless daemon for agent work (does not touch ~/.4s or port 4440):
+export FOURS_DATA_DIR=$(mktemp -d)
+target/debug/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0
+target/debug/4s state                        # found via the runtime file in FOURS_DATA_DIR
+target/debug/4s daemon stop
+
+(cd ui && npm install && npm start)          # Electron UI; starts a daemon if none is running
 scripts/check.sh                             # all tests: Rust, codegen, CLI e2e, Electron e2e
 ```
+
+- Prefer an isolated data dir and random port when testing, so you never
+  touch a daemon the user is running on the default port.
 
 - Changing anything in `crates/protocol`: run
   `cargo run -p fours-protocol --bin gen-bindings` and commit the generated
