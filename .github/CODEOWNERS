@@ -1,0 +1,8 @@
+# Changes here need the owner's review (enforced by branch protection).
+# They define the project's principles, its API, and the gates themselves.
+/AGENTS.md            @dreel
+/CONTRIBUTING.md      @dreel
+/docs/                @dreel
+/crates/protocol/     @dreel
+/.github/             @dreel
+/scripts/             @dreel

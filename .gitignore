@@ -17,3 +17,6 @@ playwright-report/
 .DS_Store
 .idea/
 .vscode/
+
+# Gate reports (scripts/gates.sh)
+.gates/
