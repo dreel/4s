@@ -17,6 +17,8 @@ and agents can drive and verify every part of it.
    by an agent: headless audio renders, a virtual controller, scripted UI tests.
 5. **Modular by design.** Instruments, mixer channels, effects, and MIDI devices
    are nodes in a graph; every parameter has a stable, addressable path.
+   (Today the engine is one fixed 8-voice drum kit; the instrument graph is
+   the target and needs an RFC first. See [extending](docs/extending.md).)
 6. **Network-transparent.** Never assume clients, controllers, or files share
    a machine with the engine. See [topology](docs/topology.md).
 7. **Docs evolve with the code.** These principles are a starting point; update
@@ -32,6 +34,7 @@ and agents can drive and verify every part of it.
 - [Engine](docs/engine.md) -- voices, sequencer, mixer, parameter list
 - [Lifecycle](docs/lifecycle.md) -- starting/stopping the daemon; app, dev, and remote modes
 - [Topology](docs/topology.md) -- engine/bridge roles, remote and collaborative setups
+- [Extending](docs/extending.md) -- recipes: drum voices, parameters, controllers, RPC/CLI/UI features
 - [Contributing](CONTRIBUTING.md) and [Gates](docs/gates.md) -- change classes, RFCs, and what every PR must prove
 - [RFCs](docs/rfcs/README.md) -- how big changes get approved before code is written
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing

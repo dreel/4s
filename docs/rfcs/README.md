@@ -7,7 +7,9 @@ routes audio, the real-time model, the protocol or sync model, lifecycle or
 topology, the project format, the UI's overall structure, the core
 principles, or the gates.
 
-Adding an instrument, a controller mapping, or fixing a bug does not need one.
+Adding or improving a drum voice, a parameter, a controller mapping, or
+fixing a bug does not need one. New instrument types do (see
+[extending.md](../extending.md#not-an-extension-needs-an-rfc)).
 
 ## Process
 
