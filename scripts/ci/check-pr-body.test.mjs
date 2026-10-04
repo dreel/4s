@@ -68,3 +68,13 @@ test("a verdict inside a comment does not count", () => {
   const b = body("fix", "<!-- gate-report -->\n<!-- VERDICT: pass -->\n");
   assert.match(run(b).errors.join(), /no independent review verdict/);
 });
+
+test("an RFC proposal PR does not need an already-accepted RFC", () => {
+  const b = body("arch", "RFC: this PR is the proposal, docs/rfcs/0007-instruments.md\n" + report());
+  const proposal = ["docs/rfcs/0007-instruments.md", "docs/rfcs/README.md"];
+  assert.deepEqual(run(b, { changedFiles: proposal }).errors, []);
+  // Touching anything outside docs/rfcs makes it an implementation PR again.
+  assert.match(run(b, { changedFiles: [...proposal, "crates/engine/src/engine.rs"] }).errors.join(), /0007: not on main/);
+  // Editing only the index is not a proposal.
+  assert.match(run(b, { changedFiles: ["docs/rfcs/README.md"] }).errors.join(), /0007: not on main/);
+});

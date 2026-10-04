@@ -31,9 +31,10 @@ function field(body, name) {
  * @param {string} p.headSha     PR head commit
  * @param {string} p.diffSha256  hash of scripts/ci/review-diff.sh base..head
  * @param {(num: string) => string | null} p.rfcStatus  status of RFC NNNN on main, or null if absent
+ * @param {string[]} [p.changedFiles]  files changed by the PR (to recognize RFC proposals)
  * @returns {{ errors: string[], warnings: string[] }}
  */
-export function checkBody({ body, headSha, diffSha256, rfcStatus }) {
+export function checkBody({ body, headSha, diffSha256, rfcStatus, changedFiles = [] }) {
   const errors = [];
   const warnings = [];
   body = body ?? "";
@@ -45,7 +46,13 @@ export function checkBody({ body, headSha, diffSha256, rfcStatus }) {
   if (classes.length !== 1) {
     errors.push(`G1: tick exactly one change class (found ${classes.length}): Fix, Extension, or Architecture / UX`);
   }
-  if (classes.includes("architecture")) {
+  // An RFC proposal (a PR that only adds or edits RFCs) is approved by being
+  // merged, so it cannot already be accepted on main.
+  const isRfcProposal =
+    changedFiles.length > 0 &&
+    changedFiles.every((f) => f.startsWith("docs/rfcs/")) &&
+    changedFiles.some((f) => /^docs\/rfcs\/\d{4}-[\w.-]+\.md$/.test(f) && !f.includes("/0000-"));
+  if (classes.includes("architecture") && !isRfcProposal) {
     const rfcs = [...new Set([...text.matchAll(/docs\/rfcs\/(\d{4})-[\w.-]+\.md/g)].map((m) => m[1]))].filter(
       (n) => n !== "0000",
     );
@@ -103,6 +110,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     headSha: process.env.HEAD_SHA ?? "",
     diffSha256: process.env.DIFF_SHA256 ?? "",
     rfcStatus: rfcStatusFromGit(process.env.RFC_REF ?? "origin/main"),
+    changedFiles: (process.env.CHANGED_FILES ?? "").split("\n").filter(Boolean),
   });
   for (const w of warnings) console.log(`::warning::${w}`);
   for (const e of errors) console.log(`::error::${e}`);
