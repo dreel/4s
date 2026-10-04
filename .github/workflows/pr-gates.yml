@@ -23,6 +23,10 @@ permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: pr-gates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   pr-gates:
     runs-on: ubuntu-latest
@@ -39,13 +43,7 @@ jobs:
             echo "::error::superseded: this run is for $EVENT_HEAD but the PR head is now $LIVE_HEAD; see the run for the latest commit"
             exit 1
           fi
-          HEAD_REPO=$(jq -r '.head.repo.full_name // empty' pr.json)
-          if [ -z "$HEAD_REPO" ]; then
-            echo "::error::the PR's head repository no longer exists"
-            exit 1
-          fi
           echo "HEAD_SHA=$EVENT_HEAD" >> "$GITHUB_ENV"
-          echo "HEAD_REPO=$HEAD_REPO" >> "$GITHUB_ENV"
           echo "BASE_REF=$(jq -r .base.ref pr.json)" >> "$GITHUB_ENV"
       # The checker, from the current tip of the (live) base branch.
       - uses: actions/checkout@v4
@@ -53,11 +51,11 @@ jobs:
           ref: ${{ env.BASE_REF }}
           path: base
           persist-credentials: false
-      # The PR's code at the live head commit, only to compute the diff hash
-      # and changed files. Nothing from it is executed.
+      # The PR's code at the head commit (fork commits are available in this
+      # repository via refs/pull/N/head), only to compute the diff hash and
+      # changed files. Nothing from it is executed.
       - uses: actions/checkout@v4
         with:
-          repository: ${{ env.HEAD_REPO }}
           ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0
           path: pr
@@ -70,8 +68,7 @@ jobs:
           TOOLS=$(cd base/scripts/ci && pwd)
           BASE_TIP=$(git -C base rev-parse HEAD)
           cd pr
-          # The base commit comes from this repository (a fork's own branch may be stale).
-          git fetch -q "https://github.com/${{ github.repository }}" "$BASE_TIP"
+          git fetch -q origin "$BASE_TIP"
           MERGE_BASE=$(git merge-base "$HEAD_SHA" "$BASE_TIP")
           export DIFF_SHA256=$("$TOOLS/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | shasum -a 256 | cut -d' ' -f1)
           export CHANGED_FILES=$(git diff --name-only --no-renames "$MERGE_BASE" "$HEAD_SHA")
