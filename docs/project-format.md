@@ -59,6 +59,17 @@ Projects live on the engine host. Load and save go through RPC using
 engine-side paths; clients never assume they can read the engine's disk (see
 [topology.md](topology.md)).
 
+- A plain name saves under the daemon's data dir:
+  `project.save {"path": "beat1"}` -> `~/.4s/projects/beat1.4s/project.json`
+  (data dir default `~/.4s`, see [lifecycle.md](lifecycle.md)).
+- Absolute paths are used as-is (`.4s` is appended if missing).
+- `project.list` lists bundles in `<data-dir>/projects/`.
+- The UI's Project panel shows the full path as a tooltip on the project name,
+  and a "show in Finder" (Explorer on Windows) button that opens the folder
+  with the bundle selected. `4s project reveal` does the same from the CLI
+  (`--no-open` just prints the path). Both are local desktop actions, only
+  available when the daemon runs on this machine.
+
 ## Presets
 
 Instrument and pattern presets use the same format, as subsets of a project

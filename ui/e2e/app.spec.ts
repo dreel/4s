@@ -96,6 +96,30 @@ test("project save and reload round trip through the UI", async () => {
   await expect(page.getByTestId("tempo-input")).toHaveValue("133");
 });
 
+test("show-in-Finder button reveals the saved project bundle", async () => {
+  const { app, page, rpc } = h;
+  // Record reveals instead of opening real Finder windows.
+  await app.evaluate(({ shell }) => {
+    (globalThis as { revealed?: string[] }).revealed = [];
+    shell.showItemInFolder = (p: string) => {
+      (globalThis as { revealed?: string[] }).revealed!.push(p);
+    };
+  });
+  await expect(page.getByTestId("project-reveal")).toBeDisabled();
+
+  await page.getByTestId("project-path").fill("reveal-me");
+  await page.getByTestId("project-save").click();
+  await expect(page.getByTestId("project-name")).toHaveText("reveal-me.4s");
+  await expect(page.getByTestId("project-reveal")).toBeEnabled();
+  await page.getByTestId("project-reveal").click();
+
+  const saved = (await rpc("state.get", {})).project.path!;
+  expect(saved).toMatch(/projects\/reveal-me\.4s$/);
+  await expect
+    .poll(() => app.evaluate(() => (globalThis as { revealed?: string[] }).revealed))
+    .toEqual([saved]);
+});
+
 test("offline render from the UI reports detected hits", async () => {
   const { page } = h;
   for (const s of [0, 4, 8, 12]) await page.getByTestId(`step-kick-${s}`).click();

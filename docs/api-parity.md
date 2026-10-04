@@ -18,6 +18,14 @@ Example -- "set mixer channel 3 volume to 35%":
 See [rpc.md](rpc.md) for the protocol and how parity is enforced
 mechanically (shared types, codegen checks, CLI coverage tests).
 
+## Exception: local desktop actions
+
+A few UI actions act on the user's own machine rather than on daemon state --
+currently "show in Finder" for the project bundle. These are not RPCs (the
+daemon may be remote, and the action is meaningless there). The CLI still
+mirrors them as local commands (`4s project reveal`), so agents and humans keep
+the same capabilities.
+
 ## Why
 
 - **Agents can do anything a human can.** The CLI is the agentic interface, so

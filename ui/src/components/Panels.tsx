@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import type { DeviceKind } from "../generated/DeviceKind";
 import type { MidiPortsResult } from "../generated/MidiPortsResult";
 import type { RenderResult } from "../generated/RenderResult";
-import { act, client, useApp } from "../store";
+import { canReveal, desktop, revealLabel } from "../desktop";
+import { act, app, client, useApp } from "../store";
 
 const panel = "flex flex-col gap-2 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 text-xs min-w-0";
 const btn = "px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 bg-zinc-900 disabled:opacity-40";
@@ -76,15 +77,33 @@ export function ProjectPanel() {
   useEffect(() => {
     void refresh();
   }, [project?.path]);
-  const name = (p: string) => p.split("/").pop() ?? p;
+  const name = (p: string) => p.split(/[\\/]/).pop() ?? p;
+  const reveal = async () => {
+    if (!project?.path || !desktop) return;
+    const r = await desktop.revealPath(project.path);
+    if (!r.ok) app.set({ error: r.error ?? "could not reveal project" });
+  };
   return (
     <section className={panel} data-testid="project-panel">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="text-zinc-500">Project</span>
-        <span data-testid="project-name" className="text-zinc-300 truncate">
-          {project?.path ? name(project.path) : "untitled"}
-          {project?.dirty ? " *" : ""}
-        </span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span data-testid="project-name" className="text-zinc-300 truncate" title={project?.path ?? "not saved yet"}>
+            {project?.path ? name(project.path) : "untitled"}
+            {project?.dirty ? " *" : ""}
+          </span>
+          {canReveal() && (
+            <button
+              className={`${btn} shrink-0`}
+              data-testid="project-reveal"
+              disabled={!project?.path}
+              title={project?.path ? project.path : "save the project first"}
+              onClick={() => void reveal()}
+            >
+              {revealLabel()}
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex gap-1">
         <input

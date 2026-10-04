@@ -11,7 +11,7 @@
 // Other knobs: FOURS_URL, FOURS_DATA_DIR, FOURSD_BIN, FOURSD_ARGS (extra
 // daemon flags, e.g. "--no-audio --no-midi" for tests).
 
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -145,7 +145,11 @@ async function main() {
     height: 940,
     backgroundColor: "#09090b",
     title: "4S",
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, "preload.cjs"),
+    },
   });
   const query = { daemon: url, lifecycle, ...(error ? { daemonError: error } : {}) };
   const devUrl = process.env.FOURS_UI_DEV_URL;
@@ -163,6 +167,16 @@ async function main() {
     }
   });
 }
+
+// Reveal a local file or folder in Finder / Explorer / the file manager.
+// Only for paths on this machine (the renderer hides the button when the
+// daemon is remote, but check anyway).
+ipcMain.handle("reveal-path", (_event, p) => {
+  if (typeof p !== "string" || !path.isAbsolute(p)) return { ok: false, error: "not an absolute path" };
+  if (!fs.existsSync(p)) return { ok: false, error: `not found on this machine: ${p}` };
+  shell.showItemInFolder(p);
+  return { ok: true, error: null };
+});
 
 app.on("window-all-closed", () => app.quit());
 main();

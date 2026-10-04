@@ -172,6 +172,13 @@ enum ProjectCmd {
     Load { path: String },
     /// List saved projects.
     List,
+    /// Print the current project's location and show it in Finder/Explorer
+    /// (local daemon only).
+    Reveal {
+        /// Only print the path.
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -347,6 +354,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             ProjectCmd::Save { path } => vec![Request::ProjectSave(ProjectSaveParams { path: path.clone() })],
             ProjectCmd::Load { path } => vec![Request::ProjectLoad(ProjectLoadParams { path: path.clone() })],
             ProjectCmd::List => vec![Request::ProjectList(e)],
+            ProjectCmd::Reveal { .. } => vec![Request::StateGet(e)],
         },
         Cmd::Midi { cmd } => match cmd {
             MidiCmd::Ports => vec![Request::MidiPorts(e)],
@@ -612,6 +620,37 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
     Ok(())
 }
 
+/// Local desktop action (not an RPC): show the project bundle in the OS file
+/// manager. Only possible when the daemon -- and so the file -- is on this
+/// machine.
+fn reveal_project(snap: &Snapshot, url: &str, no_open: bool) -> Result<()> {
+    let Some(path) = &snap.project.path else {
+        bail!("project is not saved yet; save it first with `4s project save NAME`");
+    };
+    println!("{path}");
+    if no_open {
+        return Ok(());
+    }
+    let host = url.trim_start_matches("ws://").trim_start_matches("wss://");
+    let local = ["127.0.0.1", "localhost", "[::1]"].iter().any(|h| host.starts_with(h));
+    if !local {
+        bail!("the project is on the engine host ({url}), not this machine");
+    }
+    if !std::path::Path::new(path).exists() {
+        bail!("not found on this machine: {path}");
+    }
+    let status = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg("-R").arg(path).status()
+    } else if cfg!(windows) {
+        std::process::Command::new("explorer").arg(format!("/select,{path}")).status()
+    } else {
+        let dir = std::path::Path::new(path).parent().unwrap_or(std::path::Path::new("/"));
+        std::process::Command::new("xdg-open").arg(dir).status()
+    };
+    status.map_err(|e| anyhow!("could not open the file manager: {e}"))?;
+    Ok(())
+}
+
 /// Join param.list with current values: `[{info, value}]`.
 fn params_json(results: &[Value]) -> Result<Value> {
     let list: ParamListResult = serde_json::from_value(results[0].clone())?;
@@ -827,6 +866,10 @@ async fn run(cli: Cli) -> Result<()> {
     let mut results = Vec::new();
     for r in &reqs {
         results.push(client.call(r).await?);
+    }
+    if let Cmd::Project { cmd: ProjectCmd::Reveal { no_open } } = &cli.cmd {
+        let snap: Snapshot = serde_json::from_value(results.remove(0))?;
+        return reveal_project(&snap, &url, *no_open);
     }
     if results.is_empty() {
         bail!("nothing to do");

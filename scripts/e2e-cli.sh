@@ -45,7 +45,9 @@ check "play" "playing" s play
 check "playhead events" "playhead" s watch --type playhead --count 2
 check "stop" "stopped" s stop
 check "render: onsets match distinct hit times" "triggers: 9  detected onsets: 5" s render --bars 1 --out renders/e2e.wav
+check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e
+check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project reveal --no-open
 check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
 check "load restores" "kick        X--- x--- X--- x---" bash -c "$BIN/4s project load e2e >/dev/null && $BIN/4s pattern show kick"
 check "json output" '"value": 0.35' s --json get mixer.3.volume
