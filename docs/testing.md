@@ -61,9 +61,9 @@ If there is no good answer, don't write it. The tests removed under RFC
 0002 are examples: `led_diff`, `decode_default_map`, `uptime_format`,
 `voice_parse`, `methods_unique`, `values_and_numbering`, and `mute_and_solo`
 (which duplicated the e2e render checks and could not catch the load leak).
-Removing `decode_default_map` first dropped MIDI knob decoding coverage; the
-independent review caught it and the `virtual_block` e2e now turns a knob.
-When you delete a test, check the e2e really covers the same path.
+When you delete a test, check that an e2e test really covers the same path,
+and that the e2e check can actually fail (an expected substring like `= 0`
+also matches `= 0.4`).
 
 ## Bug fixes
 

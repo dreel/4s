@@ -60,8 +60,10 @@ echo "pad 0 2" >&7
 echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
 sleep 0.5
 check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
-echo "knob 1 0" >&7; sleep 0.5   # knob 2 (CC 2) in decay mode -> snare decay
-check "knob turn from device sets its parameter" "drums.snare.decay = 0" s get drums.snare.decay
+# Knob 2 (CC 2) in decay mode -> snare decay. 127 -> 1.0, which the default
+# (0.4) cannot match.
+echo "knob 1 127" >&7; sleep 0.5
+check "knob turn from device sets its parameter" "drums.snare.decay = 1" s get drums.snare.decay
 check "device receives LED updates" "recv 90 02 7F" cat "$TMP/vdev.out"
 exec 7>&-; sleep 3
 check "unplugged device pruned" "(none)" s midi ports
