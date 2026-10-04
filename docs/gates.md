@@ -88,7 +88,10 @@ VERDICT: pass | changes-requested | needs-rfc
 Only `VERDICT: pass` passes the gate. Address the findings and run it again.
 If you disagree with a finding, say so in the PR. The human reviewer decides.
 
-- Default agent: Claude Code (`claude -p`). To use another agent, set
+- Default agent: Claude Code (`claude -p`, a new process with no
+  conversation or session context). With `ANTHROPIC_API_KEY` set it also runs
+  `--bare`, which skips personal memory, hooks, and plugins; with the
+  interactive login, your user-level instructions may still load. To use another agent, set
   `REVIEW_CMD` to a command that reads the prompt on stdin and prints the
   review, e.g. `REVIEW_CMD="my-agent --read-only --prompt-stdin"`. It must
   start with no prior context.

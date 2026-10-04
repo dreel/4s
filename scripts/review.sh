@@ -65,7 +65,12 @@ else
     echo "review.sh: 'claude' not found; install Claude Code or set REVIEW_CMD" >&2
     exit 2
   }
-  claude -p --no-session-persistence \
+  # --bare also skips personal memory, hooks, and plugins, but needs an API
+  # key (it does not use the interactive login). Without it the session still
+  # starts with no conversation context.
+  BARE=()
+  [[ -n ${ANTHROPIC_API_KEY:-} ]] && BARE=(--bare)
+  claude -p ${BARE[@]+"${BARE[@]}"} --no-session-persistence \
     --allowedTools "Read" "Grep" "Glob" "Bash(git log:*)" "Bash(git show:*)" "Bash(git diff:*)" \
     --disallowedTools "Edit" "Write" "NotebookEdit" "WebFetch" "WebSearch" \
     < "$PROMPT" > "$OUT"
