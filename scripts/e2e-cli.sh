@@ -33,6 +33,7 @@ check "clamp" "transport.tempo = 300" s tempo 9999
 check "tempo" "transport.tempo = 120" s tempo 120
 check "negative value" "mixer.1.pan = -0.5" s set mixer.1.pan -0.5
 check "unknown param" "unknown parameter" s set nope 1
+check "invalid value" "invalid value 'loud'" s set mixer.1.volume loud
 check "pattern set" "kick        X--- x--- X--- x---" s pattern set kick "X---x---X---x---"
 check "leading hyphen" "snare       ---- x--- ---- x---" s pattern set snare "----x-------x---"
 check "toggle" "clap step 13 = on" s pattern toggle clap 13
@@ -77,12 +78,12 @@ check "stop" "stopped" s stop
 check "render: onsets match distinct hit times" "triggers: 9  detected onsets: 5" s render --bars 1 --out renders/e2e.wav
 # Mute and solo are audible, not just stored: the kick still triggers but its
 # step-9 hit (where nothing else plays) disappears from the audio.
-s set mixer.1.mute on >/dev/null
+check "mute kick" "mixer.1.mute = 1" s set mixer.1.mute on
 check "mute removes kick from the audio" "triggers: 9  detected onsets: 4" s render --bars 1 --out renders/mute.wav
-s set mixer.1.mute off >/dev/null
-s set mixer.8.solo on >/dev/null
+check "unmute kick" "mixer.1.mute = 0" s set mixer.1.mute off
+check "solo cowbell" "mixer.8.solo = 1" s set mixer.8.solo on
 check "solo leaves only the cowbell" "triggers: 9  detected onsets: 1" s render --bars 1 --out renders/solo.wav
-s set mixer.8.solo off >/dev/null
+check "unsolo cowbell" "mixer.8.solo = 0" s set mixer.8.solo off
 check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e
 check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project reveal --no-open
