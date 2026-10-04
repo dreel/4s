@@ -2,13 +2,18 @@
 # accepted RFC for architecture/UX changes, and include a passing independent
 # review that covers the PR's code. See docs/gates.md.
 #
-# Everything is read live at run time, so edits and "Re-run" always check the
-# current PR against the current rules:
-# - the checker comes from the tip of the base branch (not the PR's recorded
-#   base.sha, which GitHub does not advance when main moves), so a PR cannot
-#   change the rules it is checked against and picks up fixes to them;
-# - the PR description and head commit come from the API, not the event
-#   payload (which re-runs replay unchanged).
+# Runs check the PR against the current rules:
+# - the checker scripts come from the tip of the base branch (not the PR's
+#   recorded base.sha, which GitHub does not advance when main moves), so a
+#   PR's own copies of the scripts are never used, and fixes to the rules
+#   reach open PRs. (This workflow file itself is taken from the PR's merge
+#   commit, as for any pull_request workflow; CODEOWNERS on /.github/ is the
+#   backstop for edits to it.)
+# - the PR description is read from the API at run time, because re-runs
+#   replay the original event payload;
+# - the commit checked is the event's head commit (the one this check is
+#   attached to); if the PR has moved on, the run fails as superseded.
+# - RFC statuses are read from main.
 name: pr-gates
 on:
   pull_request:
@@ -28,8 +33,19 @@ jobs:
         run: |
           gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" > pr.json
           jq -r '.body // ""' pr.json > body.md
-          echo "HEAD_SHA=$(jq -r .head.sha pr.json)" >> "$GITHUB_ENV"
-          echo "HEAD_REPO=$(jq -r .head.repo.full_name pr.json)" >> "$GITHUB_ENV"
+          LIVE_HEAD=$(jq -r .head.sha pr.json)
+          EVENT_HEAD="${{ github.event.pull_request.head.sha }}"
+          if [ "$LIVE_HEAD" != "$EVENT_HEAD" ]; then
+            echo "::error::superseded: this run is for $EVENT_HEAD but the PR head is now $LIVE_HEAD; see the run for the latest commit"
+            exit 1
+          fi
+          HEAD_REPO=$(jq -r '.head.repo.full_name // empty' pr.json)
+          if [ -z "$HEAD_REPO" ]; then
+            echo "::error::the PR's head repository no longer exists"
+            exit 1
+          fi
+          echo "HEAD_SHA=$EVENT_HEAD" >> "$GITHUB_ENV"
+          echo "HEAD_REPO=$HEAD_REPO" >> "$GITHUB_ENV"
           echo "BASE_REF=$(jq -r .base.ref pr.json)" >> "$GITHUB_ENV"
       # The checker, from the current tip of the (live) base branch.
       - uses: actions/checkout@v4
@@ -60,7 +76,8 @@ jobs:
           export DIFF_SHA256=$("$TOOLS/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | shasum -a 256 | cut -d' ' -f1)
           export CHANGED_FILES=$(git diff --name-only --no-renames "$MERGE_BASE" "$HEAD_SHA")
           export PR_BODY="$(cat ../body.md)"
-          echo "PR head $HEAD_SHA; checker and RFC statuses from $BASE_REF @ ${BASE_TIP:0:7}"
-          # RFC statuses are read from the base checkout (the current main).
+          echo "PR head $HEAD_SHA; checker from $BASE_REF @ ${BASE_TIP:0:7}"
+          # RFC statuses are read from the current main.
           cd ../base
-          RFC_REF=HEAD node "$TOOLS/check-pr-body.mjs"
+          git fetch -q "https://github.com/${{ github.repository }}" main
+          RFC_REF=FETCH_HEAD node "$TOOLS/check-pr-body.mjs"
