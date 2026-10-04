@@ -108,7 +108,7 @@ Without it, the workflow posts a note and does nothing.
 ## Validation plan
 
 After merge, on a live PR:
-- the sticky comment appears with `REVIEWER: muse/muse-spark-1.3-contributor`
+- the sticky comment appears with `Reviewer: muse/muse-spark-1.3-contributor`
   and SHA lines matching the head;
 - a new push updates the comment rather than adding a second one;
 - the key is absent from logs and comments.

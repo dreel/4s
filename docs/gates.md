@@ -115,7 +115,9 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
   - Volume: it runs automatically for authors who already have standing in
     the repository. For first-time contributors, and for diffs over 4000
     lines (excluding generated code), a maintainer runs it by adding the
-    `agent-review` label. Adding the label also forces a re-run.
+    `agent-review` label. To force a re-run when the label is already on,
+    remove it and add it again. A skipped run posts "Not reviewed" and its
+    check stays green, so green without a verdict does not mean reviewed.
   - Isolation: the reviewer instructions and scripts come from the current
     base branch, and the reviewer is instructed to judge against the base
     branch's principles and docs (`REVIEW_DOCS_ROOT`). It can only read

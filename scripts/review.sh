@@ -16,7 +16,10 @@
 #                       CI uses the copy from main)
 #   REVIEW_DOCS_ROOT    read principles/docs from this checkout instead of the
 #                       one under review (CI: the base branch)
-# Writes .gates/review-<sha>.md. Exit 0 only on VERDICT: pass.
+#   REVIEW_MAX_TURNS    cap on agent turns (default 40)
+# Writes .gates/review-<sha>.md.
+# Exit: 0 VERDICT: pass; 1 any other verdict; 3 invalid review output (wrong or
+# missing REVIEWED_SHA / DIFF_SHA256 / VERDICT); 2 usage or setup error.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -73,7 +76,7 @@ PROVIDER=${REVIEW_PROVIDER:-claude}
 echo "==> independent review of $HEAD (diff $HASH)" >&2
 if [[ -n ${REVIEW_CMD:-} ]]; then
   REVIEWER="custom ($REVIEW_CMD)"
-  bash -c "$REVIEW_CMD" < "$PROMPT" > "$OUT"
+  bash -c "$REVIEW_CMD" < "$PROMPT" > "$OUT.tmp"
 else
   command -v claude >/dev/null || {
     echo "review.sh: 'claude' (the Claude Code CLI, used as the review harness) not found; install it or set REVIEW_CMD" >&2
@@ -84,7 +87,8 @@ else
   # reviewer permissions via .claude/settings.json), and confines file tools
   # to the working directories. --bare additionally skips memory, hooks, and
   # plugins; it needs key-based auth (not the interactive login).
-  FLAGS=(--restricted --strict-mcp-config --disable-slash-commands --tools Read Grep Glob --no-session-persistence)
+  FLAGS=(--restricted --strict-mcp-config --disable-slash-commands --tools Read Grep Glob --no-session-persistence
+    --max-turns "${REVIEW_MAX_TURNS:-40}")
   [[ -n ${REVIEW_DOCS_ROOT:-} ]] && FLAGS+=(--add-dir "$REVIEW_DOCS_ROOT")
   ENV=()
   case $PROVIDER in
@@ -118,15 +122,15 @@ else
       ;;
   esac
   env ${ENV[@]+"${ENV[@]}"} claude -p "${FLAGS[@]}" < "$PROMPT" > "$OUT.tmp"
-  { echo "Reviewer: $REVIEWER"; echo; cat "$OUT.tmp"; } > "$OUT"
-  rm -f "$OUT.tmp"
 fi
+{ echo "Reviewer: $REVIEWER"; echo; cat "$OUT.tmp"; } > "$OUT"
+rm -f "$OUT.tmp"
 
 field() { grep -E "^$1:" "$OUT" | tail -1 | sed -E "s/^$1:[[:space:]]*//" | tr -d '[:space:]'; }
 VERDICT=$(field VERDICT)
 if [[ $(field REVIEWED_SHA) != "$HEAD" || $(field DIFF_SHA256) != "$HASH" || -z $VERDICT ]]; then
   echo "review.sh: review output is missing or has wrong REVIEWED_SHA/DIFF_SHA256/VERDICT lines; see $OUT" >&2
-  exit 1
+  exit 3
 fi
 echo "==> VERDICT: $VERDICT ($OUT)" >&2
-[[ $VERDICT == pass ]]
+[[ $VERDICT == pass ]] || exit 1

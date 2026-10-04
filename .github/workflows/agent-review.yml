@@ -122,11 +122,21 @@ jobs:
           {
             if [ -f "$OUT" ]; then cat "$OUT"; else echo "The review produced no output (exit $STATUS); see the workflow log."; fi
           } | perl -pe 's/\Q$ENV{META_API_KEY}\E/[redacted]/g' > ../review.md
-          VERDICT=$(grep -E '^VERDICT:' ../review.md | tail -1 | sed -E 's/^VERDICT:[[:space:]]*//' | tr -d '[:space:]')
-          echo "verdict=${VERDICT:-none}" >> "$GITHUB_OUTPUT"
+          # Trust review.sh's integrity check (reviewed SHA and diff hash), not
+          # just the text: 0 pass, 1 another valid verdict, 3 invalid output,
+          # 124 timeout.
+          RAW=$(grep -E '^VERDICT:' ../review.md | tail -1 | sed -E 's/^VERDICT:[[:space:]]*//' | tr -d '[:space:]' || true)
+          case $STATUS in
+            0) VERDICT=pass ;;
+            1) VERDICT=${RAW:-none} ;;
+            3) VERDICT=invalid ;;
+            124) VERDICT=timeout ;;
+            *) VERDICT=error ;;
+          esac
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
 
       - name: Post or update the review comment
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           SKIP: ${{ steps.decide.outputs.skip }}${{ steps.diff.outputs.skip }}
@@ -138,7 +148,7 @@ jobs:
             echo "### Independent agent review (CI)"
             echo
             if [ -n "$SKIP" ]; then
-              echo "$SKIP"
+              echo "**Not reviewed.** $SKIP"
             else
               echo "Commit \`$HEAD_SHA\` - verdict: **${VERDICT:-none}**. Reviewer instructions and principles from the current \`$BASE_REF\`."
               echo
