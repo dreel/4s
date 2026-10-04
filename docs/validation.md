@@ -19,7 +19,7 @@ What exists today:
 
 - **Engine** (`crates/engine`): every voice sounds and decays to silence;
   sequencer triggers land within 2 samples of the expected time; swing timing;
-  mute/solo; offline render onsets match sequencer triggers, including dense
+  offline render onsets match sequencer triggers, including dense
   mixed patterns and long tails that must not re-trigger.
 - **Protocol** (`crates/protocol`): wire formats, project file round trip,
   v1 fixture loads, future versions rejected.
@@ -27,7 +27,7 @@ What exists today:
   inversion.
 - **CLI** (`crates/cli`): every RPC method has a CLI command
   (`cli_covers_every_method`); stale runtime-file handling.
-- **CLI e2e** (`scripts/e2e-cli.sh`): ~39 checks covering the daemon
+- **CLI e2e** (`scripts/e2e-cli.sh`): checks covering the daemon
   lifecycle (start/status/stop/restart, single instance, runtime-file
   discovery, logs), params, patterns, virtual pads/knobs, transport events,
   offline render analysis (including that mute and solo are audible),

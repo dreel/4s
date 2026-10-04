@@ -358,22 +358,4 @@ mod tests {
         assert!((times[1] - 0.1875).abs() < 1e-3, "{times:?}");
         assert!((times[2] - 0.25).abs() < 1e-3, "{times:?}");
     }
-
-    #[test]
-    fn mute_and_solo() {
-        let mut e = Engine::new(48000);
-        let mut fb = vec![];
-        e.apply(Command::SetParam { id: mixer_param(0, MixerParam::Mute), value: 1.0 }, &mut |_| {});
-        render_secs(&mut e, 0.2, &mut fb); // let gain smoother settle
-        e.apply(Command::Trigger { track: 0, velocity: 1.0 }, &mut |_| {});
-        let out = render_secs(&mut e, 0.1, &mut fb);
-        assert!(out.iter().all(|x| x.abs() < 1e-3), "muted kick should be silent");
-
-        let mut e = Engine::new(48000);
-        e.apply(Command::SetParam { id: mixer_param(1, MixerParam::Solo), value: 1.0 }, &mut |_| {});
-        render_secs(&mut e, 0.2, &mut fb);
-        e.apply(Command::Trigger { track: 0, velocity: 1.0 }, &mut |_| {});
-        let out = render_secs(&mut e, 0.1, &mut fb);
-        assert!(out.iter().all(|x| x.abs() < 1e-3), "non-soloed kick should be silent");
-    }
 }

@@ -38,6 +38,7 @@ check "leading hyphen" "snare       ---- x--- ---- x---" s pattern set snare "--
 check "toggle" "clap step 13 = on" s pattern toggle clap 13
 check "accent" "cowbell step 16 = accent" s pattern step cowbell 16 accent
 check "step range" "step must be 1..64" s pattern step kick 65 on
+check "steps are 1-based" "step must be 1..64" s pattern step kick 0 on
 check "virtual pad" "#" s controller press 2 1
 check "pad edited pattern" "snare       x--- x---" s pattern show snare
 check "knob mode" "knobs: Decay" s controller mode --knobs decay
@@ -55,8 +56,12 @@ for _ in $(seq 30); do s midi ports | grep -q "$VDEV" && break; sleep 0.1; done
 check "hotplugged device listed" "$VDEV" s midi ports
 check "connect virtual block" "$VDEV (LividBlock)" s midi connect "$VDEV" --kind block
 s pattern clear kick >/dev/null
-echo "pad 0 2" >&7; sleep 0.5
-check "pad press from device edits pattern" "kick        --x- ---- ---- ----" s pattern show kick
+echo "pad 0 2" >&7
+echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
+sleep 0.5
+check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
+echo "knob 1 0" >&7; sleep 0.5   # knob 2 (CC 2) in decay mode -> snare decay
+check "knob turn from device sets its parameter" "drums.snare.decay = 0" s get drums.snare.decay
 check "device receives LED updates" "recv 90 02 7F" cat "$TMP/vdev.out"
 exec 7>&-; sleep 3
 check "unplugged device pruned" "(none)" s midi ports
@@ -67,7 +72,7 @@ check "playhead events" "playhead" s watch --type playhead --count 2
 check "stop" "stopped" s stop
 check "render: onsets match distinct hit times" "triggers: 9  detected onsets: 5" s render --bars 1 --out renders/e2e.wav
 # Mute and solo are audible, not just stored: the kick still triggers but its
-# step-8 hit (where nothing else plays) disappears from the audio.
+# step-9 hit (where nothing else plays) disappears from the audio.
 s set mixer.1.mute on >/dev/null
 check "mute removes kick from the audio" "triggers: 9  detected onsets: 4" s render --bars 1 --out renders/mute.wav
 s set mixer.1.mute off >/dev/null
