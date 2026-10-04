@@ -1,6 +1,14 @@
 # G1/G4 evidence: the PR description must classify the change, link an
 # accepted RFC for architecture/UX changes, and include a passing independent
 # review that covers the PR's code. See docs/gates.md.
+#
+# Everything is read live at run time, so edits and "Re-run" always check the
+# current PR against the current rules:
+# - the checker comes from the tip of the base branch (not the PR's recorded
+#   base.sha, which GitHub does not advance when main moves), so a PR cannot
+#   change the rules it is checked against and picks up fixes to them;
+# - the PR description and head commit come from the API, not the event
+#   payload (which re-runs replay unchanged).
 name: pr-gates
 on:
   pull_request:
@@ -8,52 +16,45 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   pr-gates:
     runs-on: ubuntu-latest
     steps:
-      # The PR's code, only to compute the diff hash. Nothing from it is executed.
+      - name: Fetch the PR as it is now
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" > pr.json
+          jq -r '.body // ""' pr.json > body.md
+          echo "HEAD_SHA=$(jq -r .head.sha pr.json)" >> "$GITHUB_ENV"
+          echo "BASE_REF=$(jq -r .base.ref pr.json)" >> "$GITHUB_ENV"
+      # The checker, from the current tip of the base branch.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+          persist-credentials: false
+      # The PR's code, only to compute the diff hash and changed files.
+      # Nothing from it is executed.
+      - uses: actions/checkout@v4
+        with:
           fetch-depth: 0
           path: pr
-          persist-credentials: false
-      # The checker itself comes from the base branch, so a PR cannot change
-      # the rules it is checked against.
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: base
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Check PR description
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          # Bootstrap only: until the gate tooling is on main, the PR that adds it
-          # uses its own copy. Any other base without the tooling fails.
-          TOOLS=base/scripts/ci
-          if [ ! -f "$TOOLS/check-pr-body.mjs" ]; then
-            if [ "$BASE_REF" = main ] && [ -f pr/scripts/ci/check-pr-body.mjs ]; then
-              echo "::warning::bootstrap: gate tooling not on main yet; using this PR's copy"
-              TOOLS=pr/scripts/ci
-            else
-              echo "::error::gate tooling missing on base branch $BASE_REF"
-              exit 1
-            fi
-          fi
-          TOOLS=$(cd "$TOOLS" && pwd)
+          TOOLS=$(cd base/scripts/ci && pwd)
           cd pr
-          git fetch -q origin "$BASE_SHA" main
-          MERGE_BASE=$(git merge-base "$HEAD_SHA" "$BASE_SHA")
+          git fetch -q origin "pull/${{ github.event.pull_request.number }}/head" "$BASE_REF"
+          MERGE_BASE=$(git merge-base "$HEAD_SHA" "origin/$BASE_REF")
           export DIFF_SHA256=$("$TOOLS/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | shasum -a 256 | cut -d' ' -f1)
-          export RFC_REF=origin/main
           export CHANGED_FILES=$(git diff --name-only --no-renames "$MERGE_BASE" "$HEAD_SHA")
+          export RFC_REF=origin/main
+          export PR_BODY="$(cat ../body.md)"
+          echo "PR head $HEAD_SHA; checker from $BASE_REF @ $(git -C ../base rev-parse --short HEAD)"
           node "$TOOLS/check-pr-body.mjs"
