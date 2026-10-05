@@ -5,6 +5,9 @@
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC. Merging it with
   `Status: accepted` is the maintainer's approval.
+- Amended: 2026-10-04, maintainer decisions before implementation; see
+  "Amendment: maintainer decisions" at the end. Where it differs from the
+  sections above, the amendment wins.
 
 ## Summary
 
@@ -269,11 +272,12 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 | `channel.remove` | `{n}` | unroutes sources that fed it |
 | `channel.rename` | `{n, name}` | |
 | `route.set` | `{source, channel: n \| null}` | null = unroute (back into the main mix for direct outs) |
-| `pattern.get_notes` / `pattern.set_notes` | `{instrument, notes}` | note patterns, string or structured |
+| `pattern.get_notes` / `pattern.set_notes` | `{instrument, notes}` | note patterns, string or structured (superseded: see the amendment's note-pattern API) |
 
 Changed:
 
-- `pattern.*` and `voice.trigger` gain an `instrument` field, defaulting to
+- (Defaulting superseded by the amendment: note calls default to the first
+  `tb303`.) `pattern.*` and `voice.trigger` gain an `instrument` field, defaulting to
   the first `tr808` so existing scripts keep working. "First" means
   creation order, the order `instrument.list` returns. The controller
   retargeting rule uses the same order. The default is resolved at call
@@ -291,7 +295,8 @@ Changed:
   every client knows which instrument an edit or hit belongs to:
   `StepChanged { instrument, voice, step, level }` and
   `PatternChanged { instrument, voice, steps }`.
-- New event `NotesChanged { instrument, notes }` for note-pattern edits
+- (Payload per the amendment: `NotesChanged { instrument, steps }`.) New
+  event `NotesChanged { instrument, notes }` for note-pattern edits
   (the whole pattern; it is at most 64 steps).
 - `Trigger` becomes `{ instrument, voice?, note?, velocity, time }`: a drum
   hit sets `voice`, a 303 note sets `note` (MIDI number). `velocity` is 1.0
@@ -332,7 +337,7 @@ CLI:
   and in `controller` events, and the target's pattern reaches them through
   the snapshot and the instrument-tagged `StepChanged`/`PatternChanged`
   events. A bridge has everything it needs locally.
-- In steps 2-3, volume knob mode controls the `mixer.N.volume` of the
+- (Superseded: no steps 2-3.) In steps 2-3, volume knob mode controls the `mixer.N.volume` of the
   channel the target's voice is routed to (nothing, if it is unrouted).
 - From step 4 (when the parameter exists), volume knob mode controls
   `<target>.<voice>.level` (the 808's internal mix) rather than
@@ -454,6 +459,8 @@ Channel order in `channels` is the display order. Parameters remain a flat
 
 ## Migration and compatibility
 
+> Superseded by the amendment (2026-10-04): no v1 migration; v1 projects are rejected. Only the protocol and docs notes below still apply.
+
 - `PROJECT_FORMAT_VERSION` 1 -> 2. `MIGRATIONS[0]` (v1 -> v2):
   - `instruments = [{drums, tr808, "Drums"}]`, `channels = [{1, "Drums"}]`,
     `routes = {drums: 1}`, `controller.target = "drums"`.
@@ -487,6 +494,8 @@ Channel order in `channels` is the display order. Parameters remain a flat
   [rfcs/README.md](README.md) that say new instrument types need an RFC.
 
 ## Implementation plan
+
+> Superseded by the amendment (2026-10-04): it all lands in one PR, with no size limit and no interim rules between steps.
 
 Separate PRs, each linking this RFC, each under ~800 changed lines
 (excluding generated code):
@@ -564,7 +573,8 @@ fixed: each step builds on the one before.
     (muting channel 1 silences it again).
   - `4s channel add --name X`, `rename`, `rm`: `4s mixer` shows each change,
     and a removed `n` reused by the next `add` starts at defaults.
-  - `4s instrument types` lists `tr808` (and `tb303` from step 6).
+  - `4s instrument types` lists `tr808` (and `tb303` from step 6;
+    superseded: both, as everything lands at once).
   - `4s mixer` output shows names, sources, and levels.
   - Pan and balance from the L/R render stats: a mono channel panned hard
     left has near-zero right RMS; a stereo channel (the Drums main) at
@@ -578,9 +588,9 @@ fixed: each step builds on the one before.
     the 303 arrive at the other client as `step_changed` / `notes_changed`
     with the right `instrument`, and `4s events` shows `trigger` events
     with `instrument` and `voice` or `note`.
-  - In steps 2-3, `project.save` with a non-default graph fails with the
+  - (Superseded: no steps 2-3.) In steps 2-3, `project.save` with a non-default graph fails with the
     documented error, and with the default graph it still writes v1.
-- **Migration**: the v1 fixture loads into the v2 shape (asserted
+- **Migration** (superseded by the amendment's replacement checks): the v1 fixture loads into the v2 shape (asserted
   structurally). It also loads through a running daemon (`4s project load`),
   and `4s render` reports the same onsets, and peak and RMS within 0.1 dB of
   the values recorded before the migration.
@@ -601,3 +611,167 @@ fixed: each step builds on the one before.
   version?
 - Channel limits (16 instruments, 32 channels): enough, and should channels
   get insert slots now or with the effects RFC?
+
+## Amendment: maintainer decisions (2026-10-04)
+
+Decided by the maintainer (@dreel) after acceptance and before
+implementation. Merging this amendment is the approval.
+
+### No backward compatibility for v1 projects
+
+The project is days old and has a single user, so existing project files can
+be discarded. Instead of the v1 -> v2 migration:
+
+- Project format version 2 is the oldest supported version. Loading a v1
+  file fails with a clear error ("projects from before RFC 0004 ... are no
+  longer supported; create a new project").
+- The v1 fixture is replaced by a v2 fixture. `docs/project-format.md` says
+  that v1 was dropped deliberately, and that migrations are required again
+  from version 2 on.
+- The "Migration and compatibility" fold of `mixer.N.*` into
+  `drums.<voice>.*` (with its lossy-solo note) and the migration checks in
+  the validation plan no longer apply. The new defaults still reproduce the
+  old kit's levels: voice level 0.8, channel fader at unity. Replacement
+  checks:
+  - a CLI e2e check that `4s project load` of a v1 file fails with the
+    documented error;
+  - a CLI e2e check that a fixed groove, rendered with the default project,
+    matches the peak and RMS that `main` rendered for it before this RFC
+    (recorded in the test) within 0.1 dB.
+- Protocol clients are not kept compatible either: `PROTOCOL_VERSION` 2 is a
+  clean break, and the bundled CLI and UI move with it.
+- Docs that cite v1 compatibility are updated with the implementation:
+  `docs/project-format.md` (fixtures for every *supported* version, and v1
+  dropped deliberately), `docs/testing.md` (a v2 fixture test replaces
+  `v1_fixture_loads`), and `docs/validation.md` (the v2 fixture loads; v1
+  and future versions are rejected).
+
+### One implementation PR, and no PR size guideline
+
+- The seven implementation steps land as one PR, so the interim rules for
+  steps 2-3 (save refusing a non-default graph, routing limits before the
+  main mix, per-step fader defaults, volume knobs on routed channels) are
+  not needed, and neither are their validation checks (including the
+  `project.save` refusal check).
+- The ~800-line guideline in CONTRIBUTING.md's "Keep PRs reviewable" is
+  removed: a PR can be as large as the change needs, as long as the gates
+  pass. This is guidance, not one of the gates in the gate table, and the
+  implementation PR makes the edit.
+
+### Open questions, resolved
+
+- A MIDI **keyboard** device kind plays a note instrument. A Livid Block
+  note-pattern mode is out of scope. Design:
+  - API: a new `DeviceKind::Keyboard` (`keyboard` on the wire), and an
+    optional `instrument` on `midi.connect` params and on `MidiConnection`.
+    `instrument` is only accepted for `kind: keyboard`; it must name a
+    `tb303`. CLI: `4s midi connect <port> --kind keyboard
+    [--instrument bass]`; the UI's MIDI panel offers the same choice.
+  - State: the connection, including its `instrument`, is part of the
+    snapshot's `midi` list and of `midi` events, so every client and bridge
+    sees which instrument a keyboard plays.
+  - RPC (so bridges, scripts, and the CLI can play held notes too, as
+    `controller.press` does for the Block): `voice.note_on {instrument?,
+    note, velocity?}` and `voice.note_off {instrument?, note}` -> `Empty`.
+    The keyboard handler goes through the same code path. A note-on (from
+    either path) emits a `trigger` event with `note` and `velocity`; a
+    note-off emits no event (the `trigger` event stays "a note started").
+  - Holders: a held note belongs to whoever started it. For a keyboard
+    that is the keyboard (`midi:<port>`); for an RPC caller it is its
+    connection (`name#id`, the `client_id` from `session.hello`, unique
+    per connection), not its client name, so two `cli` or `ui` clients
+    never release each other's notes. A holder's notes are released when
+    it goes away: a keyboard disconnecting or being unplugged, or a client
+    connection closing (so a crashed script or bridge cannot leave the 303
+    droning). A persistent client (the UI, a bridge) holds a note between
+    `note_on` and `note_off`; the CLI holds one for a duration in a single
+    command, `4s key C2 [--for SECONDS (default 1)] [--instrument bass]
+    [--velocity 0.8]`,
+    since each CLI command is its own connection.
+  - Through a bridge (`docs/topology.md`; the bridge role is not built
+    yet, so this is its contract): the engine only sees the bridge's
+    upstream connection as the holder. The bridge therefore tracks holders
+    per local client connection and per local keyboard, forwards
+    `voice.note_on` / `voice.note_off`, and sends `voice.note_off` upstream
+    for a local client's (or keyboard's) held notes when it disconnects or
+    is unplugged. If the bridge itself drops, the engine releases all its
+    notes, so nothing is left droning.
+  - A note-off without `instrument` goes to the instrument the holder
+    started that note on, not to "the first `tb303`" looked up again, so
+    adding or removing a `tb303` in between cannot leave a note stuck.
+  - Takeover: each instrument has one held-note entry. A newer note-on
+    replaces it (the earlier holder's later note-off or disconnect is then
+    a no-op and cannot cut the newer note). A sequenced note on a later
+    step takes the voice over from a held key: from then on the key's
+    note-off does nothing, and the pattern's rests and stop cut the voice
+    again.
+  - An audition (`voice.trigger {note}`, gated for half a step) plays
+    through the same voice: it takes over from a held key like a
+    sequenced step does (the key's later note-off is then a no-op).
+  - Behavior: a note-on starts a note with no gate: the VCA sustains while
+    it is held (it does not decay at the gated rate) and releases (~10 ms)
+    on note-off. Only the holder's note-off for that same note releases
+    it. Each instrument plays one note at a time: a newer note-on takes
+    over (gliding, as playing legato on a 303), and releasing the newer
+    key releases the voice even if an older key is still down (no
+    last-note priority). A note held by a keyboard is released if that
+    keyboard disconnects or is unplugged. While a note is held, the
+    instrument's own pattern does not cut it on rest steps or on transport
+    stop; a sequenced note on a later step takes over.
+  - Velocity: MIDI velocity / 127 (0..1) is the note's velocity, reported
+    as `trigger.velocity`; a MIDI note-on with velocity 0 is a note-off.
+    `velocity` defaults to 1.0 for `voice.note_on` and `voice.trigger
+    {note}`, so an audition (`4s trigger --note C2`, `4s key C2`) plays
+    accented by default, deliberately, as `4s trigger kick` plays a drum
+    at full velocity; pass `velocity` below 0.95 for an unaccented note.
+    For every played (not sequenced) note, from MIDI or RPC, 0.95 and up
+    plays accented. Sequenced steps keep the original
+    velocities (1.0 accented, 0.7 otherwise).
+  - Fallbacks, mirroring the controller target: with no `instrument`, a
+    keyboard plays the first `tb303` at the time of each note. If its
+    instrument is removed, the connection's `instrument` is cleared (a
+    `midi` event is emitted) and it falls back the same way. With no
+    `tb303` at all, notes do nothing.
+  - Validation, CLI e2e: with `virtual_block` (started under a name
+    without "block", so it is not auto-connected as a Livid Block, and
+    connected with `--kind keyboard`) sending raw note on/off, a
+    `trigger` event with `instrument` and `note`; held keys sustain and
+    release on note-off (per-channel meters); disconnecting releases a held
+    note. `4s key` holds then releases; another connection's
+    `voice.note_off` does not release it; a client that disconnects
+    releases its notes. `--instrument` is rejected for non-keyboard devices
+    and non-`tb303` instruments; removing a keyboard's instrument clears it
+    (with a `midi` event). `4s note` and `4s trigger --note` work, and
+    `voice.trigger` with both or neither of `voice`/`note` is
+    `invalid params`. Playwright: the MIDI panel connects a virtual port as
+    a keyboard playing a chosen `tb303`.
+- `sequencer.length` stays shared by every instrument.
+- No stereo width or mono-sum control for now.
+- Note-pattern and audition API, added to the API table:
+  - `pattern.get_notes {instrument?}` / `pattern.set_notes {instrument?,
+    steps}` -> `{instrument, length, steps}`, emitting `notes_changed
+    {instrument, steps}` (all 64 steps);
+    steps are structured `{note: n | null, accent, slide}` (the string form
+    is for the CLI and project files).
+  - `pattern.set_note {instrument?, step, note: {note, accent, slide}}` ->
+    the same result and event: one step at a time, so quick edits and
+    other clients never overwrite each other with a stale whole pattern.
+    CLI `4s note <instrument> <step> <token>` (`C2`, `D#2!~`, `-`).
+  - `voice.trigger {instrument?, voice?, note?, velocity?}`: exactly one of
+    `voice` (drums) or `note` (a note gated for half a step); both or
+    neither is `invalid params`. CLI `4s trigger kick`, `4s trigger --note
+    C2`.
+- Calls without `instrument` keep defaulting, with no plan to deprecate
+  that. The default is the first instrument, in creation order, of the
+  exact type the call needs: drum calls (`pattern.get/set/set_step/
+  toggle_step/clear`, `voice.trigger {voice}`) take the first `tr808`; note
+  calls (`pattern.get_notes/set_notes/set_note`, `voice.trigger {note}`)
+  take the first `tb303`, so `instrument` is optional for them too. With
+  no instrument of that type, the call fails with `invalid params` naming
+  the type and listing the instruments that exist. (The CLI `4s notes` and
+  `4s note` still name the instrument explicitly.) CLI e2e covers the
+  error.
+- Limits stay at 16 instruments and 32 channels. Channel inserts wait for
+  the effects RFC.
+- Removing an instrument also removes the channels its outputs fed if they
+  are left empty, unless `keep_channels` is set (as proposed).
