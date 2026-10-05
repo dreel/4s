@@ -1147,8 +1147,15 @@ fn confirm(question: &str) -> bool {
 /// If the old daemon speaks an incompatible protocol, or its session cannot
 /// be loaded by the new build, offer to start fresh instead.
 async fn restart_stale(cli: &Cli, data_dir: &std::path::Path, args: &StartArgs, old: DaemonInfo) -> Result<()> {
-    let session = match save_session(cli, data_dir, &old).await {
-        Ok(session) => Some(session),
+    // Talking to the old daemon at all is what fails when its build is
+    // incompatible (a different protocol version). Only then is discarding
+    // its session on the table; any later failure (e.g. saving) just stops.
+    let session = match Client::connect(&old.url, cli.token.clone(), "cli").await {
+        Ok(mut c) => {
+            let session = save_session(&mut c, data_dir).await?;
+            let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
+            Some(session)
+        }
         Err(e) => {
             println!("the running 4sd (pid {}, {}) is from an incompatible build: {e:#}", old.pid, old.version);
             if !confirm("Stop it and start fresh, discarding its unsaved session?") {
@@ -1160,10 +1167,15 @@ async fn restart_stale(cli: &Cli, data_dir: &std::path::Path, args: &StartArgs, 
             None
         }
     };
-    // A compatible daemon was asked to shut down; an incompatible one cannot
-    // be, so signal it.
-    if session.is_none() || !daemon_ctl::wait_exit(old.pid, std::time::Duration::from_secs(5)) {
-        daemon_ctl::signal_stop(old.pid, true)?;
+    match session {
+        // Asked to shut down; signal only if it does not exit.
+        Some(_) => {
+            if !daemon_ctl::wait_exit(old.pid, std::time::Duration::from_secs(5)) {
+                daemon_ctl::signal_stop(old.pid, false)?;
+            }
+        }
+        // It cannot be asked, and its session is being discarded anyway.
+        None => daemon_ctl::signal_stop(old.pid, true)?,
     }
     let mut args = args.clone();
     let restored = args.project.is_none() && session.is_some();
@@ -1197,21 +1209,20 @@ async fn restart_stale(cli: &Cli, data_dir: &std::path::Path, args: &StartArgs, 
     Ok(())
 }
 
-/// Save the old daemon's session (if unsaved) and ask it to shut down.
-/// Returns the project path to restore.
-async fn save_session(cli: &Cli, data_dir: &std::path::Path, old: &DaemonInfo) -> Result<String> {
-    let mut c = Client::connect(&old.url, cli.token.clone(), "cli").await?;
+/// Save the old daemon's session if it is unsaved or modified. Returns the
+/// project path to restore.
+async fn save_session(c: &mut Client, data_dir: &std::path::Path) -> Result<String> {
     let snap: Snapshot = serde_json::from_value(c.call(&Request::StateGet(Empty {})).await?)?;
-    let session = match (&snap.project.path, snap.project.dirty) {
+    Ok(match (&snap.project.path, snap.project.dirty) {
         (Some(p), false) => p.clone(),
         _ => {
             let p = data_dir.join("autosave").join("dev-session.4s").to_string_lossy().into_owned();
-            c.call(&Request::ProjectSave(ProjectSaveParams { path: Some(p.clone()) })).await?;
+            c.call(&Request::ProjectSave(ProjectSaveParams { path: Some(p.clone()) }))
+                .await
+                .map_err(|e| anyhow!("could not save the running session to {p}: {e:#}; 4sd left running"))?;
             p
         }
-    };
-    let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
-    Ok(session)
+    })
 }
 
 async fn run(cli: Cli) -> Result<()> {

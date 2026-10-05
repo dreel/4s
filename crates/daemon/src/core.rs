@@ -1205,10 +1205,10 @@ impl Core {
         // Build.
         for c in &file.channels {
             self.send(Command::SetChannelActive { ch: (c.n - 1) as u8, active: true });
-            self.channels.push(c.clone());
+            self.channels.push(ChannelInfo { n: c.n, name: c.name.trim().to_string() });
         }
         for (slot, i) in file.instruments.iter().enumerate() {
-            self.add_instrument_unchecked(&i.id, i.kind, &i.name, slot as u8);
+            self.add_instrument_unchecked(&i.id, i.kind, i.name.trim(), slot as u8);
         }
         for (source, n) in &file.routes {
             match (self.find_source(source), self.channels.iter().any(|c| c.n == *n)) {

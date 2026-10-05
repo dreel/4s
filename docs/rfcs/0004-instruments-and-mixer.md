@@ -798,6 +798,9 @@ How the implementation settled details the design left open:
   whole pattern lost quick successive edits (and would clobber another
   client's). The UI edits one step at a time and applies it optimistically.
   CLI: `4s note <id> <step> <token>`.
+- Held-note holders for RPC callers are keyed `conn:<id>` (the connection
+  id alone) rather than `name#id`: equally unique per connection, and a
+  renaming `session.hello` cannot change it.
 - A held keyboard note is tracked per instrument together with the
   keyboard (input port) that started it: only that keyboard's note-off
   releases it, and unplugging or disconnecting that keyboard releases it.

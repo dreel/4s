@@ -289,6 +289,7 @@ levels = [c['left'] for l in open('$TMP/rpc-key3.json') if l.strip()
           for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
 print('sounded, then released' if levels and max(levels) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
 check "trigger takes a voice or a note, not both" "exactly one" s call voice.trigger '{"voice": "kick", "note": 36}'
+check "trigger needs a voice or a note" "exactly one" s call voice.trigger '{}'
 check "empty names are rejected" "name must not be empty" s channel add --name " "
 check "channel or no_channel, not both" "not both" s instrument add tb303 --channel 1 --no-channel
 check "second 808 gets a numbered id" "drums2     tr808  Drums 2" s instrument add tr808
