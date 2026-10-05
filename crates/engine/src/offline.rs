@@ -1,10 +1,81 @@
 //! Offline (faster than real time) rendering and simple audio analysis, used
 //! for exports and for agent-driven validation of what the engine produces.
 
-use crate::engine::{Command, Engine, Feedback};
-use crate::params::TEMPO;
-use fours_protocol::{MAX_STEPS, NUM_TRACKS, RenderTrigger, Voice};
+use crate::engine::{Command, Engine, Feedback, ParamTarget};
+use crate::instrument;
+use crate::params::{NUM_GLOBALS, TEMPO};
+use fours_protocol::{InstrumentType, MAX_STEPS, NUM_TRACKS, NoteStep, RenderTrigger, Voice};
 use std::path::Path;
+
+/// An instrument's pattern, in engine form.
+#[derive(Clone, Debug)]
+pub enum RenderPattern {
+    Drums([[u8; MAX_STEPS]; NUM_TRACKS]),
+    Notes([NoteStep; MAX_STEPS]),
+}
+
+#[derive(Clone, Debug)]
+pub struct RenderInstrument {
+    pub id: String,
+    pub kind: InstrumentType,
+    /// Parameter values in `instrument::params` order.
+    pub params: Vec<f32>,
+    /// Channel index (0-based) per output, main first.
+    pub routes: Vec<Option<u8>>,
+    pub pattern: RenderPattern,
+}
+
+/// Everything needed to render the current project, copied out of the
+/// daemon's state.
+#[derive(Clone, Debug)]
+pub struct RenderSpec {
+    pub globals: [f32; NUM_GLOBALS],
+    /// Active channels: (0-based index, parameter values).
+    pub channels: Vec<(u8, [f32; crate::params::CHANNEL_PARAMS])>,
+    pub instruments: Vec<RenderInstrument>,
+}
+
+impl RenderSpec {
+    /// Build an engine in this state (non-real-time).
+    pub fn build(&self, sample_rate: u32) -> Engine {
+        let mut e = Engine::new(sample_rate);
+        let mut fb = |_| {};
+        for (i, v) in self.globals.iter().enumerate() {
+            let _ = e.apply(Command::SetParam { target: ParamTarget::Global(i), value: *v }, &mut fb);
+        }
+        for (ch, params) in &self.channels {
+            let _ = e.apply(Command::SetChannelActive { ch: *ch, active: true }, &mut fb);
+            for (i, v) in params.iter().enumerate() {
+                let target = ParamTarget::Channel { ch: *ch, index: i as u8 };
+                let _ = e.apply(Command::SetParam { target, value: *v }, &mut fb);
+            }
+        }
+        for (slot, inst) in self.instruments.iter().enumerate() {
+            let slot = slot as u8;
+            let instrument = instrument::make(inst.kind, sample_rate as f32);
+            let _ = e.apply(Command::AddInstrument { slot, instrument }, &mut fb);
+            for (i, v) in inst.params.iter().enumerate() {
+                let target = ParamTarget::Instrument { slot, index: i as u16 };
+                let _ = e.apply(Command::SetParam { target, value: *v }, &mut fb);
+            }
+            for (o, ch) in inst.routes.iter().enumerate() {
+                let _ = e.apply(Command::SetRoute { slot, output: o as u8, channel: *ch }, &mut fb);
+            }
+            match &inst.pattern {
+                RenderPattern::Drums(tracks) => {
+                    for (t, steps) in tracks.iter().enumerate() {
+                        let _ = e.apply(Command::SetDrumTrack { slot, track: t as u8, steps: *steps }, &mut fb);
+                    }
+                }
+                RenderPattern::Notes(steps) => {
+                    let _ = e.apply(Command::SetNotes { slot, steps: *steps }, &mut fb);
+                }
+            }
+        }
+        e.snap();
+        e
+    }
+}
 
 pub struct OfflineRender {
     pub sample_rate: u32,
@@ -15,28 +86,21 @@ pub struct OfflineRender {
 
 /// Render `bars` 4/4 bars (16 steps each, at the current tempo) from step 1,
 /// plus `tail` seconds.
-pub fn render_pattern(
-    params: &[f32],
-    pattern: &[[u8; MAX_STEPS]; NUM_TRACKS],
-    sample_rate: u32,
-    bars: f64,
-    tail: f64,
-) -> OfflineRender {
-    let mut engine = Engine::new(sample_rate);
-    engine.load(params, pattern);
-    let tempo = params[TEMPO].clamp(20.0, 300.0) as f64;
+pub fn render_graph(spec: &RenderSpec, sample_rate: u32, bars: f64, tail: f64) -> OfflineRender {
+    let mut engine = spec.build(sample_rate);
+    let tempo = spec.globals[TEMPO].clamp(20.0, 300.0) as f64;
     let bar_secs = 4.0 * 60.0 / tempo;
     let play_frames = (bars.max(0.0) * bar_secs * sample_rate as f64).round() as usize;
     let tail_frames = (tail.max(0.0) * sample_rate as f64).round() as usize;
 
     let mut fb = Vec::new();
     let mut samples = vec![0.0f32; (play_frames + tail_frames) * 2];
-    engine.apply(Command::Play, &mut |f| fb.push(f));
+    let _ = engine.apply(Command::Play, &mut |f| fb.push(f));
     let (play, rest) = samples.split_at_mut(play_frames * 2);
     for chunk in play.chunks_mut(1024) {
         engine.render(chunk, 2, &mut |f| fb.push(f));
     }
-    engine.apply(Command::Stop, &mut |f| fb.push(f));
+    let _ = engine.apply(Command::Stop, &mut |f| fb.push(f));
     for chunk in rest.chunks_mut(1024) {
         engine.render(chunk, 2, &mut |f| fb.push(f));
     }
@@ -44,16 +108,30 @@ pub fn render_pattern(
     let triggers = fb
         .into_iter()
         .filter_map(|f| match f {
-            Feedback::Trigger { track, velocity, time, step: Some(step) } => Some(RenderTrigger {
+            Feedback::Trigger { slot, voice, note, velocity, time, step: Some(step) } => Some(RenderTrigger {
                 time,
                 step,
-                voice: Voice::from_index(track as usize)?,
+                instrument: spec.instruments.get(slot as usize)?.id.clone(),
+                voice: voice.and_then(|v| Voice::from_index(v as usize)),
+                note,
                 velocity,
             }),
             _ => None,
         })
         .collect();
     OfflineRender { sample_rate, samples, triggers }
+}
+
+/// Peak and RMS of one lane (0 = left, 1 = right) of interleaved stereo.
+pub fn lane_level(samples: &[f32], lane: usize) -> (f32, f32) {
+    let lane: Vec<f32> = samples.iter().skip(lane).step_by(2).copied().collect();
+    let peak = lane.iter().fold(0.0f32, |a, x| a.max(x.abs()));
+    let rms = if lane.is_empty() {
+        0.0
+    } else {
+        (lane.iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / lane.len() as f64).sqrt() as f32
+    };
+    (peak, rms)
 }
 
 pub struct Analysis {
@@ -130,8 +208,26 @@ pub fn write_wav(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), h
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::default_values;
-    use fours_protocol::{STEP_OFF, STEP_ON};
+    use crate::params::{channel_defaults, global_defaults};
+    use crate::tr808::{DECAY, VOICE_PARAMS};
+    use fours_protocol::{STEP_ACCENT, STEP_OFF, STEP_ON};
+
+    fn drums_spec(pattern: [[u8; MAX_STEPS]; NUM_TRACKS]) -> RenderSpec {
+        let params = instrument::params(InstrumentType::Tr808, "drums").iter().map(|p| p.default as f32).collect();
+        let mut routes = vec![None; 1 + NUM_TRACKS];
+        routes[0] = Some(0);
+        RenderSpec {
+            globals: global_defaults(),
+            channels: vec![(0u8, channel_defaults())],
+            instruments: vec![RenderInstrument {
+                id: "drums".into(),
+                kind: InstrumentType::Tr808,
+                params,
+                routes,
+                pattern: RenderPattern::Drums(pattern),
+            }],
+        }
+    }
 
     #[test]
     fn render_and_detect_four_on_the_floor() {
@@ -139,9 +235,10 @@ mod tests {
         for s in [0, 4, 8, 12] {
             pattern[0][s] = STEP_ON;
         }
-        let r = render_pattern(&default_values(), &pattern, 48000, 1.0, 0.0);
+        let r = render_graph(&drums_spec(pattern), 48000, 1.0, 0.0);
         assert_eq!(r.samples.len(), 48000 * 2 * 2); // 2s at 120 bpm, stereo
         assert_eq!(r.triggers.len(), 4);
+        assert_eq!(r.triggers[0].instrument, "drums");
         let a = analyze(&r.samples, r.sample_rate);
         assert!(a.peak > 0.1);
         assert_eq!(a.onsets.len(), 4, "{:?}", a.onsets);
@@ -161,9 +258,9 @@ mod tests {
         set(&mut pattern, Voice::Snare, "----x-------x---");
         set(&mut pattern, Voice::ClosedHat, "x-x-x-x-x-x-x-xX");
         set(&mut pattern, Voice::Cowbell, "---------------X");
-        let mut values = default_values();
-        values[crate::params::TEMPO] = 128.0;
-        let r = render_pattern(&values, &pattern, 48000, 1.0, 0.0);
+        let mut spec = drums_spec(pattern);
+        spec.globals[TEMPO] = 128.0;
+        let r = render_graph(&spec, 48000, 1.0, 0.0);
         let mut hit_times: Vec<f64> = r.triggers.iter().map(|t| t.time).collect();
         hit_times.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
         let a = analyze(&r.samples, r.sample_rate);
@@ -178,11 +275,11 @@ mod tests {
     fn long_tails_do_not_retrigger() {
         for voice in [Voice::Kick, Voice::LowTom, Voice::OpenHat, Voice::Cowbell, Voice::Clap] {
             let mut pattern = [[STEP_OFF; MAX_STEPS]; NUM_TRACKS];
-            pattern[voice.index()][0] = fours_protocol::STEP_ACCENT;
+            pattern[voice.index()][0] = STEP_ACCENT;
             pattern[voice.index()][8] = STEP_ON;
-            let mut values = default_values();
-            values[crate::params::voice_param(voice.index(), crate::params::VoiceParam::Decay)] = 1.0;
-            let r = render_pattern(&values, &pattern, 48000, 1.0, 1.0);
+            let mut spec = drums_spec(pattern);
+            spec.instruments[0].params[voice.index() * VOICE_PARAMS + DECAY] = 1.0;
+            let r = render_graph(&spec, 48000, 1.0, 1.0);
             let a = analyze(&r.samples, r.sample_rate);
             assert_eq!(a.onsets.len(), 2, "{voice:?}: {:?}", a.onsets);
         }
@@ -190,8 +287,7 @@ mod tests {
 
     #[test]
     fn silence_has_no_onsets() {
-        let pattern = [[STEP_OFF; MAX_STEPS]; NUM_TRACKS];
-        let r = render_pattern(&default_values(), &pattern, 48000, 1.0, 0.0);
+        let r = render_graph(&drums_spec([[STEP_OFF; MAX_STEPS]; NUM_TRACKS]), 48000, 1.0, 0.0);
         let a = analyze(&r.samples, r.sample_rate);
         assert_eq!(a.peak, 0.0);
         assert!(a.onsets.is_empty());

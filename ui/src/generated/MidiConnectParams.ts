@@ -9,4 +9,8 @@ input: string,
 /**
  * Output port for feedback (LEDs). Defaults to the output matching the input.
  */
-output: string | null, kind: DeviceKind, };
+output: string | null, kind: DeviceKind, 
+/**
+ * For `keyboard`: the instrument to play (default: the first `tb303`).
+ */
+instrument: string | null, };

@@ -3,6 +3,10 @@ import type { Voice } from "./Voice";
 
 export type PatternClearParams = { 
 /**
+ * Drum instrument id; defaults to the first `tr808`.
+ */
+instrument: string | null, 
+/**
  * Clear only this voice; all voices if omitted.
  */
 voice: Voice | null, };

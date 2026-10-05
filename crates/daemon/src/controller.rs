@@ -1,10 +1,11 @@
-//! Livid Block controller logic: grid pads edit the pattern, knobs set params,
-//! LEDs mirror the pattern and playhead. This is pure state; the same logic
-//! serves the real device (via MIDI), the virtual controller (via RPC), and a
-//! future bridge daemon.
+//! Livid Block controller logic: grid pads edit the target drum instrument's
+//! pattern, knobs set its params, LEDs mirror the pattern and playhead. This
+//! is pure state; the same logic serves the real device (via MIDI), the
+//! virtual controller (via RPC), and a future bridge daemon.
 //!
 //! Layout: 8 rows = 8 tracks, 8 columns = 8 steps of the current page.
-//! Knob N controls track N's parameter selected by the knob mode.
+//! Knob N controls track N's parameter selected by the knob mode. With no
+//! target (no `tr808`), the grid is dark and input does nothing.
 
 use fours_protocol::{ControllerState, KnobMode, MAX_STEPS, NUM_TRACKS, STEP_OFF};
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,8 @@ pub const GRID: usize = 8;
 pub type Leds = [[u8; GRID]; GRID];
 
 pub struct Controller {
+    /// Id of the drum instrument the controller drives.
+    pub target: Option<String>,
     pub knob_mode: KnobMode,
     pub page: u32,
     pub follow: bool,
@@ -24,15 +27,26 @@ pub struct Controller {
 
 impl Default for Controller {
     fn default() -> Self {
-        Self { knob_mode: KnobMode::Volume, page: 0, follow: true, leds: [[0; GRID]; GRID], device: None }
+        Self {
+            target: None,
+            knob_mode: KnobMode::Volume,
+            page: 0,
+            follow: true,
+            leds: [[0; GRID]; GRID],
+            device: None,
+        }
     }
 }
 
 impl Controller {
     pub fn state(&self) -> ControllerState {
         ControllerState {
+            target: self.target.clone(),
             knob_mode: self.knob_mode,
-            knob_params: (0..GRID).map(|i| self.knob_mode.param_path(i)).collect(),
+            knob_params: match &self.target {
+                Some(t) => (0..GRID).map(|i| self.knob_mode.param_path(t, i)).collect(),
+                None => Vec::new(),
+            },
             page: self.page,
             follow: self.follow,
             leds: self.leds.iter().map(|r| r.to_vec()).collect(),
@@ -50,14 +64,16 @@ impl Controller {
     }
 
     /// Recompute LEDs. Lit = step on; the playhead column is inverted so it
-    /// is visible on both lit and unlit steps. Steps past `length` are dark.
+    /// is visible on both lit and unlit steps. Steps past `length` are dark,
+    /// and everything is dark without a target pattern.
     pub fn compute_leds(
         &self,
-        pattern: &[[u8; MAX_STEPS]; NUM_TRACKS],
+        pattern: Option<&[[u8; MAX_STEPS]; NUM_TRACKS]>,
         length: u32,
         playhead: Option<u32>,
     ) -> Leds {
         let mut leds = [[0u8; GRID]; GRID];
+        let Some(pattern) = pattern else { return leds };
         for (row, led_row) in leds.iter_mut().enumerate().take(NUM_TRACKS) {
             for (col, led) in led_row.iter_mut().enumerate() {
                 let step = self.pad_step(col as u32);
@@ -199,14 +215,14 @@ mod tests {
         let mut pattern = [[STEP_OFF; MAX_STEPS]; NUM_TRACKS];
         pattern[0][0] = STEP_ON;
         pattern[1][9] = STEP_ON;
-        let leds = c.compute_leds(&pattern, 16, Some(0));
+        let leds = c.compute_leds(Some(&pattern), 16, Some(0));
         assert_eq!(leds[0][0], 0, "lit step under playhead is inverted");
         assert_eq!(leds[1][0], 1, "unlit step under playhead is lit");
         assert_eq!(leds[1][1], 0);
         c.page = 1;
-        let leds = c.compute_leds(&pattern, 16, None);
+        let leds = c.compute_leds(Some(&pattern), 16, None);
         assert_eq!(leds[1][1], 1, "page 2 shows step 10 in column 2");
-        let leds = c.compute_leds(&pattern, 12, None);
+        let leds = c.compute_leds(Some(&pattern), 12, None);
         assert_eq!(leds[0][5], 0, "steps past length are dark");
     }
 }

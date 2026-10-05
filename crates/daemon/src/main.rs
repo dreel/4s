@@ -133,7 +133,7 @@ fn run(args: Args) -> Result<()> {
             None => null_audio(None),
         }
     };
-    let fours_engine::EngineLink { commands, mut feedback } = link;
+    let fours_engine::EngineLink { commands, mut feedback, mut returns } = link;
 
     // Must precede any other MIDI use so hotplugged devices are seen.
     midi::start_device_watcher();
@@ -164,8 +164,18 @@ fn run(args: Args) -> Result<()> {
                 while let Ok(f) = feedback.pop() {
                     batch.push(f);
                 }
-                if !batch.is_empty() {
+                // Removed instruments come back from the audio thread to be
+                // dropped here.
+                let mut returned = 0;
+                while let Ok(instrument) = returns.pop() {
+                    drop(instrument);
+                    returned += 1;
+                }
+                if !batch.is_empty() || returned > 0 {
                     let mut c = core.lock().unwrap();
+                    for _ in 0..returned {
+                        c.instrument_returned();
+                    }
                     for f in batch.drain(..) {
                         c.handle_feedback(f);
                     }

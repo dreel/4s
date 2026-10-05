@@ -79,7 +79,14 @@ export function Knob(props: {
   );
 }
 
-export function Fader(props: { value: number; onChange: (v: number) => void; testId?: string; height?: number }) {
+export function Fader(props: {
+  value: number;
+  onChange: (v: number) => void;
+  testId?: string;
+  height?: number;
+  /** Double-click resets to this (default 0.8). */
+  defaultValue?: number;
+}) {
   const h = props.height ?? 110;
   const drag = useDrag(props.value, 0, 1, props.onChange, h);
   return (
@@ -89,7 +96,7 @@ export function Fader(props: { value: number; onChange: (v: number) => void; tes
       data-testid={props.testId}
       data-value={props.value}
       title={`${Math.round(props.value * 100)}%`}
-      onDoubleClick={() => props.onChange(0.8)}
+      onDoubleClick={() => props.onChange(props.defaultValue ?? 0.8)}
       {...drag}
     >
       <div className="absolute bottom-0 left-0 right-0 rounded-b bg-amber-500/30" style={{ height: `${props.value * 100}%` }} />

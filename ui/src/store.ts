@@ -6,24 +6,28 @@
 import { useSyncExternalStore } from "react";
 import type { EventEnvelope } from "./generated/EventEnvelope";
 import type { ParamInfo } from "./generated/ParamInfo";
+import type { InstrumentPattern } from "./generated/InstrumentPattern";
+import type { NoteStep } from "./generated/NoteStep";
 import type { Snapshot } from "./generated/Snapshot";
-import type { Voice } from "./generated/Voice";
 import { RpcClient, type ConnectionState } from "./rpc";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export type AppState = {
   connection: ConnectionState;
   snapshot: Snapshot | null;
   registry: ParamInfo[];
   error: string | null;
+  /** Instrument shown in the editor (view state only). */
+  selected: string | null;
 };
 
 export type LiveState = {
-  tracks: number[];
+  /** Peak [left, right] per channel number. */
+  channels: Record<number, [number, number]>;
   master: number[];
-  /** performance.now() of the last trigger per voice. */
-  triggers: Partial<Record<Voice, number>>;
+  /** performance.now() of the last trigger, keyed `instrument` and `instrument.voice`. */
+  triggers: Record<string, number>;
 };
 
 class Store<T> {
@@ -53,8 +57,21 @@ export const launch = {
 };
 
 export const client = new RpcClient(daemonUrl());
-export const app = new Store<AppState>({ connection: "closed", snapshot: null, registry: [], error: null });
-export const live = new Store<LiveState>({ tracks: new Array(8).fill(0), master: [0, 0], triggers: {} });
+export const app = new Store<AppState>({ connection: "closed", snapshot: null, registry: [], error: null, selected: null });
+export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {} });
+
+/** Select an instrument for the editor. */
+export function select(id: string) {
+  app.set({ selected: id });
+}
+
+/** The selected instrument, falling back to the first one. */
+export function useSelected(): string | null {
+  return useApp((s) => {
+    const ids = s.snapshot?.graph.instruments.map((i) => i.id) ?? [];
+    return s.selected && ids.includes(s.selected) ? s.selected : (ids[0] ?? null);
+  });
+}
 
 export function useApp<S>(select: (s: AppState) => S): S {
   return useSyncExternalStore(app.subscribe, () => select(app.get()));
@@ -79,6 +96,7 @@ async function resync() {
   const pending = buffered;
   buffered = null;
   app.set({ registry: registry.params, snapshot });
+  live.set({ channels: {} });
   for (const e of pending) if (e.seq > snapshot.seq) apply(e);
 }
 
@@ -98,38 +116,55 @@ function apply(env: EventEnvelope) {
   const ev = env.event;
   const s = app.state.snapshot;
   switch (ev.type) {
-    case "meters":
-      live.set({ tracks: ev.tracks, master: ev.master });
+    case "meters": {
+      const channels: Record<number, [number, number]> = {};
+      for (const c of ev.channels) channels[c.channel] = [c.left, c.right];
+      live.set({ channels, master: ev.master });
       return;
-    case "trigger":
-      live.set({ triggers: { ...live.state.triggers, [ev.voice]: performance.now() } });
+    }
+    case "trigger": {
+      const now = performance.now();
+      const key = ev.voice ? `${ev.instrument}.${ev.voice}` : ev.instrument;
+      live.set({ triggers: { ...live.state.triggers, [key]: now, [ev.instrument]: now } });
       return;
+    }
     case "midi_in":
       return;
     case "reset":
     case "lagged":
+    case "graph":
+      // A graph change can add or remove parameters: refetch everything.
       void resync();
       return;
   }
   if (!s) return;
+  const patch = (id: string, f: (p: InstrumentPattern["pattern"]) => InstrumentPattern["pattern"]) =>
+    app.set({
+      snapshot: { ...s, patterns: s.patterns.map((p) => (p.instrument === id ? { ...p, pattern: f(p.pattern) } : p)) },
+    });
   switch (ev.type) {
     case "param_changed":
       app.set({ snapshot: { ...s, params: { ...s.params, [ev.path]: ev.value } } });
       break;
     case "step_changed":
-      app.set({
-        snapshot: {
-          ...s,
-          pattern: s.pattern.map((t) =>
-            t.voice === ev.voice ? { ...t, steps: t.steps.map((v, i) => (i === ev.step ? ev.level : v)) } : t,
-          ),
-        },
-      });
+      patch(ev.instrument, (p) =>
+        p.kind !== "drums"
+          ? p
+          : {
+              ...p,
+              tracks: p.tracks.map((t) =>
+                t.voice === ev.voice ? { ...t, steps: t.steps.map((v, i) => (i === ev.step ? ev.level : v)) } : t,
+              ),
+            },
+      );
       break;
     case "pattern_changed":
-      app.set({
-        snapshot: { ...s, pattern: s.pattern.map((t) => (t.voice === ev.voice ? { ...t, steps: ev.steps } : t)) },
-      });
+      patch(ev.instrument, (p) =>
+        p.kind !== "drums" ? p : { ...p, tracks: p.tracks.map((t) => (t.voice === ev.voice ? { ...t, steps: ev.steps } : t)) },
+      );
+      break;
+    case "notes_changed":
+      patch(ev.instrument, (p) => (p.kind !== "notes" ? p : { ...p, steps: ev.steps }));
       break;
     case "transport":
       app.set({ snapshot: { ...s, transport: { playing: ev.playing, step: ev.playing ? s.transport.step : null } } });
@@ -163,6 +198,21 @@ export async function act<T>(p: Promise<T>): Promise<T | undefined> {
 
 export function param(path: string): number {
   return app.state.snapshot?.params[path] ?? 0;
+}
+
+/** Optimistically set one note step locally, then send it. The daemon's
+ * `notes_changed` event confirms. */
+export function setNote(instrument: string, step: number, note: NoteStep) {
+  const s = app.state.snapshot;
+  if (s) {
+    const patterns = s.patterns.map((p) =>
+      p.instrument === instrument && p.pattern.kind === "notes"
+        ? { ...p, pattern: { ...p.pattern, steps: p.pattern.steps.map((x, i) => (i === step ? note : x)) } }
+        : p,
+    );
+    app.set({ snapshot: { ...s, patterns } });
+  }
+  return act(client.call("pattern.set_note", { instrument, step, note }));
 }
 
 /** Optimistically set a param locally, then send it. The daemon's event confirms. */

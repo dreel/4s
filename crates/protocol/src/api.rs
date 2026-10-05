@@ -131,23 +131,143 @@ pub struct ParamSetParams {
     pub value: f64,
 }
 
+// ---- instruments, channels, routing ----------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct InstrumentTypeInfo {
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub kind: InstrumentType,
+    pub label: String,
+    pub default_id: String,
+    /// Outputs of an instance with the default id.
+    pub outputs: Vec<OutputInfo>,
+    /// Parameters of an instance with the default id.
+    pub params: Vec<ParamInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct InstrumentTypesResult {
+    pub types: Vec<InstrumentTypeInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct InstrumentListResult {
+    pub instruments: Vec<InstrumentInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct InstrumentAddParams {
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub kind: InstrumentType,
+    /// Defaults to the type's default id (`drums`, `bass`), numbered if taken.
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Route the main output to this existing channel instead of a new one.
+    #[serde(default)]
+    pub channel: Option<u32>,
+    /// Leave the main output unrouted (no new channel).
+    #[serde(default)]
+    pub no_channel: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct InstrumentRemoveParams {
+    pub id: String,
+    /// Keep the channels its outputs fed even if they are left empty.
+    #[serde(default)]
+    pub keep_channels: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ChannelAddParams {
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ChannelRemoveParams {
+    pub n: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ChannelRenameParams {
+    pub n: u32,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct RouteSetParams {
+    /// `drums` (main out) or `drums.kick` (direct out).
+    pub source: String,
+    /// Channel number, or omitted/null to unroute (a direct out then plays
+    /// through its instrument's main mix again).
+    #[serde(default)]
+    pub channel: Option<u32>,
+}
+
 // ---- pattern -------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PatternGetParams {
+    /// Drum instrument id; defaults to the first `tr808`.
+    #[serde(default)]
+    pub instrument: Option<String>,
     #[serde(default)]
     pub voice: Option<Voice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PatternResult {
+    pub instrument: String,
     /// Active length (`sequencer.length`).
     pub length: u32,
     pub tracks: Vec<TrackPattern>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct NotesGetParams {
+    /// Note instrument id; defaults to the first `tb303`.
+    #[serde(default)]
+    pub instrument: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct NotesSetParams {
+    /// Note instrument id; defaults to the first `tb303`.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Steps from step 0; missing trailing steps become rests.
+    pub steps: Vec<NoteStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct NoteSetParams {
+    /// Note instrument id; defaults to the first `tb303`.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// 0-based step index.
+    pub step: u32,
+    pub note: NoteStep,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct NotesResult {
+    pub instrument: String,
+    /// Active length (`sequencer.length`).
+    pub length: u32,
+    /// All `MAX_STEPS` steps.
+    pub steps: Vec<NoteStep>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PatternSetParams {
+    /// Drum instrument id; defaults to the first `tr808`.
+    #[serde(default)]
+    pub instrument: Option<String>,
     pub voice: Voice,
     /// Step levels from step 0; missing trailing steps are cleared.
     pub steps: Vec<u8>,
@@ -155,6 +275,9 @@ pub struct PatternSetParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct SetStepParams {
+    /// Drum instrument id; defaults to the first `tr808`.
+    #[serde(default)]
+    pub instrument: Option<String>,
     pub voice: Voice,
     /// 0-based step index.
     pub step: u32,
@@ -164,12 +287,16 @@ pub struct SetStepParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ToggleStepParams {
+    /// Drum instrument id; defaults to the first `tr808`.
+    #[serde(default)]
+    pub instrument: Option<String>,
     pub voice: Voice,
     pub step: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct StepResult {
+    pub instrument: String,
     pub voice: Voice,
     pub step: u32,
     pub level: u8,
@@ -177,6 +304,9 @@ pub struct StepResult {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PatternClearParams {
+    /// Drum instrument id; defaults to the first `tr808`.
+    #[serde(default)]
+    pub instrument: Option<String>,
     /// Clear only this voice; all voices if omitted.
     #[serde(default)]
     pub voice: Option<Voice>,
@@ -184,7 +314,16 @@ pub struct PatternClearParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct TriggerParams {
-    pub voice: Voice,
+    /// Defaults to the first `tr808` when `voice` is given, else the first
+    /// `tb303`.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Drum voice to play (drum instruments).
+    #[serde(default)]
+    pub voice: Option<Voice>,
+    /// MIDI note to play for half a step (note instruments).
+    #[serde(default)]
+    pub note: Option<u8>,
     /// 0..1, defaults to 1.
     #[serde(default)]
     pub velocity: Option<f32>,
@@ -213,6 +352,9 @@ pub struct KnobParams {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ControllerModeParams {
+    /// Drum instrument the controller drives.
+    #[serde(default)]
+    pub target: Option<String>,
     #[serde(default)]
     pub knob_mode: Option<KnobMode>,
     #[serde(default)]
@@ -238,6 +380,9 @@ pub struct MidiConnectParams {
     #[serde(default)]
     pub output: Option<String>,
     pub kind: DeviceKind,
+    /// For `keyboard`: the instrument to play (default: the first `tb303`).
+    #[serde(default)]
+    pub instrument: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -291,10 +436,18 @@ pub struct RenderResult {
     /// Peak absolute sample value across channels.
     pub peak: f32,
     pub rms: f32,
+    pub left: Level,
+    pub right: Level,
     /// Onset times (seconds) detected from the audio itself.
     pub onsets: Vec<f64>,
     /// What the sequencer actually fired, for comparison with `onsets`.
     pub triggers: Vec<RenderTrigger>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Level {
+    pub peak: f32,
+    pub rms: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +474,24 @@ api! {
     /// Stop the sequencer.
     TransportStop = "transport.stop" (Empty) -> TransportState;
 
-    /// Read the pattern (one voice or all).
+    /// Available instrument types, with their outputs and parameters.
+    InstrumentTypes = "instrument.types" (Empty) -> InstrumentTypesResult;
+    /// Instruments in creation order.
+    InstrumentList = "instrument.list" (Empty) -> InstrumentListResult;
+    /// Add an instrument; by default on a new channel.
+    InstrumentAdd = "instrument.add" (InstrumentAddParams) -> InstrumentInfo;
+    /// Remove an instrument (and channels left empty, unless kept).
+    InstrumentRemove = "instrument.remove" (InstrumentRemoveParams) -> Graph;
+    /// Add a mixer channel (lowest free number).
+    ChannelAdd = "channel.add" (ChannelAddParams) -> ChannelInfo;
+    /// Remove a mixer channel; sources routed to it are unrouted.
+    ChannelRemove = "channel.remove" (ChannelRemoveParams) -> Graph;
+    /// Rename a mixer channel.
+    ChannelRename = "channel.rename" (ChannelRenameParams) -> ChannelInfo;
+    /// Route an instrument output to a channel, or unroute it.
+    RouteSet = "route.set" (RouteSetParams) -> Graph;
+
+    /// Read a drum pattern (one voice or all).
     PatternGet = "pattern.get" (PatternGetParams) -> PatternResult;
     /// Replace one voice's steps.
     PatternSet = "pattern.set" (PatternSetParams) -> TrackPattern;
@@ -331,8 +501,14 @@ api! {
     PatternToggleStep = "pattern.toggle_step" (ToggleStepParams) -> StepResult;
     /// Clear one voice or the whole pattern.
     PatternClear = "pattern.clear" (PatternClearParams) -> PatternResult;
+    /// Read a note pattern.
+    PatternGetNotes = "pattern.get_notes" (NotesGetParams) -> NotesResult;
+    /// Replace a note pattern.
+    PatternSetNotes = "pattern.set_notes" (NotesSetParams) -> NotesResult;
+    /// Set one step of a note pattern.
+    PatternSetNote = "pattern.set_note" (NoteSetParams) -> NotesResult;
 
-    /// Play a voice immediately (audition).
+    /// Play a drum voice or a note immediately (audition).
     VoiceTrigger = "voice.trigger" (TriggerParams) -> Empty;
 
     /// Controller state (mode, page, LEDs, device).
@@ -341,7 +517,7 @@ api! {
     ControllerPress = "controller.press" (PadParams) -> ControllerState;
     /// Turn a knob, as if on the Livid Block.
     ControllerKnob = "controller.knob" (KnobParams) -> ControllerState;
-    /// Change knob mode, page, or follow.
+    /// Change target instrument, knob mode, page, or follow.
     ControllerSetMode = "controller.set_mode" (ControllerModeParams) -> ControllerState;
 
     /// List MIDI ports and active connections.
@@ -360,7 +536,7 @@ api! {
     /// List project bundles in the daemon's projects dir.
     ProjectList = "project.list" (Empty) -> ProjectListResult;
 
-    /// Render the current pattern offline to a WAV and analyze it.
+    /// Render the current project offline to a WAV and analyze it.
     RenderOffline = "render.offline" (RenderParams) -> RenderResult;
     /// Audio device status.
     EngineStatus = "engine.status" (Empty) -> AudioStatus;
@@ -391,7 +567,7 @@ mod tests {
 
     #[test]
     fn request_wire_format() {
-        let r = Request::ParamSet(ParamSetParams { path: "mixer.3.volume".into(), value: 0.35 });
+        let r = Request::ParamSet(ParamSetParams { path: "mixer.1.volume".into(), value: 0.35 });
         let j = serde_json::to_value(&r).unwrap();
         assert_eq!(j["method"], "param.set");
         assert_eq!(j["params"]["value"], 0.35);
@@ -403,7 +579,7 @@ mod tests {
         assert!(matches!(parse_request("state.get", None).unwrap(), Request::StateGet(_)));
         assert!(matches!(
             parse_request("pattern.clear", Some(serde_json::Value::Null)).unwrap(),
-            Request::PatternClear(PatternClearParams { voice: None })
+            Request::PatternClear(PatternClearParams { instrument: None, voice: None })
         ));
         assert!(parse_request("nope", None).is_err());
         assert!(parse_request("param.set", Some(serde_json::json!({"path": 1}))).is_err());

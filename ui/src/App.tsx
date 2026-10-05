@@ -1,8 +1,6 @@
-import { BlockMirror } from "./components/BlockMirror";
-import { Mixer } from "./components/Mixer";
+import { Console } from "./components/Console";
+import { Editor } from "./components/Editor";
 import { MidiPanel, ProjectPanel, RenderPanel } from "./components/Panels";
-import { Sequencer } from "./components/Sequencer";
-import { Transport } from "./components/Transport";
 import { app, client, launch, useApp } from "./store";
 
 const LIFECYCLE_LABELS: Record<string, string> = {
@@ -57,14 +55,8 @@ export function App() {
         </div>
       ) : (
         <main className="flex flex-col gap-3 p-4 overflow-auto *:shrink-0">
-          <Transport />
-          <div className="flex gap-3 items-start">
-            <div className="flex-1 min-w-0">
-              <Sequencer />
-            </div>
-            <BlockMirror />
-          </div>
-          <Mixer />
+          <Console />
+          <Editor />
           <div className="grid grid-cols-3 gap-3">
             <MidiPanel />
             <ProjectPanel />

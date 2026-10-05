@@ -21,27 +21,48 @@ mysong.4s/
 snapshot; loading applies it. One set of types covers the API and the file, and
 agents can generate or edit projects directly.
 
-It contains:
+It contains (format version 2, RFC 0004):
 
-- The graph: instruments, effects, routing, mixer channels.
-- Parameter values as a `path -> value` map (e.g. `"mixer.3.volume": 0.35`).
-- Patterns (and later, arrangement).
-- Controller mappings.
-- Transport: tempo, swing, time signature.
+- The graph: `instruments` (`{id, type, name}`, in creation order),
+  `channels` (`{n, name}`, in display order), and `routes`
+  (`source -> channel number`, e.g. `"drums": 1`, `"drums.kick": 3`).
+  Effects come later.
+- Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,
+  `"bass.cutoff": 0.3`).
+- Patterns per instrument id: drum step strings per voice, or a note string
+  (and later, arrangement).
+- The controller: target instrument, knob mode, follow.
+- Transport: tempo, swing (as parameters).
+
+```json
+"patterns": {
+  "bass": "C2! - C2 D#2~ G2 - C2 -",
+  "drums": { "kick": "X---x---X---x---", "snare": "----x-------x---" }
+}
+```
+
+A project is applied all or nothing: it is validated (ids, channel numbers,
+pool limits of 16 instruments and 32 channels) before anything changes.
+`examples/demo.4s` is a complete example.
 
 ## Git-friendly
 
 - Pretty-printed with a stable key order, so diffs are minimal.
 - Patterns stored compactly and readably, e.g.
-  `"kick": "x---x---x---x---"`, so changing a beat produces a readable diff.
+  `"kick": "x---x---x---x---"` or `"bass": "C2 - D#2~ G1"`, so changing a beat
+  produces a readable diff.
 
 ## Versioning
 
 - A top-level integer `format_version`.
 - Migrations are Rust functions `vN -> vN+1` operating on `serde_json::Value`,
   applied in sequence on load. Saving always writes the latest version.
-- A fixture project for every past version lives in the test suite; CI checks
-  they all load.
+- A fixture project for every supported version lives in the test suite; CI
+  checks they all load.
+- Version 1 (the fixed 8-track kit) was dropped with RFC 0004 without a
+  migration, by the maintainer's decision while the project had no other
+  users: loading a v1 file fails with a clear error. From version 2 on,
+  format changes come with migrations.
 - Parameters are stored by path, so added params take their defaults from the
   parameter registry. Unknown paths are warned about (whether they are kept or
   dropped is decided when building).

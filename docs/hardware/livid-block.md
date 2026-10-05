@@ -35,8 +35,14 @@ unplug.
 
 ## Layout
 
-- Rows 1-8 = tracks (kick, snare, clap, closed hat, open hat, low tom,
-  high tom, cowbell). Columns = 8 steps of the current page.
+- The Block drives one drum instrument, the controller **target** (default:
+  the first `tr808`, usually `drums`). Choose another with
+  `4s controller mode --target drums2` or the "control with Block" button in
+  its editor. If the target is removed, the next `tr808` takes over; with no
+  `tr808` at all the grid goes dark and input does nothing until one is
+  added.
+- Rows 1-8 = the target's tracks (kick, snare, clap, closed hat, open hat,
+  low tom, high tom, cowbell). Columns = 8 steps of the current page.
 - Pressing a pad toggles that step. Steps past `sequencer.length` are dark and
   ignored.
 - LEDs: lit = step on. The playhead column is inverted (lit steps go dark,
@@ -45,8 +51,9 @@ unplug.
   (default), the page follows the playhead while playing. Choose a page with
   `4s controller mode --page N` or the UI (choosing a page while playing turns
   follow off).
-- Knobs: knob N controls track N. The knob mode picks the parameter: volume
-  (`mixer.N.volume`), tune, decay, or tone (`drums.<voice>.*`). Knobs are
+- Knobs: knob N controls track N of the target. The knob mode picks the
+  parameter: volume (`<target>.<voice>.level`, the voice's level in the
+  808's own mix), tune, decay, or tone (`<target>.<voice>.*`). Knobs are
   absolute: turning one jumps the parameter to the knob position.
 
 The same logic (`crates/daemon/src/controller.rs`) serves the real device and

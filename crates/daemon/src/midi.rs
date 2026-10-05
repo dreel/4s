@@ -100,6 +100,7 @@ impl Midi {
         input_query: &str,
         output_query: Option<&str>,
         kind: DeviceKind,
+        instrument: Option<String>,
         tx: Sender<MidiMessage>,
     ) -> Result<MidiConnection> {
         let (inputs, outputs) = list_ports();
@@ -148,7 +149,7 @@ impl Midi {
             None => None,
         };
 
-        let info = MidiConnection { input: input_name, output: output_name, kind };
+        let info = MidiConnection { input: input_name, output: output_name, kind, instrument };
         self.conns.push(Conn { info: info.clone(), _input: input, output });
         Ok(info)
     }

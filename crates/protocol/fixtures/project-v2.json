@@ -1,0 +1,51 @@
+{
+  "format_version": 2,
+  "instruments": [
+    {
+      "id": "drums",
+      "type": "tr808",
+      "name": "Drums"
+    },
+    {
+      "id": "bass",
+      "type": "tb303",
+      "name": "Bass"
+    }
+  ],
+  "channels": [
+    {
+      "n": 1,
+      "name": "Drums"
+    },
+    {
+      "n": 2,
+      "name": "Bass"
+    }
+  ],
+  "routes": {
+    "bass": 2,
+    "drums": 1
+  },
+  "params": {
+    "bass.cutoff": 0.35,
+    "drums.kick.decay": 0.6,
+    "drums.snare.level": 0.6,
+    "mixer.2.volume": 0.7,
+    "sequencer.length": 16.0,
+    "transport.swing": 0.2,
+    "transport.tempo": 118.0
+  },
+  "patterns": {
+    "bass": "C2 C2! D#2~ - G1 - C3 - C2 - - - G1 G1 A#1 -",
+    "drums": {
+      "kick": "X---x---X---x---",
+      "snare": "----x-------x---",
+      "closed_hat": "x-x-x-x-x-x-x-xX"
+    }
+  },
+  "controller": {
+    "target": "drums",
+    "knob_mode": "volume",
+    "follow": true
+  }
+}

@@ -43,9 +43,9 @@ enum Cmd {
     State,
     /// List parameters with current values.
     Params { prefix: Option<String> },
-    /// Read a parameter, e.g. `4s get mixer.3.volume`.
+    /// Read a parameter, e.g. `4s get drums.kick.level`.
     Get { path: String },
-    /// Set a parameter, e.g. `4s set mixer.3.volume 35%`. Accepts numbers,
+    /// Set a parameter, e.g. `4s set mixer.1.volume 35%`. Accepts numbers,
     /// percentages, and on/off.
     Set {
         path: String,
@@ -58,17 +58,58 @@ enum Cmd {
     Stop,
     /// Set tempo in BPM (shorthand for `set transport.tempo`).
     Tempo { bpm: f64 },
-    /// Show or edit the pattern.
+    /// Show or edit a drum pattern.
     Pattern {
+        /// Drum instrument (default: the first tr808).
+        #[arg(long)]
+        instrument: Option<String>,
         #[command(subcommand)]
         cmd: Option<PatternCmd>,
     },
-    /// Play a voice now.
+    /// Show or set a note pattern, e.g. `4s notes bass "C2 C2! D#2~ - G1"`.
+    /// Tokens: `C2` note, `!` accent, `~` slide into the next step, `-` rest.
+    Notes {
+        /// Note instrument id (e.g. `bass`).
+        instrument: String,
+        /// New pattern; omit to show the current one.
+        #[arg(allow_hyphen_values = true)]
+        pattern: Option<String>,
+    },
+    /// Set one step (1-based) of a note pattern, e.g. `4s note bass 3 D#2!~`
+    /// (`-` for a rest).
+    Note {
+        instrument: String,
+        step: u32,
+        #[arg(allow_hyphen_values = true)]
+        note: String,
+    },
+    /// Play a drum voice (`4s trigger kick`) or a note (`4s trigger --note C2`) now.
     Trigger {
-        voice: String,
+        voice: Option<String>,
+        /// Note to play on a note instrument, e.g. C2.
+        #[arg(long)]
+        note: Option<String>,
+        /// Instrument (default: the first tr808 for voices, tb303 for notes).
+        #[arg(long)]
+        instrument: Option<String>,
         #[arg(long)]
         velocity: Option<f32>,
     },
+    /// Add, remove, and list instruments.
+    Instrument {
+        #[command(subcommand)]
+        cmd: InstrumentCmd,
+    },
+    /// Add, remove, and rename mixer channels.
+    Channel {
+        #[command(subcommand)]
+        cmd: ChannelCmd,
+    },
+    /// Route an instrument output to a channel, e.g. `4s route drums.kick 2`,
+    /// or unroute it with `none` (a direct out returns to the main mix).
+    Route { source: String, channel: String },
+    /// Show the mixer: channels, their sources, levels, mute/solo.
+    Mixer,
     /// Stream events. Ctrl-C to stop.
     Watch {
         /// Only these event types (repeatable), e.g. --type param_changed.
@@ -138,6 +179,49 @@ enum DaemonCmd {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+enum InstrumentCmd {
+    /// Instrument types that can be added.
+    Types,
+    /// Instruments in the project.
+    List,
+    /// Add an instrument, by default on a new channel.
+    Add {
+        /// tr808 or tb303.
+        kind: String,
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        /// Route its main output to this existing channel.
+        #[arg(long)]
+        channel: Option<u32>,
+        /// Leave its main output unrouted.
+        #[arg(long)]
+        no_channel: bool,
+    },
+    /// Remove an instrument and the channels left empty.
+    Rm {
+        id: String,
+        /// Keep channels even if nothing feeds them any more.
+        #[arg(long)]
+        keep_channels: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ChannelCmd {
+    /// Add a channel (lowest free number).
+    Add {
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Remove a channel; its sources become unrouted.
+    Rm { n: u32 },
+    /// Rename a channel.
+    Rename { n: u32, name: String },
+}
+
+#[derive(Subcommand, Debug, Clone)]
 enum PatternCmd {
     /// Show the pattern (all voices or one).
     Show { voice: Option<String> },
@@ -192,6 +276,9 @@ enum MidiCmd {
         output: Option<String>,
         #[arg(long, value_enum, default_value = "block")]
         kind: Kind,
+        /// For --kind keyboard: the instrument to play (default: first tb303).
+        #[arg(long)]
+        instrument: Option<String>,
     },
     /// Disconnect a MIDI input.
     Disconnect { input: String },
@@ -206,6 +293,7 @@ enum MidiCmd {
 enum Kind {
     Block,
     Drums,
+    Keyboard,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -226,8 +314,11 @@ enum ControllerCmd {
         #[arg(allow_hyphen_values = true)]
         value: String,
     },
-    /// Change knob mode, page (1-based), or follow.
+    /// Change target instrument, knob mode, page (1-based), or follow.
     Mode {
+        /// Drum instrument the controller drives.
+        #[arg(long)]
+        target: Option<String>,
         #[arg(long, value_enum)]
         knobs: Option<KnobArg>,
         #[arg(long)]
@@ -259,6 +350,13 @@ fn voice(s: &str) -> Result<Voice> {
     Voice::parse(s).ok_or_else(|| {
         let ids: Vec<_> = Voice::ALL.iter().map(|v| v.id()).collect();
         anyhow!("unknown voice '{s}' (use {} or 1-8)", ids.join(", "))
+    })
+}
+
+fn instrument_type(s: &str) -> Result<InstrumentType> {
+    InstrumentType::parse(s).ok_or_else(|| {
+        let ids: Vec<_> = InstrumentType::ALL.iter().map(|t| t.id()).collect();
+        anyhow!("unknown instrument type '{s}' (use {})", ids.join(", "))
     })
 }
 
@@ -309,15 +407,18 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
         Cmd::Tempo { bpm } => {
             vec![Request::ParamSet(ParamSetParams { path: "transport.tempo".into(), value: *bpm })]
         }
-        Cmd::Pattern { cmd } => match cmd.clone().unwrap_or(PatternCmd::Show { voice: None }) {
+        Cmd::Pattern { instrument, cmd } => match cmd.clone().unwrap_or(PatternCmd::Show { voice: None }) {
             PatternCmd::Show { voice: v } => vec![Request::PatternGet(PatternGetParams {
+                instrument: instrument.clone(),
                 voice: v.as_deref().map(voice).transpose()?,
             })],
             PatternCmd::Set { voice: v, steps } => vec![Request::PatternSet(PatternSetParams {
+                instrument: instrument.clone(),
                 voice: voice(&v)?,
                 steps: parse_steps(&steps).map_err(|e| anyhow!(e))?,
             })],
             PatternCmd::Step { voice: v, step, level } => vec![Request::PatternSetStep(SetStepParams {
+                instrument: instrument.clone(),
                 voice: voice(&v)?,
                 step: step_index(step)?,
                 level: match level {
@@ -327,16 +428,76 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 },
             })],
             PatternCmd::Toggle { voice: v, step } => vec![Request::PatternToggleStep(ToggleStepParams {
+                instrument: instrument.clone(),
                 voice: voice(&v)?,
                 step: step_index(step)?,
             })],
             PatternCmd::Clear { voice: v } => vec![Request::PatternClear(PatternClearParams {
+                instrument: instrument.clone(),
                 voice: v.as_deref().map(voice).transpose()?,
             })],
         },
-        Cmd::Trigger { voice: v, velocity } => {
-            vec![Request::VoiceTrigger(TriggerParams { voice: voice(v)?, velocity: *velocity })]
+        Cmd::Notes { instrument, pattern } => match pattern {
+            None => vec![Request::PatternGetNotes(NotesGetParams { instrument: Some(instrument.clone()) })],
+            Some(p) => vec![Request::PatternSetNotes(NotesSetParams {
+                instrument: Some(instrument.clone()),
+                steps: parse_notes(p).map_err(|e| anyhow!(e))?,
+            })],
+        },
+        Cmd::Note { instrument, step, note } => {
+            let parsed = parse_notes(note).map_err(|e| anyhow!(e))?;
+            if note.split_whitespace().count() != 1 {
+                bail!("give one note token, e.g. C2, D#2!~, or -");
+            }
+            vec![Request::PatternSetNote(NoteSetParams {
+                instrument: Some(instrument.clone()),
+                step: step_index(*step)?,
+                note: parsed[0],
+            })]
         }
+        Cmd::Trigger { voice: v, note, instrument, velocity } => {
+            if v.is_some() == note.is_some() {
+                bail!("give a voice (e.g. `4s trigger kick`) or --note (e.g. `4s trigger --note C2`)");
+            }
+            vec![Request::VoiceTrigger(TriggerParams {
+                instrument: instrument.clone(),
+                voice: v.as_deref().map(voice).transpose()?,
+                note: note.as_deref().map(parse_note).transpose().map_err(|e| anyhow!(e))?,
+                velocity: *velocity,
+            })]
+        }
+        Cmd::Instrument { cmd } => match cmd {
+            InstrumentCmd::Types => vec![Request::InstrumentTypes(e)],
+            InstrumentCmd::List => vec![Request::InstrumentList(e)],
+            InstrumentCmd::Add { kind, id, name, channel, no_channel } => {
+                vec![Request::InstrumentAdd(InstrumentAddParams {
+                    kind: instrument_type(kind)?,
+                    id: id.clone(),
+                    name: name.clone(),
+                    channel: *channel,
+                    no_channel: *no_channel,
+                })]
+            }
+            InstrumentCmd::Rm { id, keep_channels } => vec![Request::InstrumentRemove(InstrumentRemoveParams {
+                id: id.clone(),
+                keep_channels: *keep_channels,
+            })],
+        },
+        Cmd::Channel { cmd } => match cmd {
+            ChannelCmd::Add { name } => vec![Request::ChannelAdd(ChannelAddParams { name: name.clone() })],
+            ChannelCmd::Rm { n } => vec![Request::ChannelRemove(ChannelRemoveParams { n: *n })],
+            ChannelCmd::Rename { n, name } => {
+                vec![Request::ChannelRename(ChannelRenameParams { n: *n, name: name.clone() })]
+            }
+        },
+        Cmd::Route { source, channel } => {
+            let channel = match channel.trim().to_ascii_lowercase().as_str() {
+                "none" | "-" | "main" => None,
+                n => Some(n.parse::<u32>().map_err(|_| anyhow!("channel must be a number or `none`"))?),
+            };
+            vec![Request::RouteSet(RouteSetParams { source: source.clone(), channel })]
+        }
+        Cmd::Mixer => vec![Request::StateGet(e)],
         Cmd::Watch { types, .. } => vec![
             Request::EventsSubscribe(SubscribeParams {
                 types: if types.is_empty() { None } else { Some(types.clone()) },
@@ -358,13 +519,15 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
         },
         Cmd::Midi { cmd } => match cmd {
             MidiCmd::Ports => vec![Request::MidiPorts(e)],
-            MidiCmd::Connect { input, output, kind } => vec![Request::MidiConnect(MidiConnectParams {
+            MidiCmd::Connect { input, output, kind, instrument } => vec![Request::MidiConnect(MidiConnectParams {
                 input: input.clone(),
                 output: output.clone(),
                 kind: match kind {
                     Kind::Block => DeviceKind::LividBlock,
                     Kind::Drums => DeviceKind::GenericDrums,
+                    Kind::Keyboard => DeviceKind::Keyboard,
                 },
+                instrument: instrument.clone(),
             })],
             MidiCmd::Disconnect { input } => {
                 vec![Request::MidiDisconnect(MidiDisconnectParams { input: input.clone() })]
@@ -385,7 +548,8 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 index: one_based(index, "knob")?,
                 value: parse_value(&value)?,
             })],
-            ControllerCmd::Mode { knobs, page, follow } => vec![Request::ControllerSetMode(ControllerModeParams {
+            ControllerCmd::Mode { target, knobs, page, follow } => vec![Request::ControllerSetMode(ControllerModeParams {
+                target,
                 knob_mode: knobs.map(|k| match k {
                     KnobArg::Volume => KnobMode::Volume,
                     KnobArg::Tune => KnobMode::Tune,
@@ -421,6 +585,7 @@ fn grid_line(label: &str, steps: &[u8], length: usize) -> String {
 }
 
 fn print_pattern(p: &PatternResult) {
+    println!("{}:", p.instrument);
     for t in &p.tracks {
         println!("{}", grid_line(t.voice.id(), &t.steps, p.length as usize));
     }
@@ -429,7 +594,8 @@ fn print_pattern(p: &PatternResult) {
 fn print_leds(c: &ControllerState) {
     let page = c.page + 1;
     println!(
-        "knobs: {:?}  page: {page}  follow: {}  device: {}",
+        "target: {}  knobs: {:?}  page: {page}  follow: {}  device: {}",
+        c.target.as_deref().unwrap_or("(none)"),
         c.knob_mode,
         c.follow,
         c.device.as_deref().unwrap_or("(virtual only)")
@@ -452,20 +618,81 @@ fn print_state(s: &Snapshot) {
         p("sequencer.length")
     );
     let length = p("sequencer.length") as usize;
-    for t in &s.pattern {
-        let ch = t.voice.index() + 1;
-        let vol = p(&format!("mixer.{ch}.volume"));
+    for ip in &s.patterns {
+        let kind = s.graph.instruments.iter().find(|i| i.id == ip.instrument).map(|i| i.kind.id()).unwrap_or("?");
+        println!("{} ({kind}):", ip.instrument);
+        match &ip.pattern {
+            PatternData::Drums { tracks } => {
+                for t in tracks {
+                    let id = &ip.instrument;
+                    let vid = t.voice.id();
+                    let level = p(&format!("{id}.{vid}.level"));
+                    let muted = if p(&format!("{id}.{vid}.mute")) >= 0.5 { " M" } else { "" };
+                    println!("  {}  lvl {:>3.0}%{muted}", grid_line(vid, &t.steps, length), level * 100.0);
+                }
+            }
+            PatternData::Notes { steps } => println!("  {}", format_notes(steps, length)),
+        }
+    }
+    print_mixer(s);
+    print_status_lines(s);
+}
+
+fn fmt_pan(v: f64) -> String {
+    if v.abs() < 0.005 {
+        "C".into()
+    } else if v < 0.0 {
+        format!("L{:.0}", -v * 100.0)
+    } else {
+        format!("R{:.0}", v * 100.0)
+    }
+}
+
+fn print_mixer(s: &Snapshot) {
+    let p = |k: &str| s.params.get(k).copied().unwrap_or(0.0);
+    for c in &s.graph.channels {
+        let n = c.n;
+        let sources: Vec<&str> =
+            s.graph.routes.iter().filter(|(_, ch)| **ch == n).map(|(src, _)| src.as_str()).collect();
         let mut flags = String::new();
-        if p(&format!("mixer.{ch}.mute")) >= 0.5 {
+        if p(&format!("mixer.{n}.mute")) >= 0.5 {
             flags.push_str(" M");
         }
-        if p(&format!("mixer.{ch}.solo")) >= 0.5 {
+        if p(&format!("mixer.{n}.solo")) >= 0.5 {
             flags.push_str(" S");
         }
-        println!("{}  vol {:>3.0}%{flags}", grid_line(t.voice.id(), &t.steps, length), vol * 100.0);
+        println!(
+            "ch {n:<2} {:<12} vol {:>3.0}%  pan {:<4}{flags:<5}  <- {}",
+            c.name,
+            p(&format!("mixer.{n}.volume")) * 100.0,
+            fmt_pan(p(&format!("mixer.{n}.pan"))),
+            if sources.is_empty() { "(nothing)".to_string() } else { sources.join(", ") }
+        );
     }
-    println!("master: {:.0}%", p("mixer.master.volume") * 100.0);
-    print_status_lines(s);
+    println!("master        vol {:>3.0}%", p("mixer.master.volume") * 100.0);
+}
+
+fn print_graph(g: &Graph) {
+    for c in &g.channels {
+        let sources: Vec<&str> =
+            g.routes.iter().filter(|(_, ch)| **ch == c.n).map(|(src, _)| src.as_str()).collect();
+        println!("ch {:<2} {:<12} <- {}", c.n, c.name, if sources.is_empty() { "(nothing)".into() } else { sources.join(", ") });
+    }
+    let unrouted: Vec<&str> = g
+        .instruments
+        .iter()
+        .map(|i| i.id.as_str())
+        .filter(|id| !g.routes.contains_key(*id))
+        .collect();
+    if !unrouted.is_empty() {
+        println!("unrouted main outs: {}", unrouted.join(", "));
+    }
+}
+
+fn print_instrument(i: &InstrumentInfo) {
+    let direct = i.outputs.len().saturating_sub(1);
+    let extra = if direct > 0 { format!(", {direct} direct outs") } else { String::new() };
+    println!("{:<10} {:<6} {:<12} ({:?} main{extra})", i.id, i.kind.id(), i.name, i.outputs[0].width);
 }
 
 fn print_status_lines(s: &Snapshot) {
@@ -497,14 +724,32 @@ fn print_event(e: &EventEnvelope, json: bool) {
     }
     let body = match &e.event {
         Event::ParamChanged { path, value } => format!("{path} = {value}"),
-        Event::StepChanged { voice, step, level } => format!("{} step {} = {}", voice.id(), step + 1, level),
-        Event::PatternChanged { voice, steps } => format!("{} = {}", voice.id(), format_steps(steps)),
+        Event::StepChanged { instrument, voice, step, level } => {
+            format!("{instrument}.{} step {} = {}", voice.id(), step + 1, level)
+        }
+        Event::PatternChanged { instrument, voice, steps } => {
+            format!("{instrument}.{} = {}", voice.id(), format_steps(steps))
+        }
+        Event::NotesChanged { instrument, steps } => format!("{instrument} = {}", format_notes(steps, 16)),
+        Event::Graph { graph } => format!(
+            "{} instruments, {} channels, {} routes",
+            graph.instruments.len(),
+            graph.channels.len(),
+            graph.routes.len()
+        ),
         Event::Transport { playing } => if *playing { "playing".into() } else { "stopped".into() },
         Event::Playhead { step, time } => format!("step {} @ {time:.3}s", step + 1),
-        Event::Trigger { voice, velocity, time } => format!("{} vel {velocity:.2} @ {time:.3}s", voice.id()),
-        Event::Meters { tracks, master } => format!(
-            "tracks [{}] master [{:.2} {:.2}]",
-            tracks.iter().map(|x| format!("{x:.2}")).collect::<Vec<_>>().join(" "),
+        Event::Trigger { instrument, voice, note, velocity, time } => {
+            let what = match (voice, note) {
+                (Some(v), _) => v.id().to_string(),
+                (None, Some(n)) => note_name(*n),
+                _ => "?".into(),
+            };
+            format!("{instrument} {what} vel {velocity:.2} @ {time:.3}s")
+        }
+        Event::Meters { channels, master } => format!(
+            "channels [{}] master [{:.2} {:.2}]",
+            channels.iter().map(|c| format!("{}:{:.2}/{:.2}", c.channel, c.left, c.right)).collect::<Vec<_>>().join(" "),
             master.first().unwrap_or(&0.0),
             master.get(1).unwrap_or(&0.0)
         ),
@@ -561,25 +806,84 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             let t: TransportState = serde_json::from_value(last)?;
             println!("{}", if t.playing { "playing" } else { "stopped" });
         }
-        Cmd::Pattern { cmd } => match cmd {
+        Cmd::Pattern { cmd, .. } => match cmd {
             None | Some(PatternCmd::Show { .. }) | Some(PatternCmd::Clear { .. }) => {
                 print_pattern(&serde_json::from_value(last)?)
             }
             Some(PatternCmd::Set { .. }) => {
+                // `pattern set` returns one track; the instrument is implied.
                 let t: TrackPattern = serde_json::from_value(last)?;
                 println!("{}", grid_line(t.voice.id(), &t.steps, 16.max(t.steps.iter().rposition(|s| *s != 0).map(|i| i + 1).unwrap_or(0))));
             }
             Some(_) => {
                 let s: StepResult = serde_json::from_value(last)?;
-                println!("{} step {} = {}", s.voice.id(), s.step + 1, ["off", "on", "accent"][s.level as usize]);
+                println!(
+                    "{}.{} step {} = {}",
+                    s.instrument,
+                    s.voice.id(),
+                    s.step + 1,
+                    ["off", "on", "accent"][s.level as usize]
+                );
             }
         },
+        Cmd::Notes { .. } | Cmd::Note { .. } => {
+            let n: NotesResult = serde_json::from_value(last)?;
+            let last_note = n.steps.iter().rposition(|s| s.note.is_some()).map(|i| i + 1).unwrap_or(0);
+            println!("{}: {}", n.instrument, format_notes(&n.steps, (n.length as usize).max(last_note)));
+        }
         Cmd::Trigger { .. } => println!("ok"),
+        Cmd::Instrument { cmd: InstrumentCmd::Types } => {
+            let r: InstrumentTypesResult = serde_json::from_value(last)?;
+            for t in r.types {
+                println!(
+                    "{:<6} {:<6} default id `{}`, {} params, {} outputs",
+                    t.kind.id(),
+                    t.label,
+                    t.default_id,
+                    t.params.len(),
+                    t.outputs.len()
+                );
+            }
+        }
+        Cmd::Instrument { cmd: InstrumentCmd::List } => {
+            let r: InstrumentListResult = serde_json::from_value(last)?;
+            if r.instruments.is_empty() {
+                println!("(no instruments)");
+            }
+            for i in &r.instruments {
+                print_instrument(i);
+            }
+        }
+        Cmd::Instrument { cmd: InstrumentCmd::Add { .. } } => {
+            print_instrument(&serde_json::from_value(last)?);
+        }
+        Cmd::Instrument { .. } | Cmd::Route { .. } | Cmd::Channel { cmd: ChannelCmd::Rm { .. } } => {
+            print_graph(&serde_json::from_value(last)?);
+        }
+        Cmd::Channel { .. } => {
+            let c: ChannelInfo = serde_json::from_value(last)?;
+            println!("ch {} {}", c.n, c.name);
+        }
+        Cmd::Mixer => print_mixer(&serde_json::from_value(last)?),
         Cmd::Render { .. } => {
             let r: RenderResult = serde_json::from_value(last)?;
             println!("wrote {} ({:.2}s @ {} Hz)", r.path, r.duration, r.sample_rate);
             println!("peak {:.3}  rms {:.4}", r.peak, r.rms);
-            println!("triggers: {}  detected onsets: {}", r.triggers.len(), r.onsets.len());
+            println!(
+                "left: peak {:.3} rms {:.4}  right: peak {:.3} rms {:.4}",
+                r.left.peak, r.left.rms, r.right.peak, r.right.rms
+            );
+            let mut per: std::collections::BTreeMap<&str, usize> = Default::default();
+            for t in &r.triggers {
+                *per.entry(t.instrument.as_str()).or_default() += 1;
+            }
+            let per: Vec<String> = per.iter().map(|(i, n)| format!("{i} {n}")).collect();
+            println!(
+                "triggers: {} ({})  detected onsets: {}",
+                r.triggers.len(),
+                if per.is_empty() { "none".into() } else { per.join(", ") },
+                r.onsets.len()
+            );
             let onsets: Vec<String> = r.onsets.iter().map(|t| format!("{t:.3}")).collect();
             println!("onsets (s): {}", onsets.join(" "));
         }
@@ -611,7 +915,8 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
                 println!("  (none)");
             }
             for c in &r.connections {
-                println!("  {} ({:?}) out: {}", c.input, c.kind, c.output.as_deref().unwrap_or("-"));
+                let plays = c.instrument.as_deref().map(|i| format!(" plays: {i}")).unwrap_or_default();
+                println!("  {} ({:?}) out: {}{plays}", c.input, c.kind, c.output.as_deref().unwrap_or("-"));
             }
         }
         Cmd::Controller { .. } => print_leds(&serde_json::from_value(last)?),
@@ -894,7 +1199,10 @@ mod tests {
     #[test]
     fn cli_covers_every_method() {
         let commands = [
-            "status", "state", "params", "get mixer.1.volume", "set mixer.3.volume 35%",
+            "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
+            "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
+            "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "route drums.closed_hat 2",
+            "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",
             "pattern set kick x---x---", "pattern set sd ----x---", "set mixer.1.pan -0.5", "pattern step kick 1 accent", "pattern toggle sd 5",
             "pattern clear", "trigger kick", "watch", "render --bars 2", "project new",

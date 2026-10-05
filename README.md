@@ -5,12 +5,14 @@ built for people *and* agents. A real-time Rust audio engine you can play from
 hardware, a desktop UI, the command line, or an AI agent -- all at once, all in
 sync.
 
-![The 4S UI: step sequencer, Livid Block mirror, and mixer](docs/images/ui.png)
+![The 4S UI: mixer console with transport, the 808 step sequencer, and the Livid Block mirror](docs/images/ui.png)
 
-Today 4S is a TR-808-style drum machine: eight fully synthesized voices (no
-samples), a 64-step sequencer with accents and swing, an 8-channel mixer, and
-first-class support for the Livid Block grid controller. It is the first
-instrument in a modular suite designed to grow.
+Today 4S has two fully synthesized instruments (no samples): a TR-808-style
+drum machine and a TB-303-style bass synth with accent and slide. Add as many
+as you like, route them into a multi-channel stereo mixer with the transport
+on top, and sequence them all from one 64-step clock with swing. The Livid
+Block grid controller is supported first-class. It is a modular suite
+designed to grow.
 
 ---
 
@@ -49,7 +51,9 @@ command or the test suite fails.
 ```sh
 4s pattern set kick  "x-x-------xx----"
 4s pattern set snare "----X--x-x--X--x"
-4s set mixer.3.volume 35%
+4s instrument add tb303          # a bass synth on its own mixer channel
+4s notes bass "C2! - C2 D#2~ G2 - C2 -"
+4s set mixer.2.volume 70%
 4s controller press 2 5          # press a pad on the (virtual) Livid Block
 4s watch --type trigger          # stream what the engine is playing
 4s render --bars 2               # render to WAV and report peak, RMS, onsets
@@ -113,7 +117,8 @@ cargo build
 target/debug/4s daemon start --project examples/demo.4s   # runs in the background
 target/debug/4s play
 target/debug/4s pattern set snare "----X-------X---"
-target/debug/4s set mixer.3.volume 35%
+target/debug/4s set drums.snare.level 35%
+target/debug/4s mixer
 target/debug/4s stop
 target/debug/4s daemon stop
 

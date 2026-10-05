@@ -40,8 +40,8 @@ accepts a review only if its `REVIEWED_SHA` is the PR's head commit, or its
 | Class | Examples | RFC? |
 |-------|----------|------|
 | **Fix** | bug fix, test, docs fix, refactor with no behavior change | No |
-| **Extension** | a new or improved drum voice model, new parameters, a MIDI controller mapping, a new CLI command with matching RPC and UI control, a new UI panel that follows existing patterns -- see [docs/extending.md](docs/extending.md) for recipes | No |
-| **Architecture / UX** | new instrument types (there is no instrument framework yet; see [docs/extending.md](docs/extending.md#not-an-extension-needs-an-rfc)); how the engine routes or processes audio; the threading or real-time model; the RPC protocol shape or sync model; daemon lifecycle or topology; the project format beyond an additive migration; the UI's overall structure or interaction model (e.g. a windowing system); the core principles; these gates | **Yes** |
+| **Extension** | a new or improved drum voice model, a new instrument type (see [docs/extending.md](docs/extending.md#6-add-an-instrument-type)), new parameters, a MIDI controller mapping, a new CLI command with matching RPC and UI control, a new UI panel that follows existing patterns -- see [docs/extending.md](docs/extending.md) for recipes | No |
+| **Architecture / UX** | how the engine routes or processes audio (effects, sends, buses; see [docs/extending.md](docs/extending.md#not-an-extension-needs-an-rfc)); the threading or real-time model; the RPC protocol shape or sync model; daemon lifecycle or topology; the project format beyond an additive migration; the UI's overall structure or interaction model (e.g. a windowing system); the core principles; these gates | **Yes** |
 
 If you are unsure, treat it as RFC-class and open an issue to ask. An
 Extension that turns out to need new core concepts (say, a voice that needs
@@ -69,9 +69,9 @@ Details, including what counts as good evidence: [docs/gates.md](docs/gates.md).
 
 ## Keep PRs reviewable
 
-- Aim for under ~800 changed lines, not counting generated code
-  (`ui/src/generated/`, `schema/`). Split larger work into steps that each
-  pass the gates.
+- There is no size limit: a PR can be as big as the change needs, as long
+  as the gates pass. Prefer splitting work when the pieces stand on their
+  own.
 - One change per PR. Don't mix a refactor with a feature.
 - Never edit generated files by hand; change `crates/protocol` and run
   `cargo run -p fours-protocol --bin gen-bindings`.

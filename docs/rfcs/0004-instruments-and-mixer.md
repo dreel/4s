@@ -1,6 +1,6 @@
 # RFC 0004: Instruments and the channel mixer
 
-- Status: accepted
+- Status: implemented
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC. Merging it with
@@ -8,6 +8,8 @@
 - Amended: 2026-10-04, maintainer decisions before implementation; see
   "Amendment: maintainer decisions" at the end. Where it differs from the
   sections above, the amendment wins.
+- Implemented: in one PR (per the amendment). "Implementation notes" at the
+  end records how the gaps the review left open were settled.
 
 ## Summary
 
@@ -602,15 +604,7 @@ fixed: each step builds on the one before.
 
 ## Open questions
 
-- Playing the 303 from a MIDI keyboard, and whether the Livid Block gets a
-  note-pattern mode for it.
-- Per-instrument pattern length versus the shared `sequencer.length`.
-- Whether a stereo channel needs a width / mono-sum control.
-- Do pattern edits sent without an `instrument` field keep defaulting to
-  the first `tr808` forever, or become an error in a later protocol
-  version?
-- Channel limits (16 instruments, 32 channels): enough, and should channels
-  get insert slots now or with the effects RFC?
+None. The amendment below resolved them.
 
 ## Amendment: maintainer decisions (2026-10-04)
 
@@ -775,3 +769,35 @@ be discarded. Instead of the v1 -> v2 migration:
   the effects RFC.
 - Removing an instrument also removes the channels its outputs fed if they
   are left empty, unless `keep_channels` is set (as proposed).
+
+## Implementation notes
+
+How the implementation settled details the design left open:
+
+- `instrument.add` takes `channel?: n` and `no_channel: bool` (two plain
+  fields) rather than a null-vs-omitted union.
+- `RenderTrigger` is `{time, step, instrument, voice?, note?, velocity}`,
+  matching the `trigger` event. `RenderResult` adds `left`/`right`
+  `{peak, rms}`.
+- `KnobMode::param_path(target, track)`: knob paths are
+  `<target>.<voice>.{level,tune,decay,tone}`; `knob_params` is empty with no
+  target. `controller.set_mode {target}` sets a target (a `tr808`); there is
+  no explicit clear, since the target only goes null when no `tr808` exists.
+- `voice.trigger` takes `voice` (drums) or `note` (note instruments, gated
+  for half a step), so the 303 editor can audition.
+- The snapshot carries `patterns: [{instrument, pattern}]`, where `pattern`
+  is `{kind: "drums", tracks}` or `{kind: "notes", steps}`.
+- New `pattern.set_note {instrument?, step, note}` alongside
+  `pattern.set_notes`, found by the UI e2e: editing one step by sending the
+  whole pattern lost quick successive edits (and would clobber another
+  client's). The UI edits one step at a time and applies it optimistically.
+  CLI: `4s note <id> <step> <token>`.
+- A keyboard tracks its held note per input port, so one keyboard's
+  note-off never releases another's note.
+- Default channel names: an instrument's new channel takes the instrument's
+  name ("Drums", "Bass", "Drums 2"); `channel.add` without a name gives
+  "Ch N".
+- Output buffers are always 2-lane (mono outputs use the left lane) rather
+  than allocated by width; simpler, and the memory is negligible.
+- Project loads check the exact number of engine commands they will send
+  before changing anything, so a load is all or nothing.
