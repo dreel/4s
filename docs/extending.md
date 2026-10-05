@@ -187,10 +187,12 @@ These change the system's shape. Write an RFC first
   topology.
 - The UI's overall structure or interaction model.
 
-### Next RFC to write: an instrument framework
+### In progress: an instrument framework
 
 To let contributors add instruments as Extensions, 4S needs an instrument
-abstraction. Questions that RFC should answer:
+abstraction. [RFC 0004](rfcs/0004-instruments-and-mixer.md) (proposed)
+answers the questions below; until it is accepted and implemented, new
+instrument types still need it. The questions:
 
 - How an instrument is instantiated and addressed. Parameter paths like
   `instruments.<id>.<param>`, and how the current `drums.*` and `mixer.N.*`
