@@ -54,7 +54,6 @@ jobs:
       MAX_DIFF_LINES: 4000
     steps:
       - name: Decide whether to review
-        id: decide
         env:
           ACTION: ${{ github.event.action }}
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
@@ -68,7 +67,7 @@ jobs:
           if [ "$HAS_KEY" != true ]; then
             skip="The META_API_KEY repository secret is not set, so the automatic review did not run."
           elif [ "$forced" != true ]; then
-            if [ "$ENABLED" = false ]; then
+            if [ "${ENABLED,,}" = false ]; then
               skip="Automatic reviews are paused (repository variable AGENT_REVIEW_ENABLED=false). A maintainer can still run one with the \`agent-review\` label."
             else
               case "$ASSOCIATION" in
@@ -85,7 +84,10 @@ jobs:
         if: env.SKIP == '' && env.FORCED != 'true'
         env:
           DEBOUNCE: ${{ vars.AGENT_REVIEW_DEBOUNCE_SECONDS }}
-        run: sleep "${DEBOUNCE:-120}"
+        run: |
+          D=${DEBOUNCE:-120}
+          [ "$D" -le 600 ] 2>/dev/null || D=600   # bounded; non-numbers fall back to 600
+          sleep "$D"
 
       - name: Check the review budget
         if: env.SKIP == '' && env.FORCED != 'true'
@@ -103,15 +105,19 @@ jobs:
           this_pr=0
           # Count runs in the last 24 h whose review step actually ran. If the
           # API call fails, this step fails and no review runs (fail closed).
+          # Approximate: runs on other PRs checking at the same moment can each
+          # see room under the cap (RFC 0003, spend guards).
           RUNS=$(gh api -X GET "repos/$REPO/actions/workflows/agent-review.yml/runs" \
             -f created=">=$SINCE" -f per_page=100 --paginate \
-            --jq ".workflow_runs[] | select(.id != $RUN_ID) | \"\\(.id) \\(.display_title)\"")
+            --jq ".workflow_runs[] | select(.id != $RUN_ID and .conclusion != \"skipped\") | \"\\(.id) \\(.display_title)\"")
           while read -r id title; do
             [ -n "$id" ] || continue
+            [ "$total" -ge "$DAILY_LIMIT" ] && break
             ran=$(gh api "repos/$REPO/actions/runs/$id/jobs" --jq \
               '[.jobs[].steps[]? | select(.name == "Independent review" and (.status == "in_progress" or .conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled"))] | length')
             if [ "$ran" -gt 0 ]; then
               total=$((total + 1))
+              # Matches the workflow's run-name; change both together.
               if [ "$title" = "agent-review #$PR" ]; then this_pr=$((this_pr + 1)); fi
             fi
           done <<< "$RUNS"
@@ -139,7 +145,6 @@ jobs:
       - name: Check the diff
         id: diff
         if: env.SKIP == ''
-        env:
         run: |
           cd pr
           git fetch -q origin "$BASE_REF"

@@ -120,10 +120,12 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
     remove it and add it again. A skipped run posts "Not reviewed" and its
     check stays green, so green without a verdict does not mean reviewed.
   - Spend guards for automatic runs (Meta's API has no spending limit):
-    a 2-minute debounce (a burst of pushes cancels down to one review), at
-    most 50 reviews per rolling 24 hours repo-wide and 10 per PR (counting
-    only runs whose review step actually ran; if the count cannot be read,
-    no review runs), and a kill switch. Tune or pause them with repository
+    a 2-minute debounce (a burst of pushes cancels down to one review; at
+    most 600 s), at most 50 reviews per rolling 24 hours repo-wide and 10
+    per PR (counting only runs whose review step actually ran; approximate
+    under simultaneous runs; if the count cannot be read, no review runs),
+    and a kill switch (case-insensitive `false`). See the RFC 0003 spend
+    guards amendment. Tune or pause them with repository
     variables: `AGENT_REVIEW_ENABLED=false`, `AGENT_REVIEW_DEBOUNCE_SECONDS`,
     `AGENT_REVIEW_DAILY_LIMIT`, `AGENT_REVIEW_PR_DAILY_LIMIT`. The
     `agent-review` label bypasses them. Each review is also capped at 40
