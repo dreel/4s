@@ -119,7 +119,15 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
     `agent-review` label. To force a re-run when the label is already on,
     remove it and add it again. A skipped run posts "Not reviewed" and its
     check stays green, so green without a verdict does not mean reviewed.
-    The maintainer should set a spending limit on the Meta key.
+  - Spend guards for automatic runs (Meta's API has no spending limit):
+    a 2-minute debounce (a burst of pushes cancels down to one review), at
+    most 50 reviews per rolling 24 hours repo-wide and 10 per PR (counting
+    only runs whose review step actually ran; if the count cannot be read,
+    no review runs), and a kill switch. Tune or pause them with repository
+    variables: `AGENT_REVIEW_ENABLED=false`, `AGENT_REVIEW_DEBOUNCE_SECONDS`,
+    `AGENT_REVIEW_DAILY_LIMIT`, `AGENT_REVIEW_PR_DAILY_LIMIT`. The
+    `agent-review` label bypasses them. Each review is also capped at 40
+    agent turns and 15 minutes.
   - Isolation: the reviewer instructions and scripts come from the current
     base branch, and the reviewer is instructed to judge against the base
     branch's principles and docs (`REVIEW_DOCS_ROOT`). It can only read

@@ -11,7 +11,18 @@
 # workflows" setting, so automatic runs are limited to authors with standing
 # in the repo. For first-time contributors a maintainer adds the
 # `agent-review` label (only users with write access can label).
+#
+# Spend guards for automatic runs (Meta offers no spending limit), tunable
+# with repository variables:
+# - AGENT_REVIEW_ENABLED=false pauses automatic reviews (kill switch);
+# - debounce: wait AGENT_REVIEW_DEBOUNCE_SECONDS (120) first, so a burst of
+#   pushes cancels down to one review;
+# - caps: AGENT_REVIEW_DAILY_LIMIT (50) reviews per rolling 24 h repo-wide,
+#   AGENT_REVIEW_PR_DAILY_LIMIT (10) per PR. Only runs whose review step
+#   actually ran count.
+# Adding the `agent-review` label bypasses all of these (maintainer's call).
 name: agent-review
+run-name: "agent-review #${{ github.event.pull_request.number }}"
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
@@ -19,6 +30,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  actions: read
 
 concurrency:
   # One review per PR; a new push cancels the old run. Unrelated label events
@@ -47,27 +59,77 @@ jobs:
           ACTION: ${{ github.event.action }}
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
           HAS_KEY: ${{ secrets.META_API_KEY != '' }}
+          ENABLED: ${{ vars.AGENT_REVIEW_ENABLED }}
         run: |
           forced=false
           [ "$ACTION" = labeled ] && forced=true
-          echo "forced=$forced" >> "$GITHUB_OUTPUT"
+          echo "FORCED=$forced" >> "$GITHUB_ENV"
+          skip=
           if [ "$HAS_KEY" != true ]; then
-            echo "skip=The META_API_KEY repository secret is not set, so the automatic review did not run." >> "$GITHUB_OUTPUT"
+            skip="The META_API_KEY repository secret is not set, so the automatic review did not run."
           elif [ "$forced" != true ]; then
-            case "$ASSOCIATION" in
-              OWNER|MEMBER|COLLABORATOR|CONTRIBUTOR) ;;
-              *) echo "skip=First-time contributor: a maintainer can run the review by adding the \`agent-review\` label." >> "$GITHUB_OUTPUT" ;;
-            esac
+            if [ "$ENABLED" = false ]; then
+              skip="Automatic reviews are paused (repository variable AGENT_REVIEW_ENABLED=false). A maintainer can still run one with the \`agent-review\` label."
+            else
+              case "$ASSOCIATION" in
+                OWNER|MEMBER|COLLABORATOR|CONTRIBUTOR) ;;
+                *) skip="First-time contributor: a maintainer can run the review by adding the \`agent-review\` label." ;;
+              esac
+            fi
+          fi
+          echo "SKIP=$skip" >> "$GITHUB_ENV"
+
+      # A newer push cancels this run while it waits, so bursts of pushes
+      # produce one review.
+      - name: Debounce
+        if: env.SKIP == '' && env.FORCED != 'true'
+        env:
+          DEBOUNCE: ${{ vars.AGENT_REVIEW_DEBOUNCE_SECONDS }}
+        run: sleep "${DEBOUNCE:-120}"
+
+      - name: Check the review budget
+        if: env.SKIP == '' && env.FORCED != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAILY_LIMIT: ${{ vars.AGENT_REVIEW_DAILY_LIMIT }}
+          PR_DAILY_LIMIT: ${{ vars.AGENT_REVIEW_PR_DAILY_LIMIT }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          DAILY_LIMIT=${DAILY_LIMIT:-50}
+          PR_DAILY_LIMIT=${PR_DAILY_LIMIT:-10}
+          SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          total=0
+          this_pr=0
+          # Count runs in the last 24 h whose review step actually ran. If the
+          # API call fails, this step fails and no review runs (fail closed).
+          RUNS=$(gh api -X GET "repos/$REPO/actions/workflows/agent-review.yml/runs" \
+            -f created=">=$SINCE" -f per_page=100 --paginate \
+            --jq ".workflow_runs[] | select(.id != $RUN_ID) | \"\\(.id) \\(.display_title)\"")
+          while read -r id title; do
+            [ -n "$id" ] || continue
+            ran=$(gh api "repos/$REPO/actions/runs/$id/jobs" --jq \
+              '[.jobs[].steps[]? | select(.name == "Independent review" and (.status == "in_progress" or .conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled"))] | length')
+            if [ "$ran" -gt 0 ]; then
+              total=$((total + 1))
+              if [ "$title" = "agent-review #$PR" ]; then this_pr=$((this_pr + 1)); fi
+            fi
+          done <<< "$RUNS"
+          echo "reviews in the last 24 h: $total repo-wide (limit $DAILY_LIMIT), $this_pr for this PR (limit $PR_DAILY_LIMIT)"
+          if [ "$total" -ge "$DAILY_LIMIT" ]; then
+            echo "SKIP=Daily review limit reached ($total reviews in the last 24 hours, limit $DAILY_LIMIT). A maintainer can force one with the \`agent-review\` label." >> "$GITHUB_ENV"
+          elif [ "$this_pr" -ge "$PR_DAILY_LIMIT" ]; then
+            echo "SKIP=This PR's review limit is reached ($this_pr reviews in the last 24 hours, limit $PR_DAILY_LIMIT). A maintainer can force one with the \`agent-review\` label." >> "$GITHUB_ENV"
           fi
 
       - uses: actions/checkout@v4
-        if: steps.decide.outputs.skip == ''
+        if: env.SKIP == ''
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           path: base
           persist-credentials: false
       - uses: actions/checkout@v4
-        if: steps.decide.outputs.skip == ''
+        if: env.SKIP == ''
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -76,9 +138,8 @@ jobs:
 
       - name: Check the diff
         id: diff
-        if: steps.decide.outputs.skip == ''
+        if: env.SKIP == ''
         env:
-          FORCED: ${{ steps.decide.outputs.forced }}
         run: |
           cd pr
           git fetch -q origin "$BASE_REF"
@@ -86,29 +147,29 @@ jobs:
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           if git diff --name-only "$MERGE_BASE" "$HEAD_SHA" | grep -qE '(^|/)(\.claude/|\.muse/|\.mcp\.json$|CLAUDE(\.local)?\.md$)'; then
-            echo "skip=This PR changes agent configuration (.claude/, .muse/, .mcp.json, CLAUDE.md, CLAUDE.local.md). Review those changes by hand; the automated review did not run." >> "$GITHUB_OUTPUT"
+            echo "SKIP=This PR changes agent configuration (.claude/, .muse/, .mcp.json, CLAUDE.md, CLAUDE.local.md). Review those changes by hand; the automated review did not run." >> "$GITHUB_ENV"
             exit 0
           fi
           LINES=$("$GITHUB_WORKSPACE/base/scripts/ci/review-diff.sh" "$MERGE_BASE" "$HEAD_SHA" | wc -l)
           if [ "$LINES" -eq 0 ]; then
-            echo "skip=No reviewable changes (only generated code or lockfiles)." >> "$GITHUB_OUTPUT"
+            echo "SKIP=No reviewable changes (only generated code or lockfiles)." >> "$GITHUB_ENV"
             exit 0
           fi
           if [ "$LINES" -gt "$MAX_DIFF_LINES" ] && [ "$FORCED" != true ]; then
-            echo "skip=The diff is $LINES lines (limit $MAX_DIFF_LINES, excluding generated code). Split the PR, or a maintainer can force the review with the \`agent-review\` label." >> "$GITHUB_OUTPUT"
+            echo "SKIP=The diff is $LINES lines (limit $MAX_DIFF_LINES, excluding generated code). Split the PR, or a maintainer can force the review with the \`agent-review\` label." >> "$GITHUB_ENV"
           fi
 
       - uses: actions/setup-node@v4
-        if: steps.decide.outputs.skip == '' && steps.diff.outputs.skip == ''
+        if: env.SKIP == ''
         with:
           node-version: 22
       - name: Install the review harness
-        if: steps.decide.outputs.skip == '' && steps.diff.outputs.skip == ''
+        if: env.SKIP == ''
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Independent review
         id: review
-        if: steps.decide.outputs.skip == '' && steps.diff.outputs.skip == ''
+        if: env.SKIP == ''
         env:
           META_API_KEY: ${{ secrets.META_API_KEY }}
           BASE_SHA: ${{ steps.diff.outputs.base_sha }}
@@ -145,7 +206,6 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
-          SKIP: ${{ steps.decide.outputs.skip }}${{ steps.diff.outputs.skip }}
           VERDICT: ${{ steps.review.outputs.verdict }}
         run: |
           MARK='<!-- agent-review -->'
