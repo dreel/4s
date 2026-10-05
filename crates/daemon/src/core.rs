@@ -390,7 +390,8 @@ impl Core {
                 self.in_flight
             )));
         }
-        self.ensure_room(4)?;
+        // The removal, plus deactivating every channel it may leave empty.
+        self.ensure_room(1 + self.instruments[pos].outputs.len())?;
         let inst = self.instruments.remove(pos);
         self.send(Command::RemoveInstrument { slot: inst.slot });
         self.slot_used[inst.slot as usize] = false;
@@ -935,6 +936,9 @@ impl Core {
 
     pub fn midi_connect(&mut self, p: MidiConnectParams, origin: &str) -> Result<MidiPortsResult, RpcError> {
         if let Some(id) = &p.instrument {
+            if p.kind != DeviceKind::Keyboard {
+                return Err(RpcError::invalid("`instrument` only applies to --kind keyboard"));
+            }
             self.resolve(Some(id), InstrumentType::Tb303)?;
         }
         self.midi

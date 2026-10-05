@@ -800,6 +800,10 @@ How the implementation settled details the design left open:
 - Default channel names: an instrument's new channel takes the instrument's
   name ("Drums", "Bass", "Drums 2"); `channel.add` without a name gives
   "Ch N".
+- The 303's `cutoff` spans ~40 Hz-6 kHz (not ~10 kHz): with up to five
+  octaves of envelope and the accent sweep on top, the upper part of a
+  10 kHz range only sounded harsh. The top is also clamped below Nyquist.
+- `midi.connect` accepts `instrument` only for `kind: keyboard`.
 - Output buffers are always 2-lane (mono outputs use the left lane) rather
   than allocated by width; simpler, and the memory is negligible.
 - Project loads check the exact number of engine commands they will send

@@ -226,8 +226,10 @@ impl Engine {
                 }
             },
             Command::AddInstrument { slot, instrument } => {
-                let old = self.slots.get_mut(slot as usize)?.replace(Slot { instrument, routes: [None; MAX_OUTPUTS] });
-                return old.map(|s| s.instrument);
+                // Never drop an instrument here: an invalid slot hands it
+                // straight back to be freed on the control side.
+                let Some(s) = self.slots.get_mut(slot as usize) else { return Some(instrument) };
+                return s.replace(Slot { instrument, routes: [None; MAX_OUTPUTS] }).map(|s| s.instrument);
             }
             Command::RemoveInstrument { slot } => {
                 return self.slots.get_mut(slot as usize)?.take().map(|s| s.instrument);

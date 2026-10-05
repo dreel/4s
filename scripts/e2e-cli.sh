@@ -100,6 +100,17 @@ check "bad note" "out of range" s notes bass "C9"
 check "set one note step" "bass: C2 C2! D#2~ - G1 - C3 - C2 - - - G1 G1 A#1 G2!~" s note bass 16 "G2!~"
 s note bass 16 - >/dev/null
 check "render reports bass triggers" "triggers: 18 (bass 9, drums 9)" s render --bars 1 --out renders/bass.wav
+# Bass alone (drums muted): every note in the pattern is retriggered (the
+# one slide leads into a rest), so each bass trigger shows up as an onset
+# at its time.
+s set mixer.1.mute on >/dev/null
+check "bass onsets land on its notes" "9 onsets on 9 notes" python3 -c "
+import json, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--bars', '1', '--out', 'renders/bass-only.wav']))
+notes = [t['time'] for t in r['triggers'] if t['instrument'] == 'bass']
+ok = len(notes) == len(r['onsets']) and all(abs(a - b) < 0.01 for a, b in zip(notes, r['onsets']))
+print(f'{len(r[\"onsets\"])} onsets on {len(notes)} notes' if ok else f'onsets {r[\"onsets\"]} vs notes {notes}')"
+s set mixer.1.mute off >/dev/null
 "$BIN/4s" watch --type notes_changed --count 1 --json > "$TMP/notes.json" &
 WATCH=$!; sleep 0.5
 s note bass 2 C3 >/dev/null
@@ -175,10 +186,15 @@ s channel rm 3 >/dev/null
 check "unknown source" "no output 'nope'" s route nope 1
 check "second 808 gets a numbered id" "drums2     tr808  Drums 2" s instrument add tr808
 check "pattern on a chosen instrument" "drums2:" s pattern --instrument drums2 show kick
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/audition.json" &
+WATCH=$!; sleep 0.5
 check "audition a note" "ok" s trigger --note C2
+wait $WATCH
+check "the audition plays the bass" '"instrument":"bass","voice":null,"note":36' cat "$TMP/audition.json"
 check "controller can target the second 808" "target: drums2" s controller mode --target drums2
 check "removing the target retargets the controller" "target: drums " bash -c "$BIN/4s instrument rm drums2 >/dev/null && $BIN/4s controller"
 check "removing an instrument removes its empty channel" "ch 1  Drums        <- drums" s instrument rm bass
+check "drums render unaffected after removing the bass" "triggers: 9 (drums 9)" s render --bars 1 --out renders/after-rm.wav
 check "its params are gone" "bass params: 0" bash -c "echo bass params: \$($BIN/4s params bass | wc -l | tr -d ' ')"
 # Events say which instrument they belong to.
 "$BIN/4s" watch --type step_changed --count 1 --json > "$TMP/events.json" &
