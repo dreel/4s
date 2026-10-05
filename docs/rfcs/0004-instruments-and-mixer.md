@@ -5,7 +5,7 @@
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC. Merging it with
   `Status: accepted` is the maintainer's approval.
-- Amended: 2026-10-05, maintainer decisions before implementation; see
+- Amended: 2026-10-04, maintainer decisions before implementation; see
   "Amendment: maintainer decisions" at the end. Where it differs from the
   sections above, the amendment wins.
 
@@ -605,7 +605,7 @@ fixed: each step builds on the one before.
 - Channel limits (16 instruments, 32 channels): enough, and should channels
   get insert slots now or with the effects RFC?
 
-## Amendment: maintainer decisions (2026-10-05)
+## Amendment: maintainer decisions (2026-10-04)
 
 Decided by the maintainer (@dreel) after acceptance and before
 implementation. Merging this amendment is the approval.
