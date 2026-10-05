@@ -74,30 +74,57 @@ back.
 | Output | Width | Why |
 |--------|-------|-----|
 | 808 main | stereo | the voices after their per-voice pan |
-| 808 direct (per voice) | mono | the voice before pan |
+| 808 direct (per voice) | mono | the voice after its level and mute, before its pan |
 | 303 main | mono | one oscillator, no stereo processing |
 
 Future instruments with real stereo character (pads, a chorus) declare a
 stereo main.
 
+So a voice's `level` and `mute` always apply, whether it plays through the
+main mix or a direct out; only its `pan` is bypassed on a direct out (the
+channel pans it instead).
+
 **Channel.** One channel is one stereo strip that accepts a source of either
 width. It is never a pair of linked mono strips. Its `pan` parameter means
 constant-power pan for a mono source and balance for a stereo source: same
 path, same range -1..1, behavior chosen by the routed source's width. The
-bus after the channel is always stereo. Parameters, with today's taper and
-10 ms smoothing:
+bus after the channel is always stereo.
+
+Pan laws, so levels stay exactly as they are today:
+
+- **Mono pan** (mono sources on a channel, and 808 voices into the 808's
+  stereo main): today's constant-power law, `L = cos(a)`, `R = sin(a)`,
+  `a = (pan + 1) * pi/4`. That is -3 dB per side at center.
+- **Balance** (stereo sources): unity at center. Moving toward one side
+  attenuates only the other side, linearly: `L *= min(1, 1 - pan)`,
+  `R *= min(1, 1 + pan)`. At full left, R is silent.
+
+Parameters, with today's squared taper and 10 ms smoothing:
 
 | Path | Range | Default |
 |------|-------|---------|
-| `mixer.<n>.volume` | 0-1 (squared taper) | 0.8 |
+| `mixer.<n>.volume` | 0-1 (squared taper) | 1.0 (unity) |
 | `mixer.<n>.pan` | -1..1 | 0 |
 | `mixer.<n>.mute` / `.solo` | toggle | off |
 | `mixer.master.volume` | 0-1 | 0.8 |
 
-`n` is a stable channel number assigned at creation and never renumbered when
-another channel is removed, so paths in projects and scripts stay valid.
-Display order is a separate list. Solo works across channels as today. A
-channel also has a name (structured state, not a parameter).
+The channel fader now defaults to unity (it was 0.8 for the per-voice
+strips). Level setting moves into the instrument (`drums.<voice>.level`
+defaults to 0.8, today's per-voice default). So the default chain is
+voice -> level 0.8 -> constant-power pan -> balance at unity -> fader at
+unity -> master: the same gain as today's voice -> fader 0.8 ->
+constant-power pan -> master.
+
+**Channel numbers.** `n` is the channel's slot in the engine's channel pool,
+1..`MAX_CHANNELS`. `channel.add` takes the lowest free `n`. Channels are
+never renumbered when another is removed, so paths in projects and scripts
+stay valid while the channel exists. A removed `n` can be reused by a later
+`channel.add`. Removing a channel resets its parameters to defaults, so a
+reused `n` starts clean, but a script that still holds the old `n` will
+address the new channel. We accept that, as DAWs do with track numbers.
+Projects store `n` explicitly, and gaps load into the same slots. Display
+order is a separate list. Solo works across channels as today. A channel
+also has a name (structured state, not a parameter).
 
 **Routing.** A map from source to channel number, kept as structured state
 next to the instrument and channel lists. It is not a float parameter. Each
@@ -150,6 +177,11 @@ for these. `tune`, `decay`, and `tone` are unchanged.
   takes it out of the table and pushes the box onto a new return ring. The
   feedback thread drains that ring and drops the box. `Command` is no longer
   `Copy`. Nothing is allocated or freed on the audio thread.
+- **The return push cannot fail.** The return ring holds `MAX_INSTRUMENTS`
+  boxes, and `Core` marks a slot busy from `instrument.add` until its box
+  has come back (the feedback thread reports it). A slot is never reused
+  while its box is in flight. So at most `MAX_INSTRUMENTS` boxes are ever
+  outstanding, and the push always has room.
 - **Parameter addressing.** The flat `ParamId` array splits by owner. The
   control side resolves a path to
   `Global(idx) | Instrument { slot, idx } | Channel { n, idx }` and sends
@@ -184,14 +216,19 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 Changed:
 
 - `pattern.*` and `voice.trigger` gain an `instrument` field, defaulting to
-  the first `tr808` so existing scripts keep working.
+  the first `tr808` so existing scripts keep working. The default is
+  resolved at call time. If there is no `tr808`, a call without
+  `instrument` fails with `invalid params`, and the error lists the
+  instruments that exist.
 - `Snapshot` gains `graph: { instruments, channels, routes }`; `pattern`
   becomes per instrument.
 - New event `graph` on any instrument/channel/route change. Clients refetch
   `param.list` when they receive it, since the registry may have changed.
 - `Meters` carries per-channel L/R peaks keyed by channel number.
 - Render results (`RenderTrigger`) gain the instrument id. `4s render`
-  reports triggers per instrument.
+  reports triggers per instrument, and peak and RMS for the left and right
+  channels separately (as well as combined), so pan and balance can be
+  checked end to end.
 - `PROTOCOL_VERSION` 1 -> 2.
 
 CLI:
@@ -213,6 +250,11 @@ CLI:
   `controller.target` (default: the first `tr808`; settable via
   `controller.set_mode` and `4s controller mode --target`). Grid rows stay the
   808's eight voices.
+- If the target instrument is removed, the controller retargets to the
+  first remaining `tr808`. If there is none, the target becomes null: the
+  grid goes dark, and pads and knobs do nothing. Either way, `Core` emits a
+  `controller` event. Adding a `tr808` while the target is null makes it
+  the target.
 - Volume knob mode now controls `<target>.<voice>.level` (the 808's internal
   mix) rather than `mixer.N.volume`.
 
@@ -334,7 +376,9 @@ Channel order in `channels` is the display order. Parameters remain a flat
   - If any `mixer.N.solo` is on, every non-soloed voice gets
     `drums.<voice>.mute = 1` (and soloed voices keep their own mute).
   - The old `mixer.N.*` paths are removed; `mixer.1.*` then takes defaults
-    as the new Drums channel. `mixer.master.volume` is unchanged.
+    as the new Drums channel (fader at unity, pan centered).
+    `mixer.master.volume` is unchanged. With the pan laws above, the
+    migrated project renders at the same level and stereo image as before.
   - `patterns` moves under `patterns.drums`.
   The v1 fixture keeps loading; a v2 fixture is added.
 - The default for new projects (and `project.new`) is the same shape: one
@@ -356,19 +400,29 @@ Separate PRs, each linking this RFC, each under ~800 changed lines
 (excluding generated code):
 
 1. **Engine framework.** `Instrument` trait, block rendering, slot table,
-   channel pool, routing, add/remove through the rings, 808 ported. Wired to
-   reproduce today's behavior exactly (eight direct outs on channels 1-8),
-   so existing tests and renders prove the refactor.
+   channel pool, routing, add/remove through the rings, 808 ported. No
+   protocol change. Wired to reproduce today exactly: eight direct outs on
+   channels 1-8, voice level fixed at unity, and `mixer.N.*` still meaning
+   those channels. Existing tests and renders prove the refactor.
 2. **Graph API.** Protocol and `Core` state for instruments, channels, and
-   routes; the new RPCs and CLI commands; dynamic registry; 808 internal mix
-   and normalled outs; widths and pan/balance; controller target;
-   `PROTOCOL_VERSION` 2.
-3. **Project v2.** Format, migration, fixtures, and the switch to the new
-   default shape (one Drums channel).
-4. **UI.** Console + editor layout, channel strips, "+ instrument", 808
+   routes; `instrument.*`, `channel.*`, `route.set`, and their CLI commands
+   (including `4s mixer`); the dynamic registry; the `graph` event;
+   `instrument` fields with call-time defaults; `PROTOCOL_VERSION` 2. Only
+   the `tr808` type exists.
+3. **Internal mix and stereo.** `drums.<voice>.level/pan/mute`, normalled
+   outs, output widths, pan vs balance, L/R render stats, controller target
+   and retargeting.
+4. **Project v2.** Format, migration, fixtures, and the switch to the new
+   default shape (one Drums channel at unity).
+5. **UI.** Console + editor layout, channel strips, "+ instrument", 808
    output selector; Playwright tests.
-5. **TB-303.** DSP, note patterns, `pattern.*_notes` RPC/CLI, 303 editor.
-   Sets this RFC to `implemented` and updates the docs listed above.
+6. **TB-303 engine and API.** DSP, note patterns, `pattern.*_notes` RPC and
+   `4s notes`, render coverage.
+7. **TB-303 editor.** The 303 panel in the UI. Sets this RFC to
+   `implemented` and updates the docs listed above.
+
+If a step still runs past ~800 lines, it splits further. The order is
+fixed: each step builds on the one before.
 
 ## Validation plan
 
@@ -390,8 +444,24 @@ Separate PRs, each linking this RFC, each under ~800 changed lines
     disappear while the rest of the kit remains.
   - `4s instrument rm bass`: removed from `instrument.list`, its params gone
     from `4s params`, render unaffected for the drums.
+  - `4s route drums.kick none`: the kick returns to the Drums channel
+    (muting channel 1 silences it again).
+  - `4s channel add --name X`, `rename`, `rm`: `4s mixer` shows each change,
+    and a removed `n` reused by the next `add` starts at defaults.
+  - `4s instrument types` lists `tr808` (and `tb303` from step 6).
+  - `4s mixer` output shows names, sources, and levels.
+  - Pan and balance from the L/R render stats: a mono channel panned hard
+    left has near-zero right RMS; a stereo channel (the Drums main) at
+    balance -1 has near-zero right RMS, and at center matches the
+    unrouted level.
+  - `4s controller mode --target`, and removing the target: the controller
+    retargets or goes null, as specified.
+  - Calls without `instrument` after removing every `tr808` fail with the
+    documented error.
 - **Migration**: the v1 fixture loads into the v2 shape (asserted
-  structurally) and renders the same onsets as before migration.
+  structurally). It also loads through a running daemon (`4s project load`),
+  and `4s render` reports the same onsets, and peak and RMS within 0.1 dB of
+  the values recorded before the migration.
 - **Playwright** (`ui/e2e/`): add an instrument from the console and see its
   strip; mute/solo a strip and check over RPC; change routing over RPC and
   see the UI update. Review the `groove.png` screenshot for the new layout.
@@ -406,5 +476,8 @@ Separate PRs, each linking this RFC, each under ~800 changed lines
   note-pattern mode for it.
 - Per-instrument pattern length versus the shared `sequencer.length`.
 - Whether a stereo channel needs a width / mono-sum control.
+- Do pattern edits sent without an `instrument` field keep defaulting to
+  the first `tr808` forever, or become an error in a later protocol
+  version?
 - Channel limits (16 instruments, 32 channels): enough, and should channels
   get insert slots now or with the effects RFC?
