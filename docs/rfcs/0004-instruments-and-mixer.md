@@ -163,6 +163,12 @@ for these. `tune`, `decay`, and `tone` are unchanged.
     `{note, accent, slide}`. String form for the CLI and project files,
     space-separated tokens: `C2` note, `C2!` accent, `C2~` slide into the
     next step, `C2!~` both, `-` rest. Example: `"C2 C2! D#2~ - G1 - C3 -"`.
+    Notes use scientific pitch with C4 = MIDI 60, so `C2` is MIDI 36.
+    Sharps only (`#`); `b` flats are accepted on input and written as
+    sharps. The range is C0-C8 (MIDI 12-108). As with drum patterns, the
+    pattern always holds 64 steps and `sequencer.length` sets how many
+    play. A shorter string is padded with rests; more than 64 tokens is an
+    error.
 - Still one pattern per instrument. Pattern banks and song arrangement are out
   of scope.
 
@@ -195,19 +201,29 @@ for these. `tune`, `decay`, and `tone` are unchanged.
   as `[NoteStep; MAX_STEPS]` (a small `Copy` struct per step), like the
   drum `SetTrack`. It is never a `Vec`, so applying it neither allocates
   nor frees.
-- **The return push cannot fail.** The return ring holds `MAX_INSTRUMENTS`
-  boxes, and `Core` marks a slot busy from `instrument.add` until its box
-  has come back (the feedback thread reports it). A slot is never reused
-  while its box is in flight. So at most `MAX_INSTRUMENTS` boxes are ever
-  outstanding, and the push always has room.
+- **The return push cannot fail.** Slot ids and returning boxes are
+  tracked separately. A slot is free again as soon as its
+  `RemoveInstrument` is pushed. The engine applies commands in order, so a
+  later `AddInstrument` to the same slot always finds it empty. The return
+  ring holds `RETURN_CAPACITY` boxes (64, four times `MAX_INSTRUMENTS`).
+  `Core` counts boxes in flight: up when it pushes a remove, down when the
+  feedback thread drops a returned box. It never pushes a remove that would
+  take the count past the capacity, so the engine's push always has room.
+- **Project load and `project.new` are all-or-nothing.** They replace the
+  whole graph in one go under the `Core` lock: removes for the old
+  instruments, then adds for the new ones. Before pushing anything, `Core`
+  checks that the command ring has room for every command (`rtrb`'s
+  `slots()`) and that the in-flight count leaves room for every remove. If
+  not, the load fails with a clear error and nothing changes. Otherwise
+  every push succeeds. Reloading a project with 16 instruments needs only
+  16 in-flight boxes, well under the capacity.
 - **No engine rebuild in this RFC.** The live `RtEngine` is moved onto the
   audio thread once at startup (the cpal callback or the null pacer) and
   stays there, so the control side never gets it back. If the audio thread
   stalls (a device stops calling back), removed instruments stop coming
-  back and their slots stay busy. Once all slots are busy, `instrument.add`
-  fails with an error that names the cause ("no free instrument slot: N
-  removed instruments are still waiting to be returned by the audio
-  engine"). A daemon restart clears it. Recovering from a lost device, and
+  back, and the in-flight count reaches the capacity. Removes (and loads)
+  then fail with an error that names the cause ("N removed instruments are
+  still waiting to be returned by the audio engine"). A daemon restart clears it. Recovering from a lost device, and
   rebuilding the engine, are left to a later lifecycle RFC.
 - **Startup.** The engine starts in the same default shape `Core` starts
   with (one `drums` 808). A loaded project is applied through the same
@@ -243,7 +259,7 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 | `instrument.types` | - | available types, their outputs and params |
 | `instrument.list` | - | instances: id, type, name, outputs |
 | `instrument.add` | `{type, id?, name?, channel?}` | `channel`: omitted = create a new channel named after the instrument and route `main` to it; a number = route `main` to that existing channel; `null` = leave `main` unrouted, as in `route.set` (CLI: `--channel N`, `--no-channel`) |
-| `instrument.remove` | `{id, keep_channels?}` | unroutes all its sources, and removes every channel left with no source, unless `keep_channels` (CLI: `--keep-channels`) |
+| `instrument.remove` | `{id, keep_channels?}` | unroutes all its sources, and removes the channels they fed that are left with no source, unless `keep_channels` (CLI: `--keep-channels`). Channels that were already empty are untouched. |
 | `channel.add` | `{name?}` | returns the new `n` |
 | `channel.remove` | `{n}` | unroutes sources that fed it |
 | `channel.rename` | `{n, name}` | |
@@ -261,8 +277,11 @@ Changed:
   instruments that exist.
 - `Snapshot` gains `graph: { instruments, channels, routes }`; `pattern`
   becomes per instrument.
-- New event `graph` on any instrument/channel/route change. Clients refetch
-  `param.list` when they receive it, since the registry may have changed.
+- New event `graph` on any instrument/channel/route change. When a client
+  receives it, it refetches `state.get` and `param.list`, as it does for
+  `reset`, since both the registry and parameter values may have changed
+  (for example, a removed and re-added `bass` starts at defaults).
+  Structural changes are rare, so a full refetch is cheap enough.
 - Events that carry pattern or trigger data gain an `instrument` field, so
   every client knows which instrument an edit or hit belongs to:
   `StepChanged { instrument, voice, step, level }` and
@@ -308,8 +327,9 @@ CLI:
   and in `controller` events, and the target's pattern reaches them through
   the snapshot and the instrument-tagged `StepChanged`/`PatternChanged`
   events. A bridge has everything it needs locally.
-- Volume knob mode now controls `<target>.<voice>.level` (the 808's internal
-  mix) rather than `mixer.N.volume`.
+- From step 4 (when the parameter exists), volume knob mode controls
+  `<target>.<voice>.level` (the 808's internal mix) rather than
+  `mixer.N.volume`.
 
 ### UI
 
@@ -474,10 +494,12 @@ Separate PRs, each linking this RFC, each under ~800 changed lines
    (including `4s mixer`); the dynamic registry; the `graph` event; the
    `instrument` field on requests and events; `PROTOCOL_VERSION` 2. Only
    the `tr808` type exists.
-3. **Stereo and controller target.** Output widths, pan vs balance, L/R
-   render stats, controller target and retargeting. Levels are unchanged.
+3. **Widths and controller target.** Output widths, L/R render stats,
+   controller target and retargeting. Every source is still mono, so only
+   mono pan is exercised; levels are unchanged.
 4. **Internal mix and project v2.** `drums.<voice>.level/pan/mute`,
-   normalled outs, the new default shape (one Drums channel at unity),
+   normalled outs, the stereo 808 main out and balance, volume knob mode on
+   `level`, the new default shape (one Drums channel at unity),
    project format v2, migration, and fixtures, all in one step. That way
    the new mix and the format that saves it, and the new defaults and the
    migration that keeps old projects sounding the same, always ship
@@ -514,13 +536,10 @@ fixed: each step builds on the one before.
 
 ## Validation plan
 
-- **Engine tests** (silent invariants and non-obvious DSP only):
+- **Engine tests** (silent invariants and non-obvious DSP only; routing and
+  pan/balance are covered end to end below, so they get no unit tests):
   - `tb303` sounds and decays at every waveform, does not exceed 1.0, and a
     slid note does not retrigger the envelope.
-  - A direct out routed to a channel leaves the instrument's main mix (and
-    returns when unrouted).
-  - A stereo source on a centered channel keeps its image; full-left balance
-    silences the right side. A mono source pans with constant power.
   - Adding and removing instruments while rendering, under an
     allocation-counting global allocator on the render path, allocates
     nothing.
