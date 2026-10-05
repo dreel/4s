@@ -1,6 +1,6 @@
 # RFC 0004: Instruments and the channel mixer
 
-- Status: proposed
+- Status: accepted
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC. Merging it with
