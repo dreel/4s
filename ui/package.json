@@ -2,6 +2,7 @@
   "name": "fours-ui",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "description": "4S thin UI: Electron + React + Tailwind over the 4sd RPC API",
   "type": "module",
   "main": "electron/main.cjs",

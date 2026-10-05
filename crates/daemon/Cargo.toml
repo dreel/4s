@@ -3,6 +3,7 @@ name = "fours-daemon"
 description = "4S daemon (4sd): engine host, RPC server, MIDI, audio output"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "4sd"
