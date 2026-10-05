@@ -7,6 +7,8 @@
   maintainer's approval.
 - Amends: [RFC 0001](0001-contribution-gates.md) (resolves its open question
   on running the canonical review automatically)
+- Amended: 2026-10-05, spend guards (Meta's API has no spending limit); see
+  "Spend guards" below
 
 ## Summary
 
@@ -64,8 +66,7 @@ review without a maintainer having to ask.
   (`author_association` of OWNER, MEMBER, COLLABORATOR, or CONTRIBUTOR).
   For first-time contributors (FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, NONE),
   the workflow posts a note, and a maintainer runs the review by adding the
-  `agent-review` label, which only users with write access can do. The
-  maintainer should also set a spending limit on the Meta key.
+  `agent-review` label, which only users with write access can do.
 - One run per PR at a time; a new push cancels the old run, so only the
   latest commit is reviewed.
 - Unchanged isolation: the reviewer instructions, scripts, and principles
@@ -75,7 +76,33 @@ review without a maintainer having to ask.
   the key is redacted from output.
 - Cost and abuse guards: skip diffs over about 4000 lines (excluding
   generated code) with a note (the label still forces a run); cap agent
-  turns.
+  turns (40) and wall time (15 minutes) per review.
+
+### Spend guards (amendment)
+
+Meta's Model API offers no spending limit, so the workflow bounds spend
+itself. These apply to automatic runs; adding the `agent-review` label (a
+maintainer's explicit choice) bypasses them.
+
+- **Kill switch**: the repository variable `AGENT_REVIEW_ENABLED=false`
+  (case-insensitive) pauses automatic reviews without a code change.
+- **Debounce**: wait `AGENT_REVIEW_DEBOUNCE_SECONDS` (default 120, at most
+  600) before reviewing. A newer push cancels the waiting run, so a burst of
+  pushes produces one review.
+- **Caps**: at most `AGENT_REVIEW_DAILY_LIMIT` (default 50) reviews per
+  rolling 24 hours repo-wide, and `AGENT_REVIEW_PR_DAILY_LIMIT` (default 10)
+  per PR. Only runs whose review step actually ran are counted. The cap is
+  approximate: runs on different PRs that check at the same moment can
+  overshoot it by the number running at once.
+- **Fail closed**: if the run history cannot be read, no review runs.
+- Over a limit or paused, the run posts "Not reviewed" with the reason and
+  its check stays green, so green without a verdict does not mean reviewed.
+- Counting reads the workflow's run history, which needs the `actions: read`
+  permission. Runs are named `agent-review #<PR>` so they can be counted per
+  PR.
+
+Together with the per-review caps, this bounds daily spend to roughly the
+daily limit times the cost of the largest review.
 - Output: one sticky PR comment with the verdict, reviewed SHA, model, and
   the full review, updated on each run.
 
