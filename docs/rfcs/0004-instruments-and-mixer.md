@@ -58,6 +58,10 @@ creation. The id is the first segment of the instrument's parameter paths.
 The default 808 has id `drums`, so `drums.kick.tune` and friends keep their
 meaning. Ids match `[a-z][a-z0-9_]*`. These ids are reserved: `transport`,
 `sequencer`, `mixer`, `controller`. An instrument also has a display name.
+A duplicate or reserved id is rejected with `invalid params`. If `id` is
+omitted, the type's default is used (`drums` for `tr808`, `bass` for
+`tb303`). If that is taken, a number is appended: `drums2`, `drums3`, and so
+on.
 
 **Outputs.** Every instrument has a `main` output. Multi-voice types also
 expose one direct output per voice. An output is named by a *source* string:
@@ -182,6 +186,15 @@ for these. `tune`, `decay`, and `tone` are unchanged.
   has come back (the feedback thread reports it). A slot is never reused
   while its box is in flight. So at most `MAX_INSTRUMENTS` boxes are ever
   outstanding, and the push always has room.
+- **When the audio thread is not running** (device lost, or the engine is
+  being rebuilt), `Core` does not wait for boxes that will never come back.
+  An engine is always built from `Core`'s graph. Building one starts with
+  every slot free except the ones the graph uses, and the old engine,
+  boxes included, is dropped on the control side.
+- **Offline renders** (`render.offline`) build their engine the same way,
+  from a copy of `Core`'s graph, parameters, and per-instrument patterns.
+  So `4s render` hears exactly what is configured: routing, mute/solo, and
+  every instrument.
 - **Parameter addressing.** The flat `ParamId` array splits by owner. The
   control side resolves a path to
   `Global(idx) | Instrument { slot, idx } | Channel { n, idx }` and sends
@@ -205,7 +218,7 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 |--------|--------|-------|
 | `instrument.types` | - | available types, their outputs and params |
 | `instrument.list` | - | instances: id, type, name, outputs |
-| `instrument.add` | `{type, id?, name?, channel?}` | `channel`: omitted = create a new channel named after the instrument and route `main` to it; a number = route `main` to that existing channel; `"none"` = leave `main` unrouted (CLI: `--channel N`, `--no-channel`) |
+| `instrument.add` | `{type, id?, name?, channel?}` | `channel`: omitted = create a new channel named after the instrument and route `main` to it; a number = route `main` to that existing channel; `null` = leave `main` unrouted, as in `route.set` (CLI: `--channel N`, `--no-channel`) |
 | `instrument.remove` | `{id}` | unroutes all its sources |
 | `channel.add` | `{name?}` | returns the new `n` |
 | `channel.remove` | `{n}` | unroutes sources that fed it |
@@ -388,7 +401,10 @@ Channel order in `channels` is the display order. Parameters remain a flat
   - `mixer.N.volume` -> `drums.<voice N>.level`, `mixer.N.pan` ->
     `drums.<voice N>.pan`, `mixer.N.mute` -> `drums.<voice N>.mute`.
   - If any `mixer.N.solo` is on, every non-soloed voice gets
-    `drums.<voice>.mute = 1` (and soloed voices keep their own mute).
+    `drums.<voice>.mute = 1` (and soloed voices keep their own mute). This
+    is deliberately lossy. The project sounds the same, but it is no longer
+    "soloed": turning a voice's mute off is how to bring it back. Step 4
+    documents this in [project-format.md](../project-format.md).
   - The old `mixer.N.*` paths are removed; `mixer.1.*` then takes defaults
     as the new Drums channel (fader at unity, pan centered).
     `mixer.master.volume` is unchanged. With the pan laws above, the
@@ -406,7 +422,10 @@ Channel order in `channels` is the display order. Parameters remain a flat
   [project-format.md](../project-format.md), [rpc.md](../rpc.md),
   [livid-block.md](../hardware/livid-block.md), and
   [extending.md](../extending.md), which gains an "add an instrument"
-  recipe (implementing a type becomes an Extension).
+  recipe (implementing a type becomes an Extension). For the same reason,
+  update the parts of [AGENTS.md](../../AGENTS.md) (principle 5),
+  [CONTRIBUTING.md](../../CONTRIBUTING.md) (change classes), and
+  [rfcs/README.md](README.md) that say new instrument types need an RFC.
 
 ## Implementation plan
 
@@ -443,6 +462,13 @@ Between steps, nothing is silently lost or changed:
 - **Fader default.** It stays 0.8 for every channel (including ones made
   by `channel.add`) through step 3. Step 4 makes it unity, together with
   the internal mix and the migration.
+- **Routing in steps 2-3.** There is no main mix before step 4, so a
+  `tr808`'s sources are its eight direct outs. `instrument.add tr808` (the
+  default `channel`) creates one channel per voice and routes each direct
+  out to it, which is the step-1 shape. `route.set <direct out> null`, and
+  `instrument.add` with `channel: null` or a number, are rejected with
+  `invalid params` ("needs the instrument main mix, RFC 0004 step 4").
+  Nothing goes silent unexpectedly.
 - **Saving in steps 2-3.** The project format is still v1. `project.save`
   fails with a clear error ("saving instruments, channels, and routes needs
   project format v2, RFC 0004 step 4") if the graph differs from the
