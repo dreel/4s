@@ -75,6 +75,40 @@ test("console: add a 303 on its own channel, mute and solo strips", async () => 
   await expect(page.getByTestId("strip-2")).toHaveCount(0);
 });
 
+test("console: add, rename, and remove channels; remove an instrument from the editor", async () => {
+  const { page, rpc } = h;
+  await page.getByTestId("add-channel").click();
+  await expect(page.getByTestId("strip-2")).toBeVisible();
+  await expect(page.getByTestId("channel-name-2")).toHaveText("Ch 2");
+  expect((await rpc("state.get", {})).graph.channels.map((c) => c.n)).toEqual([1, 2]);
+
+  await page.getByTestId("channel-name-2").dblclick();
+  await page.getByTestId("channel-name-input-2").fill("Hats");
+  await page.getByTestId("channel-name-input-2").press("Enter");
+  await expect
+    .poll(async () => (await rpc("state.get", {})).graph.channels.find((c) => c.n === 2)?.name)
+    .toBe("Hats");
+  await expect(page.getByTestId("channel-name-2")).toHaveText("Hats");
+
+  await page.getByTestId("channel-remove-2").click();
+  await expect(page.getByTestId("strip-2")).toHaveCount(0);
+  expect((await rpc("state.get", {})).graph.channels.map((c) => c.n)).toEqual([1]);
+
+  // A second 808: the Block follows it after "control with Block", and
+  // removing it from the editor hands the Block back to `drums`.
+  await rpc("instrument.add", { type: "tr808", id: null, name: null, channel: null, no_channel: false });
+  await page.getByTestId("select-drums2").click();
+  await page.getByTestId("make-target").click();
+  await expect.poll(async () => (await rpc("controller.get", {})).target).toBe("drums2");
+  await expect(page.getByTestId("block-target")).toHaveText("drums2");
+
+  await page.getByTestId("remove-drums2").click();
+  await expect.poll(async () => (await rpc("instrument.list", {})).instruments.map((i) => i.id)).toEqual(["drums"]);
+  await expect.poll(async () => (await rpc("controller.get", {})).target).toBe("drums");
+  await expect(page.getByTestId("select-drums2")).toHaveCount(0);
+  await expect(page.getByTestId("strip-2")).toHaveCount(0);
+});
+
 test("303 note editor edits the daemon's note pattern, and back", async () => {
   const { page, rpc } = h;
   await rpc("instrument.add", { type: "tb303", id: null, name: null, channel: null, no_channel: false });

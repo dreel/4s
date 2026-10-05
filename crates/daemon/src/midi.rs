@@ -168,6 +168,19 @@ impl Midi {
         before != self.conns.len()
     }
 
+    /// Forget an instrument a keyboard was set to play (it was removed); the
+    /// keyboard falls back to the first `tb303`. Returns true if any changed.
+    pub fn clear_instrument(&mut self, id: &str) -> bool {
+        let mut changed = false;
+        for c in &mut self.conns {
+            if c.info.instrument.as_deref() == Some(id) {
+                c.info.instrument = None;
+                changed = true;
+            }
+        }
+        changed
+    }
+
     /// The connected Livid Block, if any.
     pub fn block_name(&self) -> Option<String> {
         self.conns.iter().find(|c| c.info.kind == DeviceKind::LividBlock).map(|c| c.info.input.clone())

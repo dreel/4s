@@ -16,6 +16,8 @@ export function MidiPanel() {
   const connected = useApp((s) => s.connection === "open");
   const [ports, setPorts] = useState<MidiPortsResult | null>(null);
   const [kind, setKind] = useState<DeviceKind>("livid_block");
+  const noteInstruments = useApp((s) => (s.snapshot?.graph.instruments ?? []).filter((i) => i.type === "tb303").map((i) => i.id).join(","));
+  const [plays, setPlays] = useState<string>("");
   const refresh = async () => setPorts((await act(client.call("midi.ports", {}))) ?? null);
   useEffect(() => {
     if (connected) void refresh();
@@ -35,9 +37,25 @@ export function MidiPanel() {
         <select className={input} value={kind} onChange={(e) => setKind(e.target.value as DeviceKind)}>
           <option value="livid_block">Livid Block</option>
           <option value="generic_drums">GM drum notes</option>
-          <option value="keyboard">Keyboard (plays the 303)</option>
+          <option value="keyboard">Keyboard (plays a 303)</option>
         </select>
       </label>
+      {kind === "keyboard" && (
+        <label className="flex items-center gap-2 text-zinc-400">
+          plays
+          <select className={input} value={plays} onChange={(e) => setPlays(e.target.value)} data-testid="midi-keyboard-instrument">
+            <option value="">first tb303</option>
+            {noteInstruments
+              .split(",")
+              .filter(Boolean)
+              .map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+          </select>
+        </label>
+      )}
       <div className="flex flex-col gap-1">
         {(ports?.inputs ?? []).length === 0 && <div className="text-zinc-500">no MIDI inputs found</div>}
         {(ports?.inputs ?? []).map((name) => (
@@ -50,7 +68,7 @@ export function MidiPanel() {
                 disconnect
               </button>
             ) : (
-              <button className={btn} onClick={() => void act(client.call("midi.connect", { input: name, output: null, kind, instrument: null }))}>
+              <button className={btn} onClick={() => void act(client.call("midi.connect", { input: name, output: null, kind, instrument: kind === "keyboard" && plays ? plays : null }))}>
                 connect
               </button>
             )}
@@ -62,6 +80,7 @@ export function MidiPanel() {
           {connections.map((c) => (
             <div key={c.input}>
               {c.input} ({c.kind === "livid_block" ? "Block" : c.kind === "keyboard" ? "keyboard" : "drums"}){c.output ? ` -> ${c.output}` : ""}
+              {c.instrument ? ` plays ${c.instrument}` : ""}
             </div>
           ))}
         </div>

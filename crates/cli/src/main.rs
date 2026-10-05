@@ -733,7 +733,10 @@ fn print_event(e: &EventEnvelope, json: bool) {
         Event::PatternChanged { instrument, voice, steps } => {
             format!("{instrument}.{} = {}", voice.id(), format_steps(steps))
         }
-        Event::NotesChanged { instrument, steps } => format!("{instrument} = {}", format_notes(steps, 16)),
+        Event::NotesChanged { instrument, steps } => {
+            let last = steps.iter().rposition(|s| s.note.is_some()).map(|i| i + 1).unwrap_or(0);
+            format!("{instrument} = {}", format_notes(steps, last.max(16)))
+        }
         Event::Graph { graph } => format!(
             "{} instruments, {} channels, {} routes",
             graph.instruments.len(),

@@ -792,8 +792,11 @@ How the implementation settled details the design left open:
   whole pattern lost quick successive edits (and would clobber another
   client's). The UI edits one step at a time and applies it optimistically.
   CLI: `4s note <id> <step> <token>`.
-- A keyboard tracks its held note per input port, so one keyboard's
-  note-off never releases another's note.
+- A held keyboard note is tracked per instrument together with the
+  keyboard (input port) that started it: only that keyboard's note-off
+  releases it, and unplugging or disconnecting that keyboard releases it.
+  Removing an instrument clears any keyboard set to play it (it falls back
+  to the first `tb303`).
 - Default channel names: an instrument's new channel takes the instrument's
   name ("Drums", "Bass", "Drums 2"); `channel.add` without a name gives
   "Ch N".

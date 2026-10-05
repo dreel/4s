@@ -128,6 +128,16 @@ import json
 levels = [c['left'] for l in open('$TMP/key-meters.json') if l.strip()
           for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
 print('sustained then released' if levels and max(levels[:5]) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
+"$BIN/4s" watch --type meters --json > "$TMP/key-meters2.json" &
+WATCH=$!
+echo "raw 90 24 64" >&8; sleep 0.6   # hold a key...
+s midi disconnect "$KDEV" >/dev/null   # ...and disconnect the keyboard
+sleep 0.8; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "disconnecting a keyboard releases its held note" "released" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/key-meters2.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('released' if levels and max(levels) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
 exec 8>&-
 BASS_RMS=$(s --json render --bars 1 --out renders/b1.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
 s set mixer.2.mute on >/dev/null

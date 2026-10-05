@@ -96,9 +96,10 @@ pub struct Core {
     block_map: BlockMap,
     midi: Midi,
     midi_tx: Sender<MidiMessage>,
-    /// Last note each keyboard (by input port) started, so its note-off
-    /// releases that note and not another keyboard's.
-    held_notes: HashMap<String, u8>,
+    /// The note each instrument slot is holding for a keyboard, and which
+    /// keyboard (input port) started it: only that key's note-off releases
+    /// it, and unplugging that keyboard releases it too.
+    held_notes: HashMap<u8, (String, u8)>,
     project: ProjectInfo,
     pub audio: AudioStatus,
     seq: u64,
@@ -407,8 +408,13 @@ impl Core {
             self.controller.target =
                 self.instruments.iter().find(|i| i.kind == InstrumentType::Tr808).map(|i| i.id.clone());
         }
+        self.held_notes.remove(&inst.slot);
         self.graph_changed(origin);
         self.refresh_controller(origin, true);
+        if self.midi.clear_instrument(&inst.id) {
+            let connections = self.midi.connections();
+            self.emit(origin, Event::Midi { connections });
+        }
         Ok(self.graph())
     }
 
@@ -891,11 +897,13 @@ impl Core {
                 let slot = self.slot_of(&id);
                 let (status, note, vel) = (d[0] & 0xf0, d[1], d[2]);
                 if status == 0x90 && vel > 0 {
-                    self.held_notes.insert(msg.port.clone(), note);
+                    self.held_notes.insert(slot, (msg.port.clone(), note));
                     let velocity = vel as f32 / 127.0;
                     self.send(Command::NoteOn { slot, note, velocity, gate: false });
-                } else if (status == 0x80 || status == 0x90) && self.held_notes.get(&msg.port) == Some(&note) {
-                    self.held_notes.remove(&msg.port);
+                } else if (status == 0x80 || status == 0x90)
+                    && self.held_notes.get(&slot) == Some(&(msg.port.clone(), note))
+                {
+                    self.held_notes.remove(&slot);
                     self.send(Command::NoteOff { slot });
                 }
             }
@@ -910,6 +918,14 @@ impl Core {
     }
 
     fn midi_changed(&mut self, origin: &str) {
+        // Release notes held by keyboards that went away.
+        let ports: Vec<String> = self.midi.connections().into_iter().map(|c| c.input).collect();
+        let orphaned: Vec<u8> =
+            self.held_notes.iter().filter(|(_, (p, _))| !ports.contains(p)).map(|(slot, _)| *slot).collect();
+        for slot in orphaned {
+            self.held_notes.remove(&slot);
+            self.send(Command::NoteOff { slot });
+        }
         self.controller.device = self.midi.block_name();
         let connections = self.midi.connections();
         self.emit(origin, Event::Midi { connections });
@@ -1116,6 +1132,7 @@ impl Core {
             self.send(Command::SetChannelActive { ch: (c.n - 1) as u8, active: false });
         }
         self.slot_used = [false; MAX_INSTRUMENTS];
+        self.held_notes.clear();
         self.routes.clear();
         self.patterns.clear();
         self.params.clear();
