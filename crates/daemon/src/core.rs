@@ -96,9 +96,10 @@ pub struct Core {
     block_map: BlockMap,
     midi: Midi,
     midi_tx: Sender<MidiMessage>,
-    /// The note each instrument slot is holding for a keyboard, and which
-    /// keyboard (input port) started it: only that key's note-off releases
-    /// it, and unplugging that keyboard releases it too.
+    /// The note each instrument slot is holding (`voice.note_on`, or a MIDI
+    /// keyboard), and who holds it (the event origin: a client name or
+    /// `midi:<port>`). Only the holder's note-off for that note releases
+    /// it; unplugging a keyboard releases its notes.
     held_notes: HashMap<u8, (String, u8)>,
     project: ProjectInfo,
     pub audio: AudioStatus,
@@ -288,8 +289,15 @@ impl Core {
         }
     }
 
-    fn slot_of(&self, id: &str) -> u8 {
-        self.instruments.iter().find(|i| i.id == id).map(|i| i.slot).unwrap_or(0)
+    fn slot_of(&self, id: &str) -> Option<u8> {
+        self.instruments.iter().find(|i| i.id == id).map(|i| i.slot)
+    }
+
+    /// Engine slot of an instrument id, or an error naming the instruments.
+    fn slot(&self, id: &str) -> Result<u8, RpcError> {
+        self.slot_of(id).ok_or_else(|| {
+            RpcError::invalid(format!("no instrument '{id}' (instruments: {})", self.instrument_ids()))
+        })
     }
 
     fn free_id(&self, kind: InstrumentType) -> String {
@@ -371,7 +379,7 @@ impl Core {
 
     /// Send every parameter of an instrument to the engine.
     fn push_instrument_params(&mut self, id: &str) {
-        let slot = self.slot_of(id);
+        let Some(slot) = self.slot_of(id) else { return };
         let cmds: Vec<Command> = self
             .params
             .iter()
@@ -717,7 +725,7 @@ impl Core {
         let t = voice.index();
         if self.drums(id)[t][step as usize] != level {
             self.drums_mut(id)[t][step as usize] = level;
-            let slot = self.slot_of(id);
+            let slot = self.slot(id)?;
             self.send(Command::SetDrumStep { slot, track: t as u8, step: step as u8, level });
             self.emit(origin, Event::StepChanged { instrument: id.to_string(), voice, step, level });
             self.mark_dirty(origin);
@@ -738,7 +746,7 @@ impl Core {
         let t = voice.index();
         if self.drums(id)[t] != full {
             self.drums_mut(id)[t] = full;
-            let slot = self.slot_of(id);
+            let slot = self.slot(id)?;
             self.send(Command::SetDrumTrack { slot, track: t as u8, steps: full });
             self.emit(origin, Event::PatternChanged { instrument: id.to_string(), voice, steps: full.to_vec() });
             self.mark_dirty(origin);
@@ -764,7 +772,7 @@ impl Core {
         }
         let mut full = [NoteStep::default(); MAX_STEPS];
         full[..steps.len()].copy_from_slice(steps);
-        let slot = self.slot_of(id);
+        let slot = self.slot(id)?;
         let changed = match self.patterns.get_mut(id) {
             Some(PatternState::Notes(n)) if **n != full => {
                 **n = full;
@@ -800,6 +808,32 @@ impl Core {
             self.refresh_controller(origin, false);
         }
         TransportState { playing: false, step: None }
+    }
+
+    // ---- held notes ----------------------------------------------------------
+
+    /// Start a held note on a note instrument (default: the first `tb303`).
+    /// A newer note takes over the voice (gliding, as legato on a 303).
+    fn note_on(&mut self, id: Option<&str>, note: u8, velocity: f32, holder: &str) -> Result<(), RpcError> {
+        if !(NOTE_MIN..=NOTE_MAX).contains(&note) {
+            return Err(RpcError::invalid(format!("note must be {NOTE_MIN}..{NOTE_MAX}")));
+        }
+        let id = self.resolve(id, InstrumentType::Tb303)?;
+        let slot = self.slot(&id)?;
+        self.held_notes.insert(slot, (holder.to_string(), note));
+        self.send(Command::NoteOn { slot, note, velocity: velocity.clamp(0.0, 1.0), gate: false });
+        Ok(())
+    }
+
+    /// Release a held note, if `holder` is holding exactly that note.
+    fn note_off(&mut self, id: Option<&str>, note: u8, holder: &str) -> Result<(), RpcError> {
+        let id = self.resolve(id, InstrumentType::Tb303)?;
+        let slot = self.slot(&id)?;
+        if self.held_notes.get(&slot) == Some(&(holder.to_string(), note)) {
+            self.held_notes.remove(&slot);
+            self.send(Command::NoteOff { slot });
+        }
+        Ok(())
     }
 
     // ---- controller --------------------------------------------------------
@@ -884,8 +918,8 @@ impl Core {
                     && d[2] > 0
                     && let Some(v) = Voice::ALL.iter().find(|v| v.gm_note() == d[1])
                     && let Some(target) = self.controller.target.clone()
+                    && let Some(slot) = self.slot_of(&target)
                 {
-                    let slot = self.slot_of(&target);
                     self.send(Command::Trigger { slot, voice: v.index() as u8, velocity: d[2] as f32 / 127.0 });
                 }
             }
@@ -895,18 +929,13 @@ impl Core {
                 }
                 let configured =
                     self.midi.connections().into_iter().find(|c| c.input == msg.port).and_then(|c| c.instrument);
-                let Ok(id) = self.resolve(configured.as_deref(), InstrumentType::Tb303) else { return };
-                let slot = self.slot_of(&id);
                 let (status, note, vel) = (d[0] & 0xf0, d[1], d[2]);
+                // The same path as `voice.note_on` / `voice.note_off`; the
+                // keyboard (`midi:<port>`) holds the note.
                 if status == 0x90 && vel > 0 {
-                    self.held_notes.insert(slot, (msg.port.clone(), note));
-                    let velocity = vel as f32 / 127.0;
-                    self.send(Command::NoteOn { slot, note, velocity, gate: false });
-                } else if (status == 0x80 || status == 0x90)
-                    && self.held_notes.get(&slot) == Some(&(msg.port.clone(), note))
-                {
-                    self.held_notes.remove(&slot);
-                    self.send(Command::NoteOff { slot });
+                    let _ = self.note_on(configured.as_deref(), note, vel as f32 / 127.0, &origin);
+                } else if status == 0x80 || status == 0x90 {
+                    let _ = self.note_off(configured.as_deref(), note, &origin);
                 }
             }
         }
@@ -921,9 +950,13 @@ impl Core {
 
     fn midi_changed(&mut self, origin: &str) {
         // Release notes held by keyboards that went away.
-        let ports: Vec<String> = self.midi.connections().into_iter().map(|c| c.input).collect();
-        let orphaned: Vec<u8> =
-            self.held_notes.iter().filter(|(_, (p, _))| !ports.contains(p)).map(|(slot, _)| *slot).collect();
+        let holders: Vec<String> = self.midi.connections().into_iter().map(|c| format!("midi:{}", c.input)).collect();
+        let orphaned: Vec<u8> = self
+            .held_notes
+            .iter()
+            .filter(|(_, (h, _))| h.starts_with("midi:") && !holders.contains(h))
+            .map(|(slot, _)| *slot)
+            .collect();
         for slot in orphaned {
             self.held_notes.remove(&slot);
             self.send(Command::NoteOff { slot });
@@ -1173,7 +1206,7 @@ impl Core {
             self.send(c);
         }
         for (id, pattern) in &file.patterns {
-            let slot = self.slot_of(id);
+            let slot = self.slot_of(id).unwrap_or_default();
             match (self.patterns.get_mut(id), pattern) {
                 (Some(PatternState::Drums(d)), ProjectPattern::Drums(tracks)) => {
                     let mut cmds = Vec::new();
@@ -1366,7 +1399,7 @@ impl Core {
                 match (p.voice, p.note) {
                     (Some(voice), None) => {
                         let id = drum(self, &p.instrument)?;
-                        let slot = self.slot_of(&id);
+                        let slot = self.slot(&id)?;
                         self.send(Command::Trigger { slot, voice: voice.index() as u8, velocity });
                     }
                     (None, Some(note)) => {
@@ -1374,11 +1407,19 @@ impl Core {
                             return Err(RpcError::invalid(format!("note must be {NOTE_MIN}..{NOTE_MAX}")));
                         }
                         let id = self.resolve(p.instrument.as_deref(), InstrumentType::Tb303)?;
-                        let slot = self.slot_of(&id);
+                        let slot = self.slot(&id)?;
                         self.send(Command::NoteOn { slot, note, velocity, gate: true });
                     }
                     _ => return Err(RpcError::invalid("pass exactly one of `voice` (drums) or `note` (notes)")),
                 }
+                ok(Empty {})
+            }
+            Request::VoiceNoteOn(p) => {
+                self.note_on(p.instrument.as_deref(), p.note, p.velocity.unwrap_or(1.0), origin)?;
+                ok(Empty {})
+            }
+            Request::VoiceNoteOff(p) => {
+                self.note_off(p.instrument.as_deref(), p.note, origin)?;
                 ok(Empty {})
             }
             Request::ControllerGet(_) => ok(self.controller.state()),

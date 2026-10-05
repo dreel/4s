@@ -30,6 +30,7 @@ export * from "./MidiConnectParams";
 export * from "./MidiConnection";
 export * from "./MidiDisconnectParams";
 export * from "./MidiPortsResult";
+export * from "./NoteParams";
 export * from "./NoteSetParams";
 export * from "./NoteStep";
 export * from "./NotesGetParams";

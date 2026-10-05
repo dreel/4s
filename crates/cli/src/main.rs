@@ -95,6 +95,12 @@ enum Cmd {
         #[arg(long)]
         velocity: Option<f32>,
     },
+    /// Hold or release a note on a note instrument, like a keyboard key:
+    /// `4s key down C2`, then `4s key up C2`.
+    Key {
+        #[command(subcommand)]
+        cmd: KeyCmd,
+    },
     /// Add, remove, and list instruments.
     Instrument {
         #[command(subcommand)]
@@ -205,6 +211,26 @@ enum InstrumentCmd {
         /// Keep channels even if nothing feeds them any more.
         #[arg(long)]
         keep_channels: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum KeyCmd {
+    /// Start a held note.
+    Down {
+        note: String,
+        /// Note instrument (default: the first tb303).
+        #[arg(long)]
+        instrument: Option<String>,
+        /// 0..1 (default 1; 0.95 and up is accented).
+        #[arg(long)]
+        velocity: Option<f32>,
+    },
+    /// Release the note.
+    Up {
+        note: String,
+        #[arg(long)]
+        instrument: Option<String>,
     },
 }
 
@@ -469,6 +495,18 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 velocity: *velocity,
             })]
         }
+        Cmd::Key { cmd } => match cmd {
+            KeyCmd::Down { note, instrument, velocity } => vec![Request::VoiceNoteOn(NoteParams {
+                instrument: instrument.clone(),
+                note: parse_note(note).map_err(|e| anyhow!(e))?,
+                velocity: *velocity,
+            })],
+            KeyCmd::Up { note, instrument } => vec![Request::VoiceNoteOff(NoteParams {
+                instrument: instrument.clone(),
+                note: parse_note(note).map_err(|e| anyhow!(e))?,
+                velocity: None,
+            })],
+        },
         Cmd::Instrument { cmd } => match cmd {
             InstrumentCmd::Types => vec![Request::InstrumentTypes(e)],
             InstrumentCmd::List => vec![Request::InstrumentList(e)],
@@ -837,7 +875,7 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             let last_note = n.steps.iter().rposition(|s| s.note.is_some()).map(|i| i + 1).unwrap_or(0);
             println!("{}: {}", n.instrument, format_notes(&n.steps, (n.length as usize).max(last_note)));
         }
-        Cmd::Trigger { .. } => println!("ok"),
+        Cmd::Trigger { .. } | Cmd::Key { .. } => println!("ok"),
         Cmd::Instrument { cmd: InstrumentCmd::Types } => {
             let r: InstrumentTypesResult = serde_json::from_value(last)?;
             for t in r.types {
@@ -1208,7 +1246,7 @@ mod tests {
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "route drums.closed_hat 2",
-            "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "trigger --note C2",
+            "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key down C2", "key up C2", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",
             "pattern set kick x---x---", "pattern set sd ----x---", "set mixer.1.pan -0.5", "pattern step kick 1 accent", "pattern toggle sd 5",
             "pattern clear", "trigger kick", "watch", "render --bars 2", "project new",

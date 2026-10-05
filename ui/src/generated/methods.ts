@@ -20,6 +20,7 @@ import type { KnobParams } from "./KnobParams";
 import type { MidiConnectParams } from "./MidiConnectParams";
 import type { MidiDisconnectParams } from "./MidiDisconnectParams";
 import type { MidiPortsResult } from "./MidiPortsResult";
+import type { NoteParams } from "./NoteParams";
 import type { NoteSetParams } from "./NoteSetParams";
 import type { NotesGetParams } from "./NotesGetParams";
 import type { NotesResult } from "./NotesResult";
@@ -78,6 +79,8 @@ export interface Methods {
   "pattern.set_notes": { params: NotesSetParams; result: NotesResult };
   "pattern.set_note": { params: NoteSetParams; result: NotesResult };
   "voice.trigger": { params: TriggerParams; result: Empty };
+  "voice.note_on": { params: NoteParams; result: Empty };
+  "voice.note_off": { params: NoteParams; result: Empty };
   "controller.get": { params: Empty; result: ControllerState };
   "controller.press": { params: PadParams; result: ControllerState };
   "controller.knob": { params: KnobParams; result: ControllerState };
@@ -124,6 +127,8 @@ export const METHODS: MethodName[] = [
   "pattern.set_notes",
   "pattern.set_note",
   "voice.trigger",
+  "voice.note_on",
+  "voice.note_off",
   "controller.get",
   "controller.press",
   "controller.knob",

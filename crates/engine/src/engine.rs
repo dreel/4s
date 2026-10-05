@@ -243,10 +243,14 @@ impl Engine {
                 }
             }
             Command::SetChannelActive { ch, active } => {
+                let any_solo = self.any_solo();
                 if let Some(c) = self.channels.get_mut(ch as usize) {
                     c.active = active;
                     c.params = channel_defaults();
                     c.peak = [0.0; 2];
+                    // A reused channel starts at its defaults, not ramping
+                    // from the previous channel's gain and pan.
+                    c.snap(any_solo);
                 }
             }
             Command::SetDrumStep { slot, track, step, level } => {

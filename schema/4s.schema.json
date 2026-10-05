@@ -1163,6 +1163,38 @@
         ],
         "type": "object"
       },
+      "NoteParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "description": "Note instrument id; defaults to the first `tb303`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "description": "MIDI note (12..108).",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "velocity": {
+            "default": null,
+            "description": "0..1, defaults to 1 (0.95 and up plays accented). Ignored by note-off.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "type": "object"
+      },
       "NoteSetParams": {
         "properties": {
           "instrument": {
@@ -2055,6 +2087,40 @@
           },
           "params": {
             "$ref": "#/$defs/TriggerParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Start a held note (like a key down on a keyboard). The caller holds\nit until `voice.note_off` for the same note.",
+        "properties": {
+          "method": {
+            "const": "voice.note_on",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/NoteParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Release a note this caller is holding (like a key up).",
+        "properties": {
+          "method": {
+            "const": "voice.note_off",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/NoteParams"
           }
         },
         "required": [

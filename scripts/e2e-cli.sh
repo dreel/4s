@@ -204,6 +204,52 @@ check "remove a channel" "ch 2  Bass         <- bass" s channel rm 3
 check "a reused channel number starts at defaults" "mixer.3.mute = 0" bash -c "$BIN/4s channel add >/dev/null && $BIN/4s get mixer.3.mute"
 s channel rm 3 >/dev/null
 check "unknown source" "no output 'nope'" s route nope 1
+check "instrument list" "bass       tb303  Bass" s instrument list
+check "add onto an existing channel" "ch 2  Bass         vol 100%  pan C          <- bass, bass2" bash -c "$BIN/4s instrument add tb303 --channel 2 >/dev/null && $BIN/4s mixer"
+check "removing it keeps the shared channel" "ch 2  Bass         vol 100%  pan C          <- bass" bash -c "$BIN/4s instrument rm bass2 >/dev/null && $BIN/4s mixer"
+RMS_BEFORE=$(s --json render --bars 1 --out renders/nc1.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
+s instrument add tb303 --id lead --no-channel >/dev/null
+s notes lead "C3 C3 C3 C3" >/dev/null
+check "--no-channel leaves the main out unrouted" "unrouted, 2 channels" python3 -c "
+import json, subprocess
+g = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'state']))['graph']
+print('unrouted, %d channels' % len(g['channels']) if 'lead' not in g['routes'] else g)"
+check "an unrouted instrument plays but is not heard" "silent lead" python3 -c "
+import json, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--bars', '1', '--out', 'renders/nc2.wav']))
+lead = sum(1 for t in r['triggers'] if t['instrument'] == 'lead')
+print('silent lead' if lead == 4 and abs(r['rms'] - $RMS_BEFORE) < 1e-6 else f'lead {lead} rms {r[\"rms\"]} vs $RMS_BEFORE')"
+s channel add --name Lead >/dev/null
+s route lead 3 >/dev/null
+check "rm --keep-channels keeps the emptied channel" "ch 3  Lead         vol 100%  pan C          <- (nothing)" bash -c "$BIN/4s instrument rm lead --keep-channels >/dev/null && $BIN/4s mixer"
+s channel rm 3 >/dev/null
+for _ in $(seq 30); do s channel add >/dev/null; done
+check "channel pool limit" "at most 32 channels" s channel add
+for n in $(seq 3 32); do s channel rm "$n" >/dev/null; done
+for _ in $(seq 14); do s instrument add tb303 --no-channel >/dev/null; done
+check "instrument pool limit" "at most 16 instruments" s instrument add tb303 --no-channel
+for n in $(seq 2 15); do s instrument rm "bass$n" >/dev/null; done
+check "pools back to the start" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
+mkdir -p "$FOURS_DATA_DIR/projects/bad.4s"
+python3 -c "
+import json
+p = {'format_version': 2, 'instruments': [{'id': 'x', 'type': 'tb303', 'name': 'X'}, {'id': 'x', 'type': 'tr808', 'name': 'X'}],
+     'channels': [], 'routes': {}, 'params': {}, 'patterns': {}, 'controller': {'knob_mode': 'volume', 'follow': True}}
+json.dump(p, open('$FOURS_DATA_DIR/projects/bad.4s/project.json', 'w'))"
+check "an invalid project is rejected" "duplicate instrument id 'x'" s project load bad
+check "and leaves the current project as it was" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
+rm -rf "$FOURS_DATA_DIR/projects/bad.4s"
+# Held notes over RPC, as a bridge or script would send them.
+"$BIN/4s" watch --type meters --json > "$TMP/rpc-key.json" &
+WATCH=$!
+s key down C2 --instrument bass >/dev/null; sleep 0.6
+s key up C2 --instrument bass >/dev/null; sleep 0.8
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "key down holds, key up releases (RPC)" "sustained then released" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/rpc-key.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('sustained then released' if levels and max(levels[:5]) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
 check "empty names are rejected" "name must not be empty" s channel add --name " "
 check "channel or no_channel, not both" "not both" s instrument add tb303 --channel 1 --no-channel
 check "second 808 gets a numbered id" "drums2     tr808  Drums 2" s instrument add tr808

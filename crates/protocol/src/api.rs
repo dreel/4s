@@ -329,6 +329,18 @@ pub struct TriggerParams {
     pub velocity: Option<f32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct NoteParams {
+    /// Note instrument id; defaults to the first `tb303`.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// MIDI note (12..108).
+    pub note: u8,
+    /// 0..1, defaults to 1 (0.95 and up plays accented). Ignored by note-off.
+    #[serde(default)]
+    pub velocity: Option<f32>,
+}
+
 // ---- controller ----------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -510,6 +522,12 @@ api! {
 
     /// Play a drum voice or a note immediately (audition).
     VoiceTrigger = "voice.trigger" (TriggerParams) -> Empty;
+
+    /// Start a held note (like a key down on a keyboard). The caller holds
+    /// it until `voice.note_off` for the same note.
+    VoiceNoteOn = "voice.note_on" (NoteParams) -> Empty;
+    /// Release a note this caller is holding (like a key up).
+    VoiceNoteOff = "voice.note_off" (NoteParams) -> Empty;
 
     /// Controller state (mode, page, LEDs, device).
     ControllerGet = "controller.get" (Empty) -> ControllerState;

@@ -78,7 +78,10 @@ function Strip({ channel }: { channel: ChannelInfo }) {
       .map(([src]) => src)
       .join(", "),
   );
-  const instrument = sources.split(",")[0]?.split(".")[0] || null;
+  const instrument = useApp((s) => {
+    const first = Object.entries(s.snapshot?.graph.routes ?? {}).find(([, c]) => c === n)?.[0];
+    return s.snapshot?.graph.instruments.find((i) => i.outputs.some((o) => o.source === first))?.id ?? null;
+  });
   const selected = useSelected();
   const volume = useApp((s) => s.snapshot?.params[`mixer.${n}.volume`] ?? 0);
   const mute = useApp((s) => (s.snapshot?.params[`mixer.${n}.mute`] ?? 0) >= 0.5);
