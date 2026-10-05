@@ -332,7 +332,7 @@ impl Core {
         };
         self.ensure_room(ADD_COMMANDS)?;
 
-        let name = p.name.unwrap_or_else(|| match id.strip_prefix(p.kind.default_id()) {
+        let name = check_name(p.name)?.unwrap_or_else(|| match id.strip_prefix(p.kind.default_id()) {
             Some(n) if auto_id && !n.is_empty() => format!("{} {n}", p.kind.label()),
             _ => p.kind.label().to_string(),
         });
@@ -447,7 +447,7 @@ impl Core {
         }
         self.ensure_room(2)?;
         let n = (1..=MAX_CHANNELS as u32).find(|n| !self.channels.iter().any(|c| c.n == *n)).unwrap();
-        let name = name.unwrap_or_else(|| format!("Ch {n}"));
+        let name = check_name(name)?.unwrap_or_else(|| format!("Ch {n}"));
         self.add_channel_unchecked(&name);
         self.graph_changed(origin);
         Ok(ChannelInfo { n, name })
@@ -471,11 +471,9 @@ impl Core {
 
     pub fn channel_rename(&mut self, n: u32, name: String, origin: &str) -> Result<ChannelInfo, RpcError> {
         self.check_channel(n)?;
-        if name.trim().is_empty() {
-            return Err(RpcError::invalid("name must not be empty"));
-        }
+        let name = check_name(Some(name))?.unwrap_or_default();
         let c = self.channels.iter_mut().find(|c| c.n == n).unwrap();
-        c.name = name.trim().to_string();
+        c.name = name;
         let info = c.clone();
         self.graph_changed(origin);
         Ok(info)
@@ -1097,8 +1095,12 @@ impl Core {
                 return Err(RpcError::invalid(format!("duplicate instrument id '{}'", i.id)));
             }
         }
+        for i in &file.instruments {
+            check_name(Some(i.name.clone()))?;
+        }
         let mut ns = std::collections::HashSet::new();
         for c in &file.channels {
+            check_name(Some(c.name.clone()))?;
             if c.n == 0 || c.n as usize > MAX_CHANNELS || !ns.insert(c.n) {
                 return Err(RpcError::invalid(format!("invalid or duplicate channel number {}", c.n)));
             }
@@ -1209,6 +1211,20 @@ impl Core {
         self.controller.knob_mode = file.controller.knob_mode;
         self.controller.follow = file.controller.follow;
         self.controller.page = 0;
+        // Keyboards set to play an instrument this project lacks fall back
+        // to the first tb303, as after removing it.
+        let mut midi_changed = false;
+        for c in self.midi.connections() {
+            if let Some(id) = c.instrument
+                && !self.instruments.iter().any(|i| i.id == id)
+            {
+                midi_changed |= self.midi.clear_instrument(&id);
+            }
+        }
+        if midi_changed {
+            let connections = self.midi.connections();
+            self.emit(origin, Event::Midi { connections });
+        }
         self.emit(origin, Event::Reset);
         self.refresh_controller(origin, true);
         Ok(warnings)
@@ -1400,6 +1416,15 @@ impl Core {
             | Request::DaemonInfo(_)
             | Request::DaemonShutdown(_) => Err(RpcError::failed("handled by connection")),
         }
+    }
+}
+
+/// Trim a display name; an empty one is an error.
+fn check_name(name: Option<String>) -> Result<Option<String>, RpcError> {
+    match name {
+        Some(n) if n.trim().is_empty() => Err(RpcError::invalid("name must not be empty")),
+        Some(n) => Ok(Some(n.trim().to_string())),
+        None => Ok(None),
     }
 }
 

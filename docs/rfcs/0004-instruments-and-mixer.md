@@ -787,6 +787,12 @@ How the implementation settled details the design left open:
   for half a step), so the 303 editor can audition.
 - The snapshot carries `patterns: [{instrument, pattern}]`, where `pattern`
   is `{kind: "drums", tracks}` or `{kind: "notes", steps}`.
+- Note-pattern RPCs take structured steps (`steps: [{note, accent,
+  slide}]`), and `notes_changed` carries `steps`. The string form
+  (`"C2 C2! D#2~ -"`) is parsed by the CLI (`parse_notes` in the protocol
+  crate) and used in project files.
+- Display names (channels, instruments, in RPCs and project files) are
+  trimmed and must not be empty.
 - New `pattern.set_note {instrument?, step, note}` alongside
   `pattern.set_notes`, found by the UI e2e: editing one step by sending the
   whole pattern lost quick successive edits (and would clobber another

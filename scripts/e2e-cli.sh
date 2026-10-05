@@ -28,6 +28,18 @@ check "daemon status" "4sd running (pid $(python3 -c "import json;print(json.loa
 check "direct 4sd refused" "already running" "$BIN/4sd" --no-audio --no-midi --listen 127.0.0.1:0
 check "hello/status" "transport: stopped" s status
 check "default graph: one 808 on channel 1" "ch 1  Drums        vol 100%  pan C          <- drums" s mixer
+# Default levels match the old fixed kit (before RFC 0004): this groove
+# rendered on main at 17d668c gave peak 0.40297, rms 0.08550.
+s pattern set kick "X---x---X---x---" >/dev/null
+s pattern set snare "----x-------x---" >/dev/null
+s pattern set closed_hat "x-x-x-x-x-x-x-xX" >/dev/null
+s pattern set cowbell "---------------X" >/dev/null
+check "default levels match the old kit within 0.1 dB" "same level" python3 -c "
+import json, math, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--bars', '1', '--out', 'renders/ref.wav']))
+db = lambda a, b: abs(20 * math.log10(a / b))
+print('same level' if db(r['peak'], 0.40297) < 0.1 and db(r['rms'], 0.08550) < 0.1 else f'peak {r[\"peak\"]} rms {r[\"rms\"]}')"
+s pattern clear >/dev/null
 check "set percent" "drums.snare.level = 0.35" s set drums.snare.level 35%
 check "get" "drums.snare.level = 0.35" s get drums.snare.level
 check "clamp" "transport.tempo = 300" s tempo 9999
@@ -192,6 +204,8 @@ check "remove a channel" "ch 2  Bass         <- bass" s channel rm 3
 check "a reused channel number starts at defaults" "mixer.3.mute = 0" bash -c "$BIN/4s channel add >/dev/null && $BIN/4s get mixer.3.mute"
 s channel rm 3 >/dev/null
 check "unknown source" "no output 'nope'" s route nope 1
+check "empty names are rejected" "name must not be empty" s channel add --name " "
+check "channel or no_channel, not both" "not both" s instrument add tb303 --channel 1 --no-channel
 check "second 808 gets a numbered id" "drums2     tr808  Drums 2" s instrument add tr808
 check "pattern on a chosen instrument" "drums2:" s pattern --instrument drums2 show kick
 "$BIN/4s" watch --type trigger --count 1 --json > "$TMP/audition.json" &

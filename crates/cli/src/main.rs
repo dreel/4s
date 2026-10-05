@@ -495,7 +495,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
         },
         Cmd::Route { source, channel } => {
             let channel = match channel.trim().to_ascii_lowercase().as_str() {
-                "none" | "-" | "main" => None,
+                "none" | "-" => None,
                 n => Some(n.parse::<u32>().map_err(|_| anyhow!("channel must be a number or `none`"))?),
             };
             vec![Request::RouteSet(RouteSetParams { source: source.clone(), channel })]
