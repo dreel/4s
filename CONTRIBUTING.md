@@ -5,6 +5,9 @@ agent, and the process is designed for that: the design principles live in the
 repo, every change is checked by machines and by an independent agent, and big
 changes are agreed on by a human before code is written.
 
+By contributing, you agree that your contributions are licensed under the
+[MIT License](LICENSE), the project's license.
+
 If you only read one thing: **run `scripts/gates.sh` and paste its report into
 your PR.**
 

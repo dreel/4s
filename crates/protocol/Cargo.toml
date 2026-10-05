@@ -3,6 +3,7 @@ name = "fours-protocol"
 description = "Shared RPC, event, state, and project types for 4S"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 serde.workspace = true

@@ -161,3 +161,7 @@ architectural or UX changes start as an RFC approved by a human. Run
 - [docs/lifecycle.md](docs/lifecycle.md) -- starting and stopping the engine
 - [docs/hardware/livid-block.md](docs/hardware/livid-block.md) -- controller mapping
 - [docs/validation.md](docs/validation.md) -- how everything is tested
+
+## License
+
+[MIT](LICENSE). Contributions are accepted under the same license.
