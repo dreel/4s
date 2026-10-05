@@ -1,6 +1,6 @@
 # RFC 0003: Automatic CI agent review (Muse Contributor tier)
 
-- Status: accepted
+- Status: implemented
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC. Merging that PR is the

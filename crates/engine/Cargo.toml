@@ -3,6 +3,7 @@ name = "fours-engine"
 description = "Real-time audio engine for 4S: drum voices, sequencer, mixer"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 fours-protocol.workspace = true
