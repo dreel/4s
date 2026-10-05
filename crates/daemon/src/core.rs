@@ -96,8 +96,9 @@ pub struct Core {
     block_map: BlockMap,
     midi: Midi,
     midi_tx: Sender<MidiMessage>,
-    /// Last note a keyboard started, so its note-off can release it.
-    held_note: Option<u8>,
+    /// Last note each keyboard (by input port) started, so its note-off
+    /// releases that note and not another keyboard's.
+    held_notes: HashMap<String, u8>,
     project: ProjectInfo,
     pub audio: AudioStatus,
     seq: u64,
@@ -132,7 +133,7 @@ impl Core {
             block_map,
             midi: Midi::default(),
             midi_tx,
-            held_note: None,
+            held_notes: HashMap::new(),
             project: ProjectInfo { path: None, dirty: false },
             audio,
             seq: 0,
@@ -890,11 +891,11 @@ impl Core {
                 let slot = self.slot_of(&id);
                 let (status, note, vel) = (d[0] & 0xf0, d[1], d[2]);
                 if status == 0x90 && vel > 0 {
-                    self.held_note = Some(note);
+                    self.held_notes.insert(msg.port.clone(), note);
                     let velocity = vel as f32 / 127.0;
                     self.send(Command::NoteOn { slot, note, velocity, gate: false });
-                } else if (status == 0x80 || status == 0x90) && self.held_note == Some(note) {
-                    self.held_note = None;
+                } else if (status == 0x80 || status == 0x90) && self.held_notes.get(&msg.port) == Some(&note) {
+                    self.held_notes.remove(&msg.port);
                     self.send(Command::NoteOff { slot });
                 }
             }
@@ -1085,7 +1086,18 @@ impl Core {
                 self.in_flight
             )));
         }
-        let needed = (self.instruments.len() + MAX_CHANNELS) * 2 + file.instruments.len() * ADD_COMMANDS + 64;
+        // Exactly what `apply_project_file` sends: teardown, channels and
+        // their parameters, instruments with their parameters and patterns,
+        // routes, and globals.
+        let instrument_params: usize =
+            file.instruments.iter().map(|i| instrument::params(i.kind, &i.id).len()).sum();
+        let needed = self.instruments.len()
+            + self.channels.len()
+            + file.channels.len() * (1 + CHANNEL_PARAMS)
+            + file.instruments.len() * (1 + NUM_TRACKS)
+            + instrument_params
+            + file.routes.len()
+            + NUM_GLOBALS;
         self.ensure_room(needed)
     }
 

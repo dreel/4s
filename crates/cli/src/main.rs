@@ -291,8 +291,11 @@ enum MidiCmd {
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
 enum Kind {
+    /// Livid Block: grid + knobs drive the controller target, LEDs lit.
     Block,
+    /// General MIDI drum notes trigger the controller target's voices.
     Drums,
+    /// Note on/off plays a note instrument (--instrument, default: first tb303).
     Keyboard,
 }
 

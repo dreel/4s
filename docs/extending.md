@@ -91,9 +91,13 @@ Validate:
 
 Controllers are MIDI devices whose input the daemon decodes into the same
 actions the UI and CLI use. The Livid Block is the reference for a grid
-controller with feedback; `DeviceKind::GenericDrums` (note-on triggers
-voices, in `Core::handle_midi`) is the simpler reference for note-only
-devices.
+controller with feedback. `DeviceKind::GenericDrums` (note-on triggers
+the controller target's voices) and `DeviceKind::Keyboard` (note on/off
+plays a note instrument, the connection's `instrument` or the first
+`tb303`, holding the note until its note-off), both in `Core::handle_midi`,
+are the simpler references for note-only devices. A keyboard is connected
+with `4s midi connect <port> --kind keyboard [--instrument bass]` or the
+UI's MIDI panel.
 
 1. Add a `DeviceKind` variant in `crates/protocol/src/types.rs` and
    regenerate bindings (`cargo run -p fours-protocol --bin gen-bindings`).

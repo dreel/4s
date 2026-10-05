@@ -100,6 +100,35 @@ check "bad note" "out of range" s notes bass "C9"
 check "set one note step" "bass: C2 C2! D#2~ - G1 - C3 - C2 - - - G1 G1 A#1 G2!~" s note bass 16 "G2!~"
 s note bass 16 - >/dev/null
 check "render reports bass triggers" "triggers: 18 (bass 9, drums 9)" s render --bars 1 --out renders/bass.wav
+"$BIN/4s" watch --type notes_changed --count 1 --json > "$TMP/notes.json" &
+WATCH=$!; sleep 0.5
+s note bass 2 C3 >/dev/null
+wait $WATCH
+s note bass 2 "C2!" >/dev/null
+check "note events carry the instrument" '"type":"notes_changed","instrument":"bass"' cat "$TMP/notes.json"
+# A MIDI keyboard plays the 303: key down starts a held note, key up releases it.
+KDEV="4S E2E Keys $$"
+mkfifo "$TMP/kdev.in"
+target/debug/examples/virtual_block "$KDEV" < "$TMP/kdev.in" > "$TMP/kdev.out" 2>&1 &
+exec 8> "$TMP/kdev.in"
+for _ in $(seq 50); do grep -q ready "$TMP/kdev.out" && break; sleep 0.1; done
+for _ in $(seq 30); do s midi ports | grep -q "$KDEV" && break; sleep 0.1; done
+check "connect a keyboard to the bass" "$KDEV (Keyboard) out: - plays: bass" s midi connect "$KDEV" --kind keyboard --instrument bass
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/key.json" &
+WATCH=$!; sleep 0.5
+echo "raw 90 24 64" >&8   # note on, C2 (36)
+wait $WATCH
+check "key down plays the note" '"instrument":"bass","voice":null,"note":36' cat "$TMP/key.json"
+"$BIN/4s" watch --type meters --json > "$TMP/key-meters.json" &
+WATCH=$!; sleep 0.6
+echo "raw 80 24 00" >&8   # note off
+sleep 0.8; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "held key sustains, key up releases" "sustained then released" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/key-meters.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('sustained then released' if levels and max(levels[:5]) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
+exec 8>&-
 BASS_RMS=$(s --json render --bars 1 --out renders/b1.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
 s set mixer.2.mute on >/dev/null
 MUTED_RMS=$(s --json render --bars 1 --out renders/b2.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
@@ -142,7 +171,7 @@ check "removing the target retargets the controller" "target: drums " bash -c "$
 check "removing an instrument removes its empty channel" "ch 1  Drums        <- drums" s instrument rm bass
 check "its params are gone" "bass params: 0" bash -c "echo bass params: \$($BIN/4s params bass | wc -l | tr -d ' ')"
 # Events say which instrument they belong to.
-s watch --type step_changed --count 1 --json > "$TMP/events.json" &
+"$BIN/4s" watch --type step_changed --count 1 --json > "$TMP/events.json" &
 WATCH=$!; sleep 0.5
 s pattern step clap 2 on >/dev/null
 wait $WATCH

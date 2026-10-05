@@ -1,6 +1,6 @@
 # RPC Layer
 
-Status: implemented (v1). Run `4s methods` for the live method list.
+Status: implemented (protocol version 2, RFC 0004). Run `4s methods` for the live method list.
 
 ## Decision
 

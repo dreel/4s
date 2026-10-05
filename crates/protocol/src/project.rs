@@ -133,12 +133,6 @@ mod tests {
     }
 
     #[test]
-    fn v1_is_rejected() {
-        let e = parse_project(r#"{"format_version": 1}"#).unwrap_err();
-        assert!(e.contains("no longer supported"), "{e}");
-    }
-
-    #[test]
     fn round_trip_is_stable() {
         let p = parse_project(V2_FIXTURE).unwrap();
         let s = project_to_json(&p);

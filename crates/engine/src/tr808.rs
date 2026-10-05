@@ -160,9 +160,10 @@ impl Instrument for Tr808 {
     }
 
     fn trigger(&mut self, voice: usize, velocity: f32) -> bool {
-        if voice < NUM_TRACKS {
-            self.play(voice, velocity);
+        if voice >= NUM_TRACKS {
+            return false;
         }
+        self.play(voice, velocity);
         true
     }
 
