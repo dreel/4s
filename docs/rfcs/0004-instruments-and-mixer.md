@@ -685,7 +685,8 @@ be discarded. Instead of the v1 -> v2 migration:
     connection closing (so a crashed script or bridge cannot leave the 303
     droning). A persistent client (the UI, a bridge) holds a note between
     `note_on` and `note_off`; the CLI holds one for a duration in a single
-    command, `4s key C2 [--for 1] [--instrument bass] [--velocity 0.8]`,
+    command, `4s key C2 [--for SECONDS (default 1)] [--instrument bass]
+    [--velocity 0.8]`,
     since each CLI command is its own connection.
   - Through a bridge (`docs/topology.md`; the bridge role is not built
     yet, so this is its contract): the engine only sees the bridge's
@@ -704,6 +705,9 @@ be discarded. Instead of the v1 -> v2 migration:
     step takes the voice over from a held key: from then on the key's
     note-off does nothing, and the pattern's rests and stop cut the voice
     again.
+  - An audition (`voice.trigger {note}`, gated for half a step) plays
+    through the same voice: it takes over from a held key like a
+    sequenced step does (the key's later note-off is then a no-op).
   - Behavior: a note-on starts a note with no gate: the VCA sustains while
     it is held (it does not decay at the gated rate) and releases (~10 ms)
     on note-off. Only the holder's note-off for that same note releases
