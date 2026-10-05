@@ -86,7 +86,7 @@ jobs:
           DEBOUNCE: ${{ vars.AGENT_REVIEW_DEBOUNCE_SECONDS }}
         run: |
           D=${DEBOUNCE:-120}
-          [ "$D" -le 600 ] 2>/dev/null || D=600   # bounded; non-numbers fall back to 600
+          { [ "$D" -ge 0 ] && [ "$D" -le 600 ]; } 2>/dev/null || D=600   # 0..600; anything else -> 600
           sleep "$D"
 
       - name: Check the review budget
@@ -98,8 +98,9 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          DAILY_LIMIT=${DAILY_LIMIT:-50}
-          PR_DAILY_LIMIT=${PR_DAILY_LIMIT:-10}
+          # Non-numeric or empty limits fall back to the defaults (never "no cap").
+          case $DAILY_LIMIT in '' | *[!0-9]*) DAILY_LIMIT=50 ;; esac
+          case $PR_DAILY_LIMIT in '' | *[!0-9]*) PR_DAILY_LIMIT=10 ;; esac
           SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           total=0
           this_pr=0
@@ -114,7 +115,7 @@ jobs:
             [ -n "$id" ] || continue
             [ "$total" -ge "$DAILY_LIMIT" ] && break
             ran=$(gh api "repos/$REPO/actions/runs/$id/jobs" --jq \
-              '[.jobs[].steps[]? | select(.name == "Independent review" and (.status == "in_progress" or .conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled"))] | length')
+              '[.jobs[].steps[]? | select(.name == "Independent review" and .started_at != null and (.status == "in_progress" or .conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled"))] | length')
             if [ "$ran" -gt 0 ]; then
               total=$((total + 1))
               # Matches the workflow's run-name; change both together.
