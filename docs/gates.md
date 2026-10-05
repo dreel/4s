@@ -92,9 +92,11 @@ Only `VERDICT: pass` passes the gate. Address the findings and run it again.
 If you disagree with a finding, say so in the PR. The human reviewer decides.
 
 - Default agent: Claude Code (`claude -p`, a new process with no
-  conversation or session context). With `ANTHROPIC_API_KEY` set it also runs
-  `--bare`, which skips personal memory, hooks, and plugins; with the
-  interactive login, your user-level instructions may still load. To use another agent, set
+  conversation or session context). `REVIEW_PROVIDER=muse` runs the same
+  harness against Meta's Muse model with your own `META_API_KEY`. The default provider also runs `--bare`
+  (skipping personal memory, hooks, and plugins) when `ANTHROPIC_API_KEY` is
+  set; with the interactive login, your user-level instructions may still
+  load. The `muse` provider always runs `--bare`. To use another agent, set
   `REVIEW_CMD` to a command that reads the prompt on stdin and prints the
   review, e.g. `REVIEW_CMD="my-agent --read-only --prompt-stdin"`. It must
   start with no prior context.
@@ -104,16 +106,29 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
   not need a new review). It cannot prove a pasted review is genuine. It
   always checks the PR as it is now against the rules on the current base
   branch, so after the rules change, re-running it on an older PR can fail
-  where it passed before. The
-  verification is the canonical re-review a maintainer triggers by adding the
-  `agent-review` label; run it before merging outside contributions and
-  Architecture / UX changes.
-- The canonical run is isolated from the PR: the reviewer instructions and
-  scripts come from the base branch, the reviewer is instructed to judge
-  against the base branch's principles and docs (`REVIEW_DOCS_ROOT`), it can
-  only read files, and project settings in the PR (`.claude/`, `.mcp.json`)
-  are ignored. It refuses to run on PRs that
-  touch those paths; review them by hand.
+  where it passed before.
+- **The CI review (`agent-review`, RFC 0003)** is the verification. It runs
+  automatically on every PR's latest commit and posts one comment, updated
+  in place, with the verdict. Its check fails on a non-passing verdict.
+  - Model: Meta's Muse (`muse-spark-1.3-contributor`), through the same
+    locked-down harness as `scripts/review.sh`, via Meta's
+    Anthropic-compatible API and the `META_API_KEY` repository secret.
+  - Volume: it runs automatically for authors who already have standing in
+    the repository. For first-time contributors, and for diffs over 4000
+    lines (excluding generated code), a maintainer runs it by adding the
+    `agent-review` label. To force a re-run when the label is already on,
+    remove it and add it again. A skipped run posts "Not reviewed" and its
+    check stays green, so green without a verdict does not mean reviewed.
+    The maintainer should set a spending limit on the Meta key.
+  - Isolation: the reviewer instructions and scripts come from the current
+    base branch, and the reviewer is instructed to judge against the base
+    branch's principles and docs (`REVIEW_DOCS_ROOT`). It can only read
+    files, and project settings in the PR are ignored. It refuses PRs that
+    change agent configuration (`.claude/`, `.muse/`, `.mcp.json`,
+    `CLAUDE.md`, `CLAUDE.local.md`); review those by hand.
+  - **Data use:** at the Contributor tier, Meta may train on prompts and
+    completions, which here means the PR diff and repository docs. 4S is a
+    public repository, so this content is public anyway.
 
 ## G5 Docs
 

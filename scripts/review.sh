@@ -6,12 +6,21 @@
 #
 # Env:
 #   REVIEW_BASE         base ref (default: origin/main)
-#   REVIEW_CMD          agent command reading the prompt on stdin (default: claude -p ...)
+#   REVIEW_PROVIDER     claude (default: Claude Code login or ANTHROPIC_API_KEY)
+#                       or muse (Meta's Muse model via its Anthropic-compatible
+#                       API; needs your own META_API_KEY). Same locked-down
+#                       harness either way; see RFC 0003.
+#   REVIEW_MODEL        model id (muse default: muse-spark-1.3-contributor)
+#   REVIEW_CMD          any other agent command reading the prompt on stdin
 #   REVIEW_PROMPT_FILE  reviewer instructions (default: docs/review/reviewer.md;
 #                       CI uses the copy from main)
 #   REVIEW_DOCS_ROOT    read principles/docs from this checkout instead of the
 #                       one under review (CI: the base branch)
-# Writes .gates/review-<sha>.md. Exit 0 only on VERDICT: pass.
+#   REVIEW_MAX_TURNS    cap on agent turns (default 40)
+# Writes .gates/review-<sha>.md.
+# Exit: 0 VERDICT: pass; 1 any other verdict; 3 invalid review output (wrong or
+# missing REVIEWED_SHA / DIFF_SHA256 / VERDICT); 2 usage or setup error;
+# 4 the agent process itself failed (e.g. auth error, --max-turns reached).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -64,31 +73,68 @@ PROMPT=.gates/review-prompt-$HEAD.md
 } > "$PROMPT"
 
 OUT=.gates/review-$HEAD.md
+PROVIDER=${REVIEW_PROVIDER:-claude}
+rm -f "$OUT" "$OUT.tmp" # never leave an older review behind on failure
 echo "==> independent review of $HEAD (diff $HASH)" >&2
 if [[ -n ${REVIEW_CMD:-} ]]; then
-  bash -c "$REVIEW_CMD" < "$PROMPT" > "$OUT"
+  REVIEWER="custom ($REVIEW_CMD)"
+  bash -c "$REVIEW_CMD" < "$PROMPT" > "$OUT.tmp" || { echo "review.sh: review command exited $?" >&2; exit 4; }
 else
   command -v claude >/dev/null || {
-    echo "review.sh: 'claude' not found; install Claude Code or set REVIEW_CMD" >&2
+    echo "review.sh: 'claude' (the Claude Code CLI, used as the review harness) not found; install it or set REVIEW_CMD" >&2
     exit 2
   }
   # Locked down: --restricted removes every command-running tool and WebFetch,
   # ignores user/project/local settings files (so a PR cannot grant its
   # reviewer permissions via .claude/settings.json), and confines file tools
   # to the working directories. --bare additionally skips memory, hooks, and
-  # plugins, but needs an API key (it does not use the interactive login).
-  FLAGS=(--restricted --strict-mcp-config --disable-slash-commands --tools Read Grep Glob --no-session-persistence)
-  [[ -n ${ANTHROPIC_API_KEY:-} ]] && FLAGS=(--bare "${FLAGS[@]}")
+  # plugins; it needs key-based auth (not the interactive login).
+  FLAGS=(--restricted --strict-mcp-config --disable-slash-commands --tools Read Grep Glob --no-session-persistence
+    --max-turns "${REVIEW_MAX_TURNS:-40}")
   [[ -n ${REVIEW_DOCS_ROOT:-} ]] && FLAGS+=(--add-dir "$REVIEW_DOCS_ROOT")
-  claude -p "${FLAGS[@]}" \
-    < "$PROMPT" > "$OUT"
+  ENV=()
+  case $PROVIDER in
+    claude)
+      REVIEWER="claude/${REVIEW_MODEL:-default}"
+      [[ -n ${ANTHROPIC_API_KEY:-} ]] && FLAGS=(--bare "${FLAGS[@]}")
+      [[ -n ${REVIEW_MODEL:-} ]] && FLAGS+=(--model "$REVIEW_MODEL")
+      ;;
+    muse)
+      if [[ -z ${META_API_KEY:-} ]]; then
+        echo "review.sh: REVIEW_PROVIDER=muse needs META_API_KEY (your own Meta Model API key)" >&2
+        exit 2
+      fi
+      MODEL=${REVIEW_MODEL:-muse-spark-1.3-contributor}
+      REVIEWER="muse/$MODEL"
+      FLAGS=(--bare "${FLAGS[@]}" --model "$MODEL")
+      # Meta's Model API is Anthropic-compatible. Every request, including
+      # background ones, goes to Meta with the Muse model.
+      ENV=(-u ANTHROPIC_API_KEY
+        ANTHROPIC_BASE_URL=https://api.meta.ai
+        ANTHROPIC_AUTH_TOKEN="$META_API_KEY"
+        ANTHROPIC_MODEL="$MODEL"
+        ANTHROPIC_SMALL_FAST_MODEL="$MODEL"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL="$MODEL"
+        ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+        ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL")
+      ;;
+    *)
+      echo "review.sh: unknown REVIEW_PROVIDER '$PROVIDER' (claude or muse)" >&2
+      exit 2
+      ;;
+  esac
+  env ${ENV[@]+"${ENV[@]}"} claude -p "${FLAGS[@]}" < "$PROMPT" > "$OUT.tmp" ||
+    { echo "review.sh: agent exited $?" >&2; exit 4; }
 fi
+{ echo "Reviewer: $REVIEWER"; echo; cat "$OUT.tmp"; } > "$OUT"
+rm -f "$OUT.tmp"
 
-field() { grep -E "^$1:" "$OUT" | tail -1 | sed -E "s/^$1:[[:space:]]*//" | tr -d '[:space:]'; }
+field() { { grep -E "^$1:" "$OUT" || true; } | tail -1 | sed -E "s/^$1:[[:space:]]*//" | tr -d '[:space:]'; }
 VERDICT=$(field VERDICT)
+case $VERDICT in pass | changes-requested | needs-rfc) ;; *) VERDICT= ;; esac
 if [[ $(field REVIEWED_SHA) != "$HEAD" || $(field DIFF_SHA256) != "$HASH" || -z $VERDICT ]]; then
   echo "review.sh: review output is missing or has wrong REVIEWED_SHA/DIFF_SHA256/VERDICT lines; see $OUT" >&2
-  exit 1
+  exit 3
 fi
 echo "==> VERDICT: $VERDICT ($OUT)" >&2
-[[ $VERDICT == pass ]]
+[[ $VERDICT == pass ]] || exit 1

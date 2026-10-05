@@ -76,8 +76,14 @@ Details, including what counts as good evidence: [docs/gates.md](docs/gates.md).
 ## Setup
 
 Rust (via [rustup](https://rustup.rs)), Node.js 22+, and for the review gate
-an agent CLI (by default [Claude Code](https://claude.com/claude-code); set
-`REVIEW_CMD` to use another, see [docs/gates.md](docs/gates.md)).
+the [Claude Code](https://claude.com/claude-code) CLI, which is the review
+harness. It runs with your Claude login by default, or against Meta's Muse
+model with your own key: `REVIEW_PROVIDER=muse META_API_KEY=... scripts/gates.sh`.
+`REVIEW_CMD` plugs in any other agent (see [docs/gates.md](docs/gates.md)).
+
+Every PR is also reviewed in CI by the same reviewer (RFC 0003), using
+Meta's Muse model at the Contributor tier. Meta may train on that content
+(your diff and the repo's docs), which is public in this repository anyway.
 
 ```sh
 scripts/dev.sh        # build and run everything
