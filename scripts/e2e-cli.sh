@@ -352,6 +352,13 @@ s tempo 97 >/dev/null
 sleep 1; touch "$BIN/4sd"   # simulate a rebuild after the daemon started
 check "stale: restarted" "restarted 4sd (code changed" s daemon start --restart-if-stale --no-audio --no-midi --listen 127.0.0.1:0
 check "stale: unsaved session carried over" "transport.tempo = 97" s get transport.tempo
+# A session the new build cannot load: without a terminal to ask on, nothing
+# is discarded and the command explains how to start fresh.
+s project save stale-old >/dev/null
+echo '{"format_version": 1}' > "$FOURS_DATA_DIR/projects/stale-old.4s/project.json"
+sleep 1; touch "$BIN/4sd"
+check "stale: unloadable session is not discarded without asking" "dev.sh --fresh" s daemon start --restart-if-stale --no-audio --no-midi --listen 127.0.0.1:0 </dev/null
+check "start fresh after that" "4sd started" s daemon start --no-audio --no-midi --listen 127.0.0.1:0
 check "final stop" "4sd stopped" s daemon stop
 
 echo "all $pass checks passed"

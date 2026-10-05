@@ -51,6 +51,19 @@ rebuilt), it restarts the daemon and carries the session over: a saved,
 unmodified project is reloaded from its path; otherwise the session is saved
 to `<data-dir>/autosave/dev-session.4s` and loaded from there.
 
+If the session cannot be carried over, it asks before discarding it:
+
+- The running daemon is from an incompatible build (a different protocol
+  version, so the new CLI cannot talk to it):
+  "Stop it and start fresh, discarding its unsaved session? [y/N]". Yes stops
+  it with a signal and starts the new daemon with a new project.
+- The new daemon cannot load the saved session (e.g. an old project format):
+  "Start with a new project instead? [y/N]".
+
+The default, and the answer without a terminal (CI, scripts), is no: nothing
+is discarded, and the command fails with a hint to use
+`scripts/dev.sh --fresh` (or `4s daemon stop`).
+
 ## Runtime file and discovery
 
 While running, the daemon writes `<data-dir>/4sd.json` (pid, URL, version,

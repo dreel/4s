@@ -1126,9 +1126,80 @@ async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> R
     Ok(())
 }
 
+/// Ask a yes/no question on the terminal (default no). Without a terminal
+/// there is nobody to ask, so the answer is no.
+fn confirm(question: &str) -> bool {
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return false;
+    }
+    print!("{question} [y/N] ");
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    if std::io::stdin().lock().read_line(&mut line).is_err() {
+        return false;
+    }
+    matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
 /// Restart a daemon running an old build, carrying its session over: unsaved
 /// or modified work is saved to `<data-dir>/autosave/dev-session.4s` first.
+/// If the old daemon speaks an incompatible protocol, or its session cannot
+/// be loaded by the new build, offer to start fresh instead.
 async fn restart_stale(cli: &Cli, data_dir: &std::path::Path, args: &StartArgs, old: DaemonInfo) -> Result<()> {
+    let session = match save_session(cli, data_dir, &old).await {
+        Ok(session) => Some(session),
+        Err(e) => {
+            println!("the running 4sd (pid {}, {}) is from an incompatible build: {e:#}", old.pid, old.version);
+            if !confirm("Stop it and start fresh, discarding its unsaved session?") {
+                bail!(
+                    "4sd (pid {}) left running. Start fresh with `scripts/dev.sh --fresh` or `4s daemon stop`",
+                    old.pid
+                );
+            }
+            None
+        }
+    };
+    // A compatible daemon was asked to shut down; an incompatible one cannot
+    // be, so signal it.
+    if session.is_none() || !daemon_ctl::wait_exit(old.pid, std::time::Duration::from_secs(5)) {
+        daemon_ctl::signal_stop(old.pid, true)?;
+    }
+    let mut args = args.clone();
+    let restored = args.project.is_none() && session.is_some();
+    if restored {
+        args.project = session.clone();
+    }
+    let info = match daemon_ctl::start(data_dir, &args, cli.token.as_deref()) {
+        Ok((info, _)) => info,
+        Err(e) if restored => {
+            println!("could not restore the session from {}:\n{e:#}", session.as_deref().unwrap_or("?"));
+            if !confirm("Start with a new project instead?") {
+                bail!("4sd not started. Start fresh with `scripts/dev.sh --fresh`");
+            }
+            args.project = None;
+            let (info, _) = daemon_ctl::start(data_dir, &args, cli.token.as_deref())?;
+            println!("started 4sd (pid {}) on {} with a new project", info.pid, info.url);
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&info)?);
+    } else {
+        println!("restarted 4sd (code changed; pid {} -> {}) on {}", old.pid, info.pid, info.url);
+        match (&session, restored) {
+            (Some(s), true) => println!("session restored from {s}"),
+            (None, _) => println!("previous session discarded"),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Save the old daemon's session (if unsaved) and ask it to shut down.
+/// Returns the project path to restore.
+async fn save_session(cli: &Cli, data_dir: &std::path::Path, old: &DaemonInfo) -> Result<String> {
     let mut c = Client::connect(&old.url, cli.token.clone(), "cli").await?;
     let snap: Snapshot = serde_json::from_value(c.call(&Request::StateGet(Empty {})).await?)?;
     let session = match (&snap.project.path, snap.project.dirty) {
@@ -1140,25 +1211,7 @@ async fn restart_stale(cli: &Cli, data_dir: &std::path::Path, args: &StartArgs, 
         }
     };
     let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
-    drop(c);
-    if !daemon_ctl::wait_exit(old.pid, std::time::Duration::from_secs(5)) {
-        daemon_ctl::signal_stop(old.pid, false)?;
-    }
-    let mut args = args.clone();
-    let restored = args.project.is_none();
-    if restored {
-        args.project = Some(session.clone());
-    }
-    let (info, _) = daemon_ctl::start(data_dir, &args, cli.token.as_deref())?;
-    if cli.json {
-        println!("{}", serde_json::to_string_pretty(&info)?);
-    } else {
-        println!("restarted 4sd (code changed; pid {} -> {}) on {}", old.pid, info.pid, info.url);
-        if restored {
-            println!("session restored from {session}");
-        }
-    }
-    Ok(())
+    Ok(session)
 }
 
 async fn run(cli: Cli) -> Result<()> {
