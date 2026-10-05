@@ -272,11 +272,12 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 | `channel.remove` | `{n}` | unroutes sources that fed it |
 | `channel.rename` | `{n, name}` | |
 | `route.set` | `{source, channel: n \| null}` | null = unroute (back into the main mix for direct outs) |
-| `pattern.get_notes` / `pattern.set_notes` | `{instrument, notes}` | note patterns, string or structured |
+| `pattern.get_notes` / `pattern.set_notes` | `{instrument, notes}` | note patterns, string or structured (superseded: see the amendment's note-pattern API) |
 
 Changed:
 
-- `pattern.*` and `voice.trigger` gain an `instrument` field, defaulting to
+- (Defaulting superseded by the amendment: note calls default to the first
+  `tb303`.) `pattern.*` and `voice.trigger` gain an `instrument` field, defaulting to
   the first `tr808` so existing scripts keep working. "First" means
   creation order, the order `instrument.list` returns. The controller
   retargeting rule uses the same order. The default is resolved at call
@@ -294,7 +295,8 @@ Changed:
   every client knows which instrument an edit or hit belongs to:
   `StepChanged { instrument, voice, step, level }` and
   `PatternChanged { instrument, voice, steps }`.
-- New event `NotesChanged { instrument, notes }` for note-pattern edits
+- (Payload per the amendment: `NotesChanged { instrument, steps }`.) New
+  event `NotesChanged { instrument, notes }` for note-pattern edits
   (the whole pattern; it is at most 64 steps).
 - `Trigger` becomes `{ instrument, voice?, note?, velocity, time }`: a drum
   hit sets `voice`, a 303 note sets `note` (MIDI number). `velocity` is 1.0
@@ -335,7 +337,7 @@ CLI:
   and in `controller` events, and the target's pattern reaches them through
   the snapshot and the instrument-tagged `StepChanged`/`PatternChanged`
   events. A bridge has everything it needs locally.
-- In steps 2-3, volume knob mode controls the `mixer.N.volume` of the
+- (Superseded: no steps 2-3.) In steps 2-3, volume knob mode controls the `mixer.N.volume` of the
   channel the target's voice is routed to (nothing, if it is unrouted).
 - From step 4 (when the parameter exists), volume knob mode controls
   `<target>.<voice>.level` (the 808's internal mix) rather than
@@ -637,6 +639,10 @@ be discarded. Instead of the v1 -> v2 migration:
     (recorded in the test) within 0.1 dB.
 - Protocol clients are not kept compatible either: `PROTOCOL_VERSION` 2 is a
   clean break, and the bundled CLI and UI move with it.
+- Docs that cite v1 compatibility are updated with the implementation:
+  `docs/project-format.md` (fixtures for every *supported* version, and v1
+  dropped deliberately) and `docs/testing.md` (a v2 fixture test replaces
+  `v1_fixture_loads`).
 
 ### One implementation PR, and no PR size guideline
 
@@ -664,11 +670,23 @@ be discarded. Instead of the v1 -> v2 migration:
     sees which instrument a keyboard plays.
   - RPC (so bridges, scripts, and the CLI can play held notes too, as
     `controller.press` does for the Block): `voice.note_on {instrument?,
-    note, velocity?}` and `voice.note_off {instrument?, note}` -> `Empty`;
-    CLI `4s key down C2 [--instrument bass] [--velocity 0.8]` and
-    `4s key up C2`. The keyboard handler goes through the same code path,
-    with the keyboard (`midi:<port>`) as the holder; an RPC caller is held
-    under its client name. Both emit `trigger` events with `note`.
+    note, velocity?}` and `voice.note_off {instrument?, note}` -> `Empty`.
+    The keyboard handler goes through the same code path. Both emit
+    `trigger` events with `note`.
+  - Holders: a held note belongs to whoever started it. For a keyboard
+    that is the keyboard (`midi:<port>`); for an RPC caller it is its
+    connection (`name#id`, the `client_id` from `session.hello`, unique
+    per connection), not its client name, so two `cli` or `ui` clients
+    never release each other's notes. A holder's notes are released when
+    it goes away: a keyboard disconnecting or being unplugged, or a client
+    connection closing (so a crashed script or bridge cannot leave the 303
+    droning). A persistent client (the UI, a bridge) holds a note between
+    `note_on` and `note_off`; the CLI holds one for a duration in a single
+    command, `4s key C2 [--for 1] [--instrument bass] [--velocity 0.8]`,
+    since each CLI command is its own connection.
+  - A note-off without `instrument` goes to the instrument the holder
+    started that note on, not to "the first `tb303`" looked up again, so
+    adding or removing a `tb303` in between cannot leave a note stuck.
   - Behavior: a note-on starts a note with no gate: the VCA sustains while
     it is held (it does not decay at the gated rate) and releases (~10 ms)
     on note-off. Only the holder's note-off for that same note releases
@@ -680,21 +698,33 @@ be discarded. Instead of the v1 -> v2 migration:
     instrument's own pattern does not cut it on rest steps or on transport
     stop; a sequenced note on a later step takes over.
   - Velocity: MIDI velocity / 127 (0..1) is the note's velocity, reported
-    as `trigger.velocity`; 0.95 and up plays accented.
+    as `trigger.velocity`; a MIDI note-on with velocity 0 is a note-off.
+    `velocity` defaults to 1.0 for `voice.note_on` and `voice.trigger
+    {note}`. For every played (not sequenced) note, from MIDI or RPC,
+    0.95 and up plays accented. Sequenced steps keep the original
+    velocities (1.0 accented, 0.7 otherwise).
   - Fallbacks, mirroring the controller target: with no `instrument`, a
     keyboard plays the first `tb303` at the time of each note. If its
     instrument is removed, the connection's `instrument` is cleared (a
     `midi` event is emitted) and it falls back the same way. With no
     `tb303` at all, notes do nothing.
-  - Validation: CLI e2e with `virtual_block` sending raw note on/off: a
+  - Validation, CLI e2e: with `virtual_block` sending raw note on/off, a
     `trigger` event with `instrument` and `note`; held keys sustain and
-    release on note-off (per-channel meters); disconnecting releases a
-    held note.
+    release on note-off (per-channel meters); disconnecting releases a held
+    note. `4s key` holds then releases; another connection's
+    `voice.note_off` does not release it; a client that disconnects
+    releases its notes. `--instrument` is rejected for non-keyboard devices
+    and non-`tb303` instruments; removing a keyboard's instrument clears it
+    (with a `midi` event). `4s note` and `4s trigger --note` work, and
+    `voice.trigger` with both or neither of `voice`/`note` is
+    `invalid params`. Playwright: the MIDI panel connects a virtual port as
+    a keyboard playing a chosen `tb303`.
 - `sequencer.length` stays shared by every instrument.
 - No stereo width or mono-sum control for now.
 - Note-pattern and audition API, added to the API table:
   - `pattern.get_notes {instrument?}` / `pattern.set_notes {instrument?,
-    steps}` -> `{instrument, length, steps}`, emitting `notes_changed`;
+    steps}` -> `{instrument, length, steps}`, emitting `notes_changed
+    {instrument, steps}` (all 64 steps);
     steps are structured `{note: n | null, accent, slide}` (the string form
     is for the CLI and project files).
   - `pattern.set_note {instrument?, step, note: {note, accent, slide}}` ->
