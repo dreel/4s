@@ -77,6 +77,8 @@ review without a maintainer having to ask.
 - Cost and abuse guards: skip diffs over about 4000 lines (excluding
   generated code) with a note (the label still forces a run); cap agent
   turns (40) and wall time (15 minutes) per review.
+- Output: one sticky PR comment with the verdict, reviewed SHA, model, and
+  the full review, updated on each run.
 
 ### Spend guards (amendment)
 
@@ -103,8 +105,7 @@ maintainer's explicit choice) bypasses them.
 
 Together with the per-review caps, this bounds daily spend to roughly the
 daily limit times the cost of the largest review.
-- Output: one sticky PR comment with the verdict, reviewed SHA, model, and
-  the full review, updated on each run.
+
 
 ### Data use
 
