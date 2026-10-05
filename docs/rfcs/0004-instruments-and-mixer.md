@@ -217,6 +217,11 @@ for these. `tune`, `decay`, and `tone` are unchanged.
   not, the load fails with a clear error and nothing changes. Otherwise
   every push succeeds. Reloading a project with 16 instruments needs only
   16 in-flight boxes, well under the capacity.
+- **Full pools.** `instrument.add` with all `MAX_INSTRUMENTS` slots used,
+  and `channel.add` (or an `instrument.add` that needs new channels) with
+  all `MAX_CHANNELS` used, fail with `invalid params` naming the limit
+  ("at most 32 channels"). A project with more instruments or channels than
+  the pools hold fails to load, as part of the same all-or-nothing check.
 - **No engine rebuild in this RFC.** The live `RtEngine` is moved onto the
   audio thread once at startup (the cpal callback or the null pacer) and
   stays there, so the control side never gets it back. If the audio thread
@@ -327,6 +332,8 @@ CLI:
   and in `controller` events, and the target's pattern reaches them through
   the snapshot and the instrument-tagged `StepChanged`/`PatternChanged`
   events. A bridge has everything it needs locally.
+- In steps 2-3, volume knob mode controls the `mixer.N.volume` of the
+  channel the target's voice is routed to (nothing, if it is unrouted).
 - From step 4 (when the parameter exists), volume knob mode controls
   `<target>.<voice>.level` (the 808's internal mix) rather than
   `mixer.N.volume`.
@@ -530,6 +537,8 @@ Between steps, nothing is silently lost or changed:
   channel names; a `channel.rename` counts as a change). So a v1 file
   never holds state it cannot represent. The `drums.<voice>.level/pan/mute`
   parameters do not exist until step 4, so a v1 file never holds them.
+- **Loading in steps 2-3.** `project.load` of a v1 file, and `project.new`,
+  reset the graph to that default, then apply the file as today.
 
 If a step still runs past ~800 lines, it splits further. The order is
 fixed: each step builds on the one before.
