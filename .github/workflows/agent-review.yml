@@ -105,17 +105,22 @@ jobs:
           total=0
           this_pr=0
           # Count runs in the last 24 h whose review step actually ran. If the
-          # API call fails, this step fails and no review runs (fail closed).
+          # history cannot be read, no review runs (fail closed) and the PR
+          # gets a "Not reviewed" note saying why.
           # Approximate: runs on other PRs checking at the same moment can each
           # see room under the cap (RFC 0003, spend guards).
+          budget_unreadable() {
+            echo "SKIP=Could not read the review history to check the daily limits, so no review ran. A maintainer can force one with the \`agent-review\` label." >> "$GITHUB_ENV"
+            exit 0
+          }
           RUNS=$(gh api -X GET "repos/$REPO/actions/workflows/agent-review.yml/runs" \
             -f created=">=$SINCE" -f per_page=100 --paginate \
-            --jq ".workflow_runs[] | select(.id != $RUN_ID and .conclusion != \"skipped\") | \"\\(.id) \\(.display_title)\"")
+            --jq ".workflow_runs[] | select(.id != $RUN_ID and .conclusion != \"skipped\") | \"\\(.id) \\(.display_title)\"") || budget_unreadable
           while read -r id title; do
             [ -n "$id" ] || continue
             [ "$total" -ge "$DAILY_LIMIT" ] && break
             ran=$(gh api "repos/$REPO/actions/runs/$id/jobs" --jq \
-              '[.jobs[].steps[]? | select(.name == "Independent review" and .started_at != null and (.status == "in_progress" or .conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled"))] | length')
+              '[.jobs[].steps[]? | select(.name == "Independent review" and .started_at != null and (.status == "in_progress" or .conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled"))] | length') || budget_unreadable
             if [ "$ran" -gt 0 ]; then
               total=$((total + 1))
               # Matches the workflow's run-name; change both together.
