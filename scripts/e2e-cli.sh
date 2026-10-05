@@ -136,6 +136,11 @@ target/debug/examples/virtual_block "$KDEV" < "$TMP/kdev.in" > "$TMP/kdev.out" 2
 exec 8> "$TMP/kdev.in"
 for _ in $(seq 50); do grep -q ready "$TMP/kdev.out" && break; sleep 0.1; done
 for _ in $(seq 30); do s midi ports | grep -q "$KDEV" && break; sleep 0.1; done
+check "instrument only applies to keyboards" "only applies to --kind keyboard" s midi connect "$KDEV" --kind drums --instrument bass
+s instrument add tb303 --id keys --no-channel >/dev/null
+s midi connect "$KDEV" --kind keyboard --instrument keys >/dev/null
+check "removing a keyboard's instrument clears it" "(Keyboard) out: -" bash -c "$BIN/4s instrument rm keys >/dev/null && $BIN/4s midi ports | grep '$KDEV' | grep -v plays"
+s midi disconnect "$KDEV" >/dev/null
 check "connect a keyboard to the bass" "$KDEV (Keyboard) out: - plays: bass" s midi connect "$KDEV" --kind keyboard --instrument bass
 "$BIN/4s" watch --type trigger --count 1 --json > "$TMP/key.json" &
 WATCH=$!; sleep 0.5
@@ -239,17 +244,41 @@ json.dump(p, open('$FOURS_DATA_DIR/projects/bad.4s/project.json', 'w'))"
 check "an invalid project is rejected" "duplicate instrument id 'x'" s project load bad
 check "and leaves the current project as it was" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
 rm -rf "$FOURS_DATA_DIR/projects/bad.4s"
-# Held notes over RPC, as a bridge or script would send them.
+# Held notes over RPC, as a bridge or script would send them. A note belongs
+# to the connection that started it: only it can release the note, and it
+# is released when that connection closes.
 "$BIN/4s" watch --type meters --json > "$TMP/rpc-key.json" &
 WATCH=$!
-s key down C2 --instrument bass >/dev/null; sleep 0.6
-s key up C2 --instrument bass >/dev/null; sleep 0.8
+s key C2 --instrument bass --for 0.6 >/dev/null; sleep 0.8
 kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
-check "key down holds, key up releases (RPC)" "sustained then released" python3 -c "
+check "4s key holds, then releases" "sustained then released" python3 -c "
 import json
 levels = [c['left'] for l in open('$TMP/rpc-key.json') if l.strip()
           for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
 print('sustained then released' if levels and max(levels[:5]) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
+"$BIN/4s" watch --type meters --json > "$TMP/rpc-key2.json" &
+WATCH=$!
+"$BIN/4s" key C2 --for 1.2 >/dev/null &
+KEY=$!; sleep 0.3
+s call voice.note_off '{"note": 36}' >/dev/null   # another connection
+sleep 0.5
+wait $KEY; sleep 0.6
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "another client's note-off does not release the note" "held until its owner let go" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/rpc-key2.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+n = len(levels); print('held until its owner let go' if n > 30 and min(levels[3:30]) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
+"$BIN/4s" watch --type meters --json > "$TMP/rpc-key3.json" &
+WATCH=$!; sleep 0.2
+s call voice.note_on '{"note": 36}' >/dev/null   # connection closes right away
+sleep 0.8; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "a client that disconnects releases its notes" "released" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/rpc-key3.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('released' if (not levels or levels[-1] < 1e-4) and len(levels) < 15 else f'levels {levels}')"
+check "trigger takes a voice or a note, not both" "exactly one" s call voice.trigger '{"voice": "kick", "note": 36}'
 check "empty names are rejected" "name must not be empty" s channel add --name " "
 check "channel or no_channel, not both" "not both" s instrument add tb303 --channel 1 --no-channel
 check "second 808 gets a numbered id" "drums2     tr808  Drums 2" s instrument add tr808

@@ -34,7 +34,7 @@ export function MidiPanel() {
       </div>
       <label className="flex items-center gap-2 text-zinc-400">
         connect as
-        <select className={input} value={kind} onChange={(e) => setKind(e.target.value as DeviceKind)}>
+        <select className={input} value={kind} onChange={(e) => setKind(e.target.value as DeviceKind)} data-testid="midi-kind">
           <option value="livid_block">Livid Block</option>
           <option value="generic_drums">GM drum notes</option>
           <option value="keyboard">Keyboard (plays a 303)</option>
@@ -64,11 +64,17 @@ export function MidiPanel() {
               {name}
             </span>
             {isConnected(name) ? (
-              <button className={btn} onClick={() => void act(client.call("midi.disconnect", { input: name }))}>
+              <button className={btn} data-testid={`midi-disconnect-${name}`} onClick={() => void act(client.call("midi.disconnect", { input: name }))}>
                 disconnect
               </button>
             ) : (
-              <button className={btn} onClick={() => void act(client.call("midi.connect", { input: name, output: null, kind, instrument: kind === "keyboard" && plays ? plays : null }))}>
+              <button
+                className={btn}
+                data-testid={`midi-connect-${name}`}
+                onClick={() =>
+                  void act(client.call("midi.connect", { input: name, output: null, kind, instrument: kind === "keyboard" && plays ? plays : null }))
+                }
+              >
                 connect
               </button>
             )}

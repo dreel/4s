@@ -190,6 +190,10 @@ impl Instrument for Tb303 {
     }
 
     fn note_off(&mut self) {
+        // A sequenced note that took over a held key is not the key's to end.
+        if !self.held_by_key {
+            return;
+        }
         self.held_by_key = false;
         self.release();
     }

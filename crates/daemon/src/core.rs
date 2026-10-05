@@ -97,9 +97,9 @@ pub struct Core {
     midi: Midi,
     midi_tx: Sender<MidiMessage>,
     /// The note each instrument slot is holding (`voice.note_on`, or a MIDI
-    /// keyboard), and who holds it (the event origin: a client name or
-    /// `midi:<port>`). Only the holder's note-off for that note releases
-    /// it; unplugging a keyboard releases its notes.
+    /// keyboard), and who holds it: a client connection (`name#id`) or a
+    /// keyboard (`midi:<port>`). Only the holder's note-off for that note
+    /// releases it; a holder that disconnects releases its notes.
     held_notes: HashMap<u8, (String, u8)>,
     project: ProjectInfo,
     pub audio: AudioStatus,
@@ -825,15 +825,33 @@ impl Core {
         Ok(())
     }
 
-    /// Release a held note, if `holder` is holding exactly that note.
+    /// Release a held note, if `holder` is holding exactly that note. With
+    /// no instrument given, it goes to whichever instrument the holder
+    /// started that note on (not re-resolved, so adding or removing a `tb303`
+    /// in between cannot leave it stuck).
     fn note_off(&mut self, id: Option<&str>, note: u8, holder: &str) -> Result<(), RpcError> {
-        let id = self.resolve(id, InstrumentType::Tb303)?;
-        let slot = self.slot(&id)?;
-        if self.held_notes.get(&slot) == Some(&(holder.to_string(), note)) {
+        let held = (holder.to_string(), note);
+        let slot = match id {
+            Some(id) => {
+                let id = self.resolve(Some(id), InstrumentType::Tb303)?;
+                Some(self.slot(&id)?).filter(|s| self.held_notes.get(s) == Some(&held))
+            }
+            None => self.held_notes.iter().find(|(_, h)| **h == held).map(|(s, _)| *s),
+        };
+        if let Some(slot) = slot {
             self.held_notes.remove(&slot);
             self.send(Command::NoteOff { slot });
         }
         Ok(())
+    }
+
+    /// Release every note a client connection holds (it disconnected).
+    pub fn release_held_by(&mut self, holder: &str) {
+        let slots: Vec<u8> = self.held_notes.iter().filter(|(_, (h, _))| h == holder).map(|(s, _)| *s).collect();
+        for slot in slots {
+            self.held_notes.remove(&slot);
+            self.send(Command::NoteOff { slot });
+        }
     }
 
     // ---- controller --------------------------------------------------------
@@ -1322,7 +1340,9 @@ impl Core {
 
     /// Handle a request. Connection-level methods (hello, subscribe, render)
     /// are handled by the server before reaching here.
-    pub fn handle(&mut self, req: Request, origin: &str) -> RpcResult {
+    /// `origin` names the client in events; `client` identifies this
+    /// connection (`name#id`) and holds the notes it starts.
+    pub fn handle(&mut self, req: Request, origin: &str, client: &str) -> RpcResult {
         let drum = |c: &Self, id: &Option<String>| c.resolve(id.as_deref(), InstrumentType::Tr808);
         match req {
             Request::StateGet(_) => ok(self.snapshot()),
@@ -1415,11 +1435,11 @@ impl Core {
                 ok(Empty {})
             }
             Request::VoiceNoteOn(p) => {
-                self.note_on(p.instrument.as_deref(), p.note, p.velocity.unwrap_or(1.0), origin)?;
+                self.note_on(p.instrument.as_deref(), p.note, p.velocity.unwrap_or(1.0), client)?;
                 ok(Empty {})
             }
             Request::VoiceNoteOff(p) => {
-                self.note_off(p.instrument.as_deref(), p.note, origin)?;
+                self.note_off(p.instrument.as_deref(), p.note, client)?;
                 ok(Empty {})
             }
             Request::ControllerGet(_) => ok(self.controller.state()),

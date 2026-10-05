@@ -84,6 +84,8 @@ async fn handle_connection(core: Shared, daemon: Arc<Daemon>, stream: TcpStream,
     if let Some(h) = conn.subscription.take() {
         h.abort();
     }
+    // Notes this connection was holding end with it.
+    core.lock().unwrap().release_held_by(&format!("{}#{}", conn.name, conn.id));
     drop(tx);
     let _ = writer.await;
     tracing::debug!("connection {id} closed");
@@ -150,7 +152,7 @@ async fn handle_text(
         }
         other => {
             let mut c = core.lock().unwrap();
-            c.handle(other, &conn.name)
+            c.handle(other, &conn.name, &format!("{}#{}", conn.name, conn.id))
         }
     };
     (reply(result), shutdown)

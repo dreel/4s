@@ -2,6 +2,10 @@
 // verifies the other, closing the loop in both directions.
 
 import { expect, test } from "@playwright/test";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { startHarness, type Harness } from "./harness";
 
 let h: Harness;
@@ -149,6 +153,36 @@ test("808 voice output: route a voice to its own channel from the UI and over RP
 
   await rpc("param.set", { path: "drums.kick.level", value: 0.5 });
   await expect(page.getByTestId("knob-drums.kick.level")).toHaveAttribute("data-value", "0.5");
+});
+
+test("MIDI panel connects a keyboard that plays a chosen 303", async () => {
+  const { page, rpc } = h;
+  // A real virtual MIDI port, from a separate process (as in the CLI e2e).
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const bin = path.join(root, "target", "debug", "examples", "virtual_block");
+  // Built like 4sd before the suite runs (scripts/check.sh builds it).
+  if (!existsSync(bin)) throw new Error("build it with: cargo build -p fours-daemon --example virtual_block");
+  const name = `PW Keys ${process.pid}`;
+  const dev = spawn(bin, [name], { stdio: "pipe" });
+  try {
+    await rpc("instrument.add", { type: "tb303", id: "lead", name: null, channel: null, no_channel: false });
+    await expect
+      .poll(async () => {
+        await page.getByTestId("midi-refresh").click();
+        return page.getByTestId(`midi-connect-${name}`).count();
+      })
+      .toBe(1);
+    await page.getByTestId("midi-kind").selectOption("keyboard");
+    await page.getByTestId("midi-keyboard-instrument").selectOption("lead");
+    await page.getByTestId(`midi-connect-${name}`).click();
+    await expect
+      .poll(async () => (await rpc("midi.ports", {})).connections.find((c) => c.input === name))
+      .toMatchObject({ kind: "keyboard", instrument: "lead" });
+    await page.getByTestId(`midi-disconnect-${name}`).click();
+    await expect.poll(async () => (await rpc("midi.ports", {})).connections.length).toBe(0);
+  } finally {
+    dev.kill();
+  }
 });
 
 test("transport: play from UI, playhead moves, stop", async () => {
