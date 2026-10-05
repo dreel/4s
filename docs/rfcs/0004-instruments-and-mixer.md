@@ -186,11 +186,18 @@ for these. `tune`, `decay`, and `tone` are unchanged.
   has come back (the feedback thread reports it). A slot is never reused
   while its box is in flight. So at most `MAX_INSTRUMENTS` boxes are ever
   outstanding, and the push always has room.
-- **When the audio thread is not running** (device lost, or the engine is
-  being rebuilt), `Core` does not wait for boxes that will never come back.
-  An engine is always built from `Core`'s graph. Building one starts with
-  every slot free except the ones the graph uses, and the old engine,
-  boxes included, is dropped on the control side.
+- **No engine rebuild in this RFC.** The live `RtEngine` is moved onto the
+  audio thread once at startup (the cpal callback or the null pacer) and
+  stays there, so the control side never gets it back. If the audio thread
+  stalls (a device stops calling back), removed instruments stop coming
+  back and their slots stay busy. Once all slots are busy, `instrument.add`
+  fails with an error that names the cause ("no free instrument slot: N
+  removed instruments are still waiting to be returned by the audio
+  engine"). A daemon restart clears it. Recovering from a lost device, and
+  rebuilding the engine, are left to a later lifecycle RFC.
+- **Startup.** The engine starts in the same default shape `Core` starts
+  with (one `drums` 808). A loaded project is applied through the same
+  commands as live edits.
 - **Offline renders** (`render.offline`) build their engine the same way,
   from a copy of `Core`'s graph, parameters, and per-instrument patterns.
   So `4s render` hears exactly what is configured: routing, mute/solo, and
@@ -208,7 +215,10 @@ for these. `tune`, `decay`, and `tone` are unchanged.
   Then each channel applies pan or balance (from the routed width), gain,
   and mute/solo, and the result is summed into the master. The master keeps
   its soft clipper.
-- **Meters** are per channel (L and R peaks) plus master.
+- **Meters** are per channel (L and R peaks) plus master. Channel meters
+  read post-fader, post-pan/balance, and post-mute/solo, so they show what
+  the channel sends to the master. The L/R render stats measure the same
+  point (the master output).
 
 ### API (RPC -> CLI -> UI)
 
@@ -390,6 +400,12 @@ Channel order in `channels` is the display order. Parameters remain a flat
   param path, but routing is structural (it changes the registry and the
   engine graph) and integers-as-channel-references break when channels are
   removed. Structured state with its own event is clearer.
+- **`instruments.<id>.<param>` paths** (as [extending.md](../extending.md)
+  first suggested). This avoids collisions without a reserved list, but it
+  breaks every `drums.*` path in projects, scripts, and controller maps for
+  no gain. Bare `<id>.<param>` keeps them. The cost is that the reserved
+  list (`transport`, `sequencer`, `mixer`, `controller`) must grow with any
+  future top-level namespace. Adding one is an RFC-level change anyway.
 - **Per-instrument clocks.** More flexible (polymeter), but not needed yet;
   per-instrument length is listed as an open question.
 
@@ -472,7 +488,8 @@ Between steps, nothing is silently lost or changed:
 - **Saving in steps 2-3.** The project format is still v1. `project.save`
   fails with a clear error ("saving instruments, channels, and routes needs
   project format v2, RFC 0004 step 4") if the graph differs from the
-  default (one `drums` 808, channels 1-8, eight direct outs). So a v1 file
+  default (one `drums` 808, channels 1-8, eight direct outs, default
+  channel names; a `channel.rename` counts as a change). So a v1 file
   never holds state it cannot represent. The `drums.<voice>.level/pan/mute`
   parameters do not exist until step 4, so a v1 file never holds them.
 
