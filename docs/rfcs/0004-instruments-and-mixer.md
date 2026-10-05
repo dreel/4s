@@ -457,6 +457,8 @@ Channel order in `channels` is the display order. Parameters remain a flat
 
 ## Migration and compatibility
 
+> Superseded by the amendment (2026-10-04): no v1 migration; v1 projects are rejected. Only the protocol and docs notes below still apply.
+
 - `PROJECT_FORMAT_VERSION` 1 -> 2. `MIGRATIONS[0]` (v1 -> v2):
   - `instruments = [{drums, tr808, "Drums"}]`, `channels = [{1, "Drums"}]`,
     `routes = {drums: 1}`, `controller.target = "drums"`.
@@ -490,6 +492,8 @@ Channel order in `channels` is the display order. Parameters remain a flat
   [rfcs/README.md](README.md) that say new instrument types need an RFC.
 
 ## Implementation plan
+
+> Superseded by the amendment (2026-10-04): it all lands in one PR, with no size limit and no interim rules between steps.
 
 Separate PRs, each linking this RFC, each under ~800 changed lines
 (excluding generated code):
@@ -581,9 +585,9 @@ fixed: each step builds on the one before.
     the 303 arrive at the other client as `step_changed` / `notes_changed`
     with the right `instrument`, and `4s events` shows `trigger` events
     with `instrument` and `voice` or `note`.
-  - In steps 2-3, `project.save` with a non-default graph fails with the
+  - (Superseded: no steps 2-3.) In steps 2-3, `project.save` with a non-default graph fails with the
     documented error, and with the default graph it still writes v1.
-- **Migration**: the v1 fixture loads into the v2 shape (asserted
+- **Migration** (superseded by the amendment's replacement checks): the v1 fixture loads into the v2 shape (asserted
   structurally). It also loads through a running daemon (`4s project load`),
   and `4s render` reports the same onsets, and peak and RMS within 0.1 dB of
   the values recorded before the migration.
@@ -658,11 +662,25 @@ be discarded. Instead of the v1 -> v2 migration:
   - State: the connection, including its `instrument`, is part of the
     snapshot's `midi` list and of `midi` events, so every client and bridge
     sees which instrument a keyboard plays.
-  - Behavior: note-on starts a held note (no gate) on the instrument;
-    note-off of that same note from that same keyboard releases it.
-    Overlapping keys glide, as playing legato on a 303. The note held by a
-    keyboard is tracked per instrument together with the keyboard, and
-    released if that keyboard disconnects or is unplugged.
+  - RPC (so bridges, scripts, and the CLI can play held notes too, as
+    `controller.press` does for the Block): `voice.note_on {instrument?,
+    note, velocity?}` and `voice.note_off {instrument?, note}` -> `Empty`;
+    CLI `4s key down C2 [--instrument bass] [--velocity 0.8]` and
+    `4s key up C2`. The keyboard handler goes through the same code path,
+    with the keyboard (`midi:<port>`) as the holder; an RPC caller is held
+    under its client name. Both emit `trigger` events with `note`.
+  - Behavior: a note-on starts a note with no gate: the VCA sustains while
+    it is held (it does not decay at the gated rate) and releases (~10 ms)
+    on note-off. Only the holder's note-off for that same note releases
+    it. Each instrument plays one note at a time: a newer note-on takes
+    over (gliding, as playing legato on a 303), and releasing the newer
+    key releases the voice even if an older key is still down (no
+    last-note priority). A note held by a keyboard is released if that
+    keyboard disconnects or is unplugged. While a note is held, the
+    instrument's own pattern does not cut it on rest steps or on transport
+    stop; a sequenced note on a later step takes over.
+  - Velocity: MIDI velocity / 127 (0..1) is the note's velocity, reported
+    as `trigger.velocity`; 0.95 and up plays accented.
   - Fallbacks, mirroring the controller target: with no `instrument`, a
     keyboard plays the first `tb303` at the time of each note. If its
     instrument is removed, the connection's `instrument` is cleared (a
@@ -674,6 +692,19 @@ be discarded. Instead of the v1 -> v2 migration:
     held note.
 - `sequencer.length` stays shared by every instrument.
 - No stereo width or mono-sum control for now.
+- Note-pattern and audition API, added to the API table:
+  - `pattern.get_notes {instrument?}` / `pattern.set_notes {instrument?,
+    steps}` -> `{instrument, length, steps}`, emitting `notes_changed`;
+    steps are structured `{note: n | null, accent, slide}` (the string form
+    is for the CLI and project files).
+  - `pattern.set_note {instrument?, step, note: {note, accent, slide}}` ->
+    the same result and event: one step at a time, so quick edits and
+    other clients never overwrite each other with a stale whole pattern.
+    CLI `4s note <instrument> <step> <token>` (`C2`, `D#2!~`, `-`).
+  - `voice.trigger {instrument?, voice?, note?, velocity?}`: exactly one of
+    `voice` (drums) or `note` (a note gated for half a step); both or
+    neither is `invalid params`. CLI `4s trigger kick`, `4s trigger --note
+    C2`.
 - Calls without `instrument` keep defaulting, with no plan to deprecate
   that. The default is the first instrument, in creation order, of the
   exact type the call needs: drum calls (`pattern.get/set/set_step/
