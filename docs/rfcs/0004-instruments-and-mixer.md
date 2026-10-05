@@ -624,7 +624,13 @@ be discarded. Instead of the v1 -> v2 migration:
 - The "Migration and compatibility" fold of `mixer.N.*` into
   `drums.<voice>.*` (with its lossy-solo note) and the migration checks in
   the validation plan no longer apply. The new defaults still reproduce the
-  old kit's levels: voice level 0.8, channel fader at unity.
+  old kit's levels: voice level 0.8, channel fader at unity. Replacement
+  checks:
+  - a CLI e2e check that `4s project load` of a v1 file fails with the
+    documented error;
+  - a CLI e2e check that a fixed groove, rendered with the default project,
+    matches the peak and RMS that `main` rendered for it before this RFC
+    (recorded in the test) within 0.1 dB.
 - Protocol clients are not kept compatible either: `PROTOCOL_VERSION` 2 is a
   clean break, and the bundled CLI and UI move with it.
 
@@ -633,7 +639,8 @@ be discarded. Instead of the v1 -> v2 migration:
 - The seven implementation steps land as one PR, so the interim rules for
   steps 2-3 (save refusing a non-default graph, routing limits before the
   main mix, per-step fader defaults, volume knobs on routed channels) are
-  not needed.
+  not needed, and neither are their validation checks (including the
+  `project.save` refusal check).
 - The ~800-line guideline in CONTRIBUTING.md's "Keep PRs reviewable" is
   removed: a PR can be as large as the change needs, as long as the gates
   pass. This is guidance, not one of the gates in the gate table, and the
@@ -641,13 +648,42 @@ be discarded. Instead of the v1 -> v2 migration:
 
 ### Open questions, resolved
 
-- A MIDI **keyboard** device kind plays a note instrument (note on/off;
-  default the first `tb303`; choose one when connecting). A Livid Block
-  note-pattern mode is out of scope.
+- A MIDI **keyboard** device kind plays a note instrument. A Livid Block
+  note-pattern mode is out of scope. Design:
+  - API: a new `DeviceKind::Keyboard` (`keyboard` on the wire), and an
+    optional `instrument` on `midi.connect` params and on `MidiConnection`.
+    `instrument` is only accepted for `kind: keyboard`; it must name a
+    `tb303`. CLI: `4s midi connect <port> --kind keyboard
+    [--instrument bass]`; the UI's MIDI panel offers the same choice.
+  - State: the connection, including its `instrument`, is part of the
+    snapshot's `midi` list and of `midi` events, so every client and bridge
+    sees which instrument a keyboard plays.
+  - Behavior: note-on starts a held note (no gate) on the instrument;
+    note-off of that same note from that same keyboard releases it.
+    Overlapping keys glide, as playing legato on a 303. The note held by a
+    keyboard is tracked per instrument together with the keyboard, and
+    released if that keyboard disconnects or is unplugged.
+  - Fallbacks, mirroring the controller target: with no `instrument`, a
+    keyboard plays the first `tb303` at the time of each note. If its
+    instrument is removed, the connection's `instrument` is cleared (a
+    `midi` event is emitted) and it falls back the same way. With no
+    `tb303` at all, notes do nothing.
+  - Validation: CLI e2e with `virtual_block` sending raw note on/off: a
+    `trigger` event with `instrument` and `note`; held keys sustain and
+    release on note-off (per-channel meters); disconnecting releases a
+    held note.
 - `sequencer.length` stays shared by every instrument.
 - No stereo width or mono-sum control for now.
-- Calls without `instrument` keep defaulting to the first instrument of the
-  matching type, with no plan to deprecate that.
+- Calls without `instrument` keep defaulting, with no plan to deprecate
+  that. The default is the first instrument, in creation order, of the
+  exact type the call needs: drum calls (`pattern.get/set/set_step/
+  toggle_step/clear`, `voice.trigger {voice}`) take the first `tr808`; note
+  calls (`pattern.get_notes/set_notes/set_note`, `voice.trigger {note}`)
+  take the first `tb303`, so `instrument` is optional for them too. With
+  no instrument of that type, the call fails with `invalid params` naming
+  the type and listing the instruments that exist. (The CLI `4s notes` and
+  `4s note` still name the instrument explicitly.) CLI e2e covers the
+  error.
 - Limits stay at 16 instruments and 32 channels. Channel inserts wait for
   the effects RFC.
 - Removing an instrument also removes the channels its outputs fed if they
