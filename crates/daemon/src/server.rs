@@ -85,7 +85,7 @@ async fn handle_connection(core: Shared, daemon: Arc<Daemon>, stream: TcpStream,
         h.abort();
     }
     // Notes this connection was holding end with it.
-    core.lock().unwrap().release_held_by(&format!("{}#{}", conn.name, conn.id));
+    core.lock().unwrap().release_held_by(&format!("conn:{}", conn.id));
     drop(tx);
     let _ = writer.await;
     tracing::debug!("connection {id} closed");
@@ -152,7 +152,9 @@ async fn handle_text(
         }
         other => {
             let mut c = core.lock().unwrap();
-            c.handle(other, &conn.name, &format!("{}#{}", conn.name, conn.id))
+            // Holder key: the connection id alone, which a renaming
+            // `session.hello` cannot change.
+            c.handle(other, &conn.name, &format!("conn:{}", conn.id))
         }
     };
     (reply(result), shutdown)

@@ -97,7 +97,7 @@ pub struct Core {
     midi: Midi,
     midi_tx: Sender<MidiMessage>,
     /// The note each instrument slot is holding (`voice.note_on`, or a MIDI
-    /// keyboard), and who holds it: a client connection (`name#id`) or a
+    /// keyboard), and who holds it: a client connection (`conn:<id>`) or a
     /// keyboard (`midi:<port>`). Only the holder's note-off for that note
     /// releases it; a holder that disconnects releases its notes.
     held_notes: HashMap<u8, (String, u8)>,
@@ -820,6 +820,7 @@ impl Core {
         }
         let id = self.resolve(id, InstrumentType::Tb303)?;
         let slot = self.slot(&id)?;
+        self.ensure_room(1)?;
         self.held_notes.insert(slot, (holder.to_string(), note));
         self.send(Command::NoteOn { slot, note, velocity: velocity.clamp(0.0, 1.0), gate: false });
         Ok(())
@@ -847,7 +848,9 @@ impl Core {
         Ok(())
     }
 
-    /// Release every note a client connection holds (it disconnected).
+    /// Release every note a client connection holds (it disconnected). The
+    /// release is sent even when the queue looks full: there is no caller to
+    /// report an error to, and a dropped note-off is logged by `send`.
     pub fn release_held_by(&mut self, holder: &str) {
         let slots: Vec<u8> = self.held_notes.iter().filter(|(_, (h, _))| h == holder).map(|(s, _)| *s).collect();
         for slot in slots {
@@ -1343,7 +1346,7 @@ impl Core {
     /// Handle a request. Connection-level methods (hello, subscribe, render)
     /// are handled by the server before reaching here.
     /// `origin` names the client in events; `client` identifies this
-    /// connection (`name#id`) and holds the notes it starts.
+    /// connection (`conn:<id>`) and holds the notes it starts.
     pub fn handle(&mut self, req: Request, origin: &str, client: &str) -> RpcResult {
         let drum = |c: &Self, id: &Option<String>| c.resolve(id.as_deref(), InstrumentType::Tr808);
         match req {

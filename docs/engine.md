@@ -102,7 +102,8 @@ resonant ladder lowpass (24 dB/oct, tanh stages), and a VCA.
   the next step, and that note glides in (~60 ms) without retriggering the
   envelopes.
 - Played from a MIDI keyboard (or `voice.note_on`, or `4s key C2 --for 1`), a note
-  holds until its key is released;
+  holds until its key is released (a played note's velocity only selects
+  accent, at 0.95 and up, as on the 303);
   while held, the sequencer's rest steps and stopping the transport do not
   cut it (a sequenced note on a later step takes over).
 - Output: one mono main.

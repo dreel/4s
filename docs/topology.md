@@ -67,6 +67,13 @@ clients use `external` mode and never start or stop it. See
   events; it applies LED and state events coming back to the device.
 - Real, bridged, and virtual (simulated) controllers look the same to the
   engine.
+- **Held notes** (`voice.note_on` / `voice.note_off`, RFC 0004) belong to
+  the connection that started them, and the engine releases them when that
+  connection closes. A bridge is one upstream connection for all its local
+  clients and keyboards, so it must track holders per local client and per
+  keyboard, and send `voice.note_off` upstream for their notes when they
+  disconnect or are unplugged. If the bridge drops, the engine releases all
+  its notes.
 - **Local feedback**: the bridge lights LEDs immediately on press and then
   reconciles with authoritative state, so the device feels instant despite
   network latency.

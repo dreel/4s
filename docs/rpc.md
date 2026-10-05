@@ -82,6 +82,12 @@ current parameter set.
 - Pattern and trigger events name their instrument (`step_changed`,
   `pattern_changed`, `notes_changed`, `trigger`), so clients know which
   instrument an edit or hit belongs to.
+- **Connection-scoped state: held notes.** `voice.note_on` holds a note for
+  the calling connection until it sends `voice.note_off` for that note, or
+  until the connection closes (the daemon then releases it). Other
+  connections cannot release it. This is the only state tied to a
+  connection; everything else is shared. A bridge must therefore track
+  holders per local client (see [topology.md](topology.md)).
 - High-rate events: `playhead` (per step), `trigger` (per hit), `meters`
   (~30 Hz, suppressed while silent). JSON is fine at these rates.
 

@@ -272,13 +272,22 @@ levels = [c['left'] for l in open('$TMP/rpc-key2.json') if l.strip()
 n = len(levels); print('held until its owner let go' if n > 30 and min(levels[3:30]) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
 "$BIN/4s" watch --type meters --json > "$TMP/rpc-key3.json" &
 WATCH=$!; sleep 0.2
-s call voice.note_on '{"note": 36}' >/dev/null   # connection closes right away
-sleep 0.8; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
-check "a client that disconnects releases its notes" "released" python3 -c "
+# A client that dies while holding a note: kill `4s key` mid-note. The note
+# sounds while the client is connected and stops when its connection drops.
+python3 - "$BIN/4s" <<'PY' &
+import subprocess, sys, time
+p = subprocess.Popen([sys.argv[1], "key", "C2", "--for", "10"])
+time.sleep(0.6)
+p.kill()
+PY
+KILLER=$!
+sleep 1.6; wait $KILLER
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "a client that disconnects releases its notes" "sounded, then released" python3 -c "
 import json
 levels = [c['left'] for l in open('$TMP/rpc-key3.json') if l.strip()
           for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
-print('released' if (not levels or levels[-1] < 1e-4) and len(levels) < 15 else f'levels {levels}')"
+print('sounded, then released' if levels and max(levels) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
 check "trigger takes a voice or a note, not both" "exactly one" s call voice.trigger '{"voice": "kick", "note": 36}'
 check "empty names are rejected" "name must not be empty" s channel add --name " "
 check "channel or no_channel, not both" "not both" s instrument add tb303 --channel 1 --no-channel
