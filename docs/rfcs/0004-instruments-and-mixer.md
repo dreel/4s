@@ -127,13 +127,18 @@ stay valid while the channel exists. A removed `n` can be reused by a later
 reused `n` starts clean, but a script that still holds the old `n` will
 address the new channel. We accept that, as DAWs do with track numbers.
 Projects store `n` explicitly, and gaps load into the same slots. Display
-order is a separate list. Solo works across channels as today. A channel
+order is creation order (the order of `channels` in the project).
+Reordering is out of scope for this RFC; it would add a `channel.move`
+RPC and CLI command later. Solo works across channels as today. A channel
 also has a name (structured state, not a parameter).
 
 **Routing.** A map from source to channel number, kept as structured state
 next to the instrument and channel lists. It is not a float parameter. Each
-source feeds at most one channel; a channel may be fed by several sources
-(they are summed). This is the routing graph; sends, buses, and inserts are
+source feeds at most one channel; a channel may be fed by several sources.
+Each source gets its own pan law (mono pan or balance, by its own width),
+and the results are summed in stereo before the fader. So a mono and a
+stereo source can share a channel, and the channel's one `pan` knob moves
+both. This is the routing graph; sends, buses, and inserts are
 a later RFC and will attach to channels.
 
 **808 internal mix.** New per-voice parameters in the instrument panel:
@@ -181,6 +186,15 @@ for these. `tune`, `decay`, and `tone` are unchanged.
   takes it out of the table and pushes the box onto a new return ring. The
   feedback thread drains that ring and drops the box. `Command` is no longer
   `Copy`. Nothing is allocated or freed on the audio thread.
+- **Structural commands never drop silently.** Today `Core::send` logs and
+  drops a command when the ring is full. For add, remove, and route
+  commands, a failed push fails the RPC and rolls back `Core`'s state. The
+  box comes back in `PushError::Full` and is dropped on the control side,
+  so `Core` and the engine never disagree about the graph.
+- **Pattern commands are fixed size.** A note pattern goes to the engine
+  as `[NoteStep; MAX_STEPS]` (a small `Copy` struct per step), like the
+  drum `SetTrack`. It is never a `Vec`, so applying it neither allocates
+  nor frees.
 - **The return push cannot fail.** The return ring holds `MAX_INSTRUMENTS`
   boxes, and `Core` marks a slot busy from `instrument.add` until its box
   has come back (the feedback thread reports it). A slot is never reused
@@ -229,7 +243,7 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 | `instrument.types` | - | available types, their outputs and params |
 | `instrument.list` | - | instances: id, type, name, outputs |
 | `instrument.add` | `{type, id?, name?, channel?}` | `channel`: omitted = create a new channel named after the instrument and route `main` to it; a number = route `main` to that existing channel; `null` = leave `main` unrouted, as in `route.set` (CLI: `--channel N`, `--no-channel`) |
-| `instrument.remove` | `{id}` | unroutes all its sources |
+| `instrument.remove` | `{id, keep_channels?}` | unroutes all its sources, and removes every channel left with no source, unless `keep_channels` (CLI: `--keep-channels`) |
 | `channel.add` | `{name?}` | returns the new `n` |
 | `channel.remove` | `{n}` | unroutes sources that fed it |
 | `channel.rename` | `{n, name}` | |
@@ -239,8 +253,10 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 Changed:
 
 - `pattern.*` and `voice.trigger` gain an `instrument` field, defaulting to
-  the first `tr808` so existing scripts keep working. The default is
-  resolved at call time. If there is no `tr808`, a call without
+  the first `tr808` so existing scripts keep working. "First" means
+  creation order, the order `instrument.list` returns. The controller
+  retargeting rule uses the same order. The default is resolved at call
+  time. If there is no `tr808`, a call without
   `instrument` fails with `invalid params`, and the error lists the
   instruments that exist.
 - `Snapshot` gains `graph: { instruments, channels, routes }`; `pattern`
@@ -524,8 +540,8 @@ fixed: each step builds on the one before.
   - `4s mixer` output shows names, sources, and levels.
   - Pan and balance from the L/R render stats: a mono channel panned hard
     left has near-zero right RMS; a stereo channel (the Drums main) at
-    balance -1 has near-zero right RMS, and at center matches the
-    unrouted level.
+    balance -1 has near-zero right RMS, and at center matches the RMS of
+    the same pattern rendered before the balance change.
   - `4s controller mode --target`, and removing the target: the controller
     retargets or goes null, as specified.
   - Calls without `instrument` after removing every `tr808` fail with the
@@ -548,8 +564,6 @@ fixed: each step builds on the one before.
 
 ## Open questions
 
-- Does removing an instrument also remove channels that only it fed?
-  (Proposed default: yes, unless `--keep-channels`.)
 - Playing the 303 from a MIDI keyboard, and whether the Livid Block gets a
   note-pattern mode for it.
 - Per-instrument pattern length versus the shared `sequencer.length`.
