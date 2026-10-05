@@ -573,7 +573,8 @@ fixed: each step builds on the one before.
     (muting channel 1 silences it again).
   - `4s channel add --name X`, `rename`, `rm`: `4s mixer` shows each change,
     and a removed `n` reused by the next `add` starts at defaults.
-  - `4s instrument types` lists `tr808` (and `tb303` from step 6).
+  - `4s instrument types` lists `tr808` (and `tb303` from step 6;
+    superseded: both, as everything lands at once).
   - `4s mixer` output shows names, sources, and levels.
   - Pan and balance from the L/R render stats: a mono channel panned hard
     left has near-zero right RMS; a stereo channel (the Drums main) at
@@ -641,8 +642,9 @@ be discarded. Instead of the v1 -> v2 migration:
   clean break, and the bundled CLI and UI move with it.
 - Docs that cite v1 compatibility are updated with the implementation:
   `docs/project-format.md` (fixtures for every *supported* version, and v1
-  dropped deliberately) and `docs/testing.md` (a v2 fixture test replaces
-  `v1_fixture_loads`).
+  dropped deliberately), `docs/testing.md` (a v2 fixture test replaces
+  `v1_fixture_loads`), and `docs/validation.md` (the v2 fixture loads; v1
+  and future versions are rejected).
 
 ### One implementation PR, and no PR size guideline
 
@@ -671,8 +673,9 @@ be discarded. Instead of the v1 -> v2 migration:
   - RPC (so bridges, scripts, and the CLI can play held notes too, as
     `controller.press` does for the Block): `voice.note_on {instrument?,
     note, velocity?}` and `voice.note_off {instrument?, note}` -> `Empty`.
-    The keyboard handler goes through the same code path. Both emit
-    `trigger` events with `note`.
+    The keyboard handler goes through the same code path. A note-on (from
+    either path) emits a `trigger` event with `note` and `velocity`; a
+    note-off emits no event (the `trigger` event stays "a note started").
   - Holders: a held note belongs to whoever started it. For a keyboard
     that is the keyboard (`midi:<port>`); for an RPC caller it is its
     connection (`name#id`, the `client_id` from `session.hello`, unique
@@ -684,9 +687,23 @@ be discarded. Instead of the v1 -> v2 migration:
     `note_on` and `note_off`; the CLI holds one for a duration in a single
     command, `4s key C2 [--for 1] [--instrument bass] [--velocity 0.8]`,
     since each CLI command is its own connection.
+  - Through a bridge (`docs/topology.md`; the bridge role is not built
+    yet, so this is its contract): the engine only sees the bridge's
+    upstream connection as the holder. The bridge therefore tracks holders
+    per local client connection and per local keyboard, forwards
+    `voice.note_on` / `voice.note_off`, and sends `voice.note_off` upstream
+    for a local client's (or keyboard's) held notes when it disconnects or
+    is unplugged. If the bridge itself drops, the engine releases all its
+    notes, so nothing is left droning.
   - A note-off without `instrument` goes to the instrument the holder
     started that note on, not to "the first `tb303`" looked up again, so
     adding or removing a `tb303` in between cannot leave a note stuck.
+  - Takeover: each instrument has one held-note entry. A newer note-on
+    replaces it (the earlier holder's later note-off or disconnect is then
+    a no-op and cannot cut the newer note). A sequenced note on a later
+    step takes the voice over from a held key: from then on the key's
+    note-off does nothing, and the pattern's rests and stop cut the voice
+    again.
   - Behavior: a note-on starts a note with no gate: the VCA sustains while
     it is held (it does not decay at the gated rate) and releases (~10 ms)
     on note-off. Only the holder's note-off for that same note releases
@@ -700,15 +717,20 @@ be discarded. Instead of the v1 -> v2 migration:
   - Velocity: MIDI velocity / 127 (0..1) is the note's velocity, reported
     as `trigger.velocity`; a MIDI note-on with velocity 0 is a note-off.
     `velocity` defaults to 1.0 for `voice.note_on` and `voice.trigger
-    {note}`. For every played (not sequenced) note, from MIDI or RPC,
-    0.95 and up plays accented. Sequenced steps keep the original
+    {note}`, so an audition (`4s trigger --note C2`, `4s key C2`) plays
+    accented by default, deliberately, as `4s trigger kick` plays a drum
+    at full velocity; pass `velocity` below 0.95 for an unaccented note.
+    For every played (not sequenced) note, from MIDI or RPC, 0.95 and up
+    plays accented. Sequenced steps keep the original
     velocities (1.0 accented, 0.7 otherwise).
   - Fallbacks, mirroring the controller target: with no `instrument`, a
     keyboard plays the first `tb303` at the time of each note. If its
     instrument is removed, the connection's `instrument` is cleared (a
     `midi` event is emitted) and it falls back the same way. With no
     `tb303` at all, notes do nothing.
-  - Validation, CLI e2e: with `virtual_block` sending raw note on/off, a
+  - Validation, CLI e2e: with `virtual_block` (started under a name
+    without "block", so it is not auto-connected as a Livid Block, and
+    connected with `--kind keyboard`) sending raw note on/off, a
     `trigger` event with `instrument` and `note`; held keys sustain and
     release on note-off (per-channel meters); disconnecting releases a held
     note. `4s key` holds then releases; another connection's

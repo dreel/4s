@@ -32,6 +32,15 @@ fixing a bug does not need one. New instrument types do (see
    and updates the design docs in `docs/` so they describe the new reality.
    The RFC stays as the record of why.
 
+## Amendments
+
+An accepted RFC can be amended before it is implemented (or while it is):
+open a PR that only changes `docs/rfcs/`, adding a dated "Amendment"
+section and an `Amended:` line in the header. The status stays `accepted`;
+merging the PR is the maintainer's approval, as for the original. Where the
+amendment differs from the earlier sections, the amendment wins; mark the
+superseded parts inline. RFC 0003 and RFC 0004 were amended this way.
+
 ## Statuses
 
 `proposed` -> `accepted` -> `implemented`, or `rejected` / `withdrawn`.
