@@ -28,6 +28,8 @@ export type LiveState = {
   master: number[];
   /** performance.now() of the last trigger, keyed `instrument` and `instrument.voice`. */
   triggers: Record<string, number>;
+  /** Last note each note instrument played (MIDI number). */
+  lastNote: Record<string, number>;
 };
 
 class Store<T> {
@@ -58,7 +60,7 @@ export const launch = {
 
 export const client = new RpcClient(daemonUrl());
 export const app = new Store<AppState>({ connection: "closed", snapshot: null, registry: [], error: null, selected: null });
-export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {} });
+export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {} });
 
 /** Select an instrument for the editor. */
 export function select(id: string) {
@@ -125,7 +127,10 @@ function apply(env: EventEnvelope) {
     case "trigger": {
       const now = performance.now();
       const key = ev.voice ? `${ev.instrument}.${ev.voice}` : ev.instrument;
-      live.set({ triggers: { ...live.state.triggers, [key]: now, [ev.instrument]: now } });
+      live.set({
+        triggers: { ...live.state.triggers, [key]: now, [ev.instrument]: now },
+        lastNote: ev.note === null ? live.state.lastNote : { ...live.state.lastNote, [ev.instrument]: ev.note },
+      });
       return;
     }
     case "midi_in":

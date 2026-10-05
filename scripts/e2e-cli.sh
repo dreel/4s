@@ -149,6 +149,14 @@ import json
 levels = [c['left'] for l in open('$TMP/key-meters2.json') if l.strip()
           for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
 print('released' if levels and max(levels) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
+# The same device as GM drums plays the controller target's voices.
+check "connect as GM drums" "$KDEV (GenericDrums)" s midi connect "$KDEV" --kind drums
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/gm.json" &
+WATCH=$!; sleep 0.5
+echo "raw 99 26 64" >&8   # GM 38 = snare, on channel 10
+wait $WATCH
+check "GM drum note plays the target's voice" '"instrument":"drums","voice":"snare"' cat "$TMP/gm.json"
+s midi disconnect "$KDEV" >/dev/null
 exec 8>&-
 BASS_RMS=$(s --json render --bars 1 --out renders/b1.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
 s set mixer.2.mute on >/dev/null

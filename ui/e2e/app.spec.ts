@@ -130,6 +130,9 @@ test("303 note editor edits the daemon's note pattern, and back", async () => {
   await rpc("pattern.set_notes", { instrument: "bass", steps });
   await expect(page.getByTestId("note-5")).toHaveValue("48");
 
+  await page.getByTestId("bass-audition").click();
+  await expect(page.getByTestId("bass-last-note")).toHaveAttribute("data-note", "36");
+
   await page.getByTestId("bass-waveform").click();
   await expect.poll(async () => (await rpc("param.get", { path: "bass.waveform" })).value).toBe(1);
 });

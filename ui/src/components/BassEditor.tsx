@@ -14,8 +14,16 @@ const NOTES = Array.from({ length: 37 }, (_, i) => 24 + i);
 
 function NoteLight({ id }: { id: string }) {
   const t = useLive((s) => s.triggers[id] ?? 0);
+  const note = useLive((s) => s.lastNote[id]);
   const recent = performance.now() - t < 120;
-  return <div className={`w-1.5 h-1.5 rounded-full ${recent ? "bg-amber-300" : "bg-zinc-700"}`} />;
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={`w-1.5 h-1.5 rounded-full ${recent ? "bg-amber-300" : "bg-zinc-700"}`} />
+      <span className="w-8 text-zinc-400 tabular-nums" data-testid="bass-last-note" data-note={note ?? ""}>
+        {note === undefined ? "" : noteName(note)}
+      </span>
+    </span>
+  );
 }
 
 export function BassEditor({ id }: { id: string }) {

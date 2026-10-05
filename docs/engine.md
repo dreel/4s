@@ -101,6 +101,9 @@ resonant ladder lowpass (24 dB/oct, tanh stages), and a VCA.
 - A note gates for half a step. A step with **slide** holds the gate into
   the next step, and that note glides in (~60 ms) without retriggering the
   envelopes.
+- Played from a MIDI keyboard, a note holds until its key is released;
+  while held, the sequencer's rest steps and stopping the transport do not
+  cut it (a sequenced note on a later step takes over).
 - Output: one mono main.
 
 Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,

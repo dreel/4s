@@ -69,6 +69,9 @@ pub struct Tb303 {
     ladder: [f32; 4],
     /// The previous step asked to slide into this one.
     slide_pending: bool,
+    /// The current note is held by a keyboard (until its note-off), so the
+    /// sequencer's rests and stop do not cut it; a sequenced note takes over.
+    held_by_key: bool,
     buf: Vec<f32>,
 }
 
@@ -99,6 +102,7 @@ impl Tb303 {
             accent_coef: coef(0.08),
             ladder: [0.0; 4],
             slide_pending: false,
+            held_by_key: false,
             buf: vec![0.0; MAX_BLOCK * 2],
         }
     }
@@ -157,9 +161,12 @@ impl Instrument for Tb303 {
         let sliding_in = self.slide_pending && self.gate;
         self.slide_pending = false;
         let Some(note) = s.note else {
-            self.release();
+            if !self.held_by_key {
+                self.release();
+            }
             return;
         };
+        self.held_by_key = false;
         let gate = if s.slide { None } else { Some(step_samples * 0.5) };
         self.start(note, s.accent, sliding_in, gate);
         self.slide_pending = s.slide;
@@ -168,18 +175,22 @@ impl Instrument for Tb303 {
     }
 
     fn on_stop(&mut self) {
-        self.release();
+        if !self.held_by_key {
+            self.release();
+        }
         self.slide_pending = false;
     }
 
     fn note_on(&mut self, note: u8, velocity: f32, gate_samples: Option<f64>) -> bool {
         // Overlapping keyboard notes glide, like playing legato on a 303.
         let glide = self.gate && gate_samples.is_none();
+        self.held_by_key = gate_samples.is_none();
         self.start(note, velocity >= 0.95, glide, gate_samples);
         true
     }
 
     fn note_off(&mut self) {
+        self.held_by_key = false;
         self.release();
     }
 

@@ -314,6 +314,9 @@ impl Core {
         let slot = self.slot_used.iter().position(|u| !u).ok_or_else(|| {
             RpcError::invalid(format!("at most {MAX_INSTRUMENTS} instruments"))
         })? as u8;
+        if p.no_channel && p.channel.is_some() {
+            return Err(RpcError::invalid("pass `channel` or `no_channel`, not both"));
+        }
         let channel = if p.no_channel {
             None
         } else if let Some(n) = p.channel {
