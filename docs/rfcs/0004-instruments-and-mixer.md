@@ -205,7 +205,7 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 |--------|--------|-------|
 | `instrument.types` | - | available types, their outputs and params |
 | `instrument.list` | - | instances: id, type, name, outputs |
-| `instrument.add` | `{type, id?, name?, channel?}` | by default creates a channel and routes `main` to it |
+| `instrument.add` | `{type, id?, name?, channel?}` | `channel`: omitted = create a new channel named after the instrument and route `main` to it; a number = route `main` to that existing channel; `"none"` = leave `main` unrouted (CLI: `--channel N`, `--no-channel`) |
 | `instrument.remove` | `{id}` | unroutes all its sources |
 | `channel.add` | `{name?}` | returns the new `n` |
 | `channel.remove` | `{n}` | unroutes sources that fed it |
@@ -224,6 +224,15 @@ Changed:
   becomes per instrument.
 - New event `graph` on any instrument/channel/route change. Clients refetch
   `param.list` when they receive it, since the registry may have changed.
+- Events that carry pattern or trigger data gain an `instrument` field, so
+  every client knows which instrument an edit or hit belongs to:
+  `StepChanged { instrument, voice, step, level }` and
+  `PatternChanged { instrument, voice, steps }`.
+- New event `NotesChanged { instrument, notes }` for note-pattern edits
+  (the whole pattern; it is at most 64 steps).
+- `Trigger` becomes `{ instrument, voice?, note?, velocity, time }`: a drum
+  hit sets `voice`, a 303 note sets `note` (MIDI number). `velocity` is 1.0
+  for an accented 303 step and 0.7 otherwise, as for drums.
 - `Meters` carries per-channel L/R peaks keyed by channel number.
 - Render results (`RenderTrigger`) gain the instrument id. `4s render`
   reports triggers per instrument, and peak and RMS for the left and right
@@ -255,6 +264,11 @@ CLI:
   grid goes dark, and pads and knobs do nothing. Either way, `Core` emits a
   `controller` event. Adding a `tr808` while the target is null makes it
   the target.
+- Bridges light LEDs locally on press ([topology.md](../topology.md)). The
+  target is part of `ControllerState`, so it reaches bridges in the snapshot
+  and in `controller` events, and the target's pattern reaches them through
+  the snapshot and the instrument-tagged `StepChanged`/`PatternChanged`
+  events. A bridge has everything it needs locally.
 - Volume knob mode now controls `<target>.<voice>.level` (the 808's internal
   mix) rather than `mixer.N.volume`.
 
@@ -406,20 +420,35 @@ Separate PRs, each linking this RFC, each under ~800 changed lines
    those channels. Existing tests and renders prove the refactor.
 2. **Graph API.** Protocol and `Core` state for instruments, channels, and
    routes; `instrument.*`, `channel.*`, `route.set`, and their CLI commands
-   (including `4s mixer`); the dynamic registry; the `graph` event;
-   `instrument` fields with call-time defaults; `PROTOCOL_VERSION` 2. Only
+   (including `4s mixer`); the dynamic registry; the `graph` event; the
+   `instrument` field on requests and events; `PROTOCOL_VERSION` 2. Only
    the `tr808` type exists.
-3. **Internal mix and stereo.** `drums.<voice>.level/pan/mute`, normalled
-   outs, output widths, pan vs balance, L/R render stats, controller target
-   and retargeting.
-4. **Project v2.** Format, migration, fixtures, and the switch to the new
-   default shape (one Drums channel at unity).
+3. **Stereo and controller target.** Output widths, pan vs balance, L/R
+   render stats, controller target and retargeting. Levels are unchanged.
+4. **Internal mix and project v2.** `drums.<voice>.level/pan/mute`,
+   normalled outs, the new default shape (one Drums channel at unity),
+   project format v2, migration, and fixtures, all in one step. That way
+   the new mix and the format that saves it, and the new defaults and the
+   migration that keeps old projects sounding the same, always ship
+   together.
 5. **UI.** Console + editor layout, channel strips, "+ instrument", 808
    output selector; Playwright tests.
-6. **TB-303 engine and API.** DSP, note patterns, `pattern.*_notes` RPC and
-   `4s notes`, render coverage.
+6. **TB-303 engine and API.** DSP, note patterns, `pattern.*_notes` RPC,
+   `NotesChanged`, and `4s notes`, with render coverage.
 7. **TB-303 editor.** The 303 panel in the UI. Sets this RFC to
    `implemented` and updates the docs listed above.
+
+Between steps, nothing is silently lost or changed:
+
+- **Fader default.** It stays 0.8 for every channel (including ones made
+  by `channel.add`) through step 3. Step 4 makes it unity, together with
+  the internal mix and the migration.
+- **Saving in steps 2-3.** The project format is still v1. `project.save`
+  fails with a clear error ("saving instruments, channels, and routes needs
+  project format v2, RFC 0004 step 4") if the graph differs from the
+  default (one `drums` 808, channels 1-8, eight direct outs). So a v1 file
+  never holds state it cannot represent. The `drums.<voice>.level/pan/mute`
+  parameters do not exist until step 4, so a v1 file never holds them.
 
 If a step still runs past ~800 lines, it splits further. The order is
 fixed: each step builds on the one before.
@@ -458,6 +487,12 @@ fixed: each step builds on the one before.
     retargets or goes null, as specified.
   - Calls without `instrument` after removing every `tr808` fail with the
     documented error.
+  - With two subscribed clients, a step edit on one 808 and a note edit on
+    the 303 arrive at the other client as `step_changed` / `notes_changed`
+    with the right `instrument`, and `4s events` shows `trigger` events
+    with `instrument` and `voice` or `note`.
+  - In steps 2-3, `project.save` with a non-default graph fails with the
+    documented error, and with the default graph it still writes v1.
 - **Migration**: the v1 fixture loads into the v2 shape (asserted
   structurally). It also loads through a running daemon (`4s project load`),
   and `4s render` reports the same onsets, and peak and RMS within 0.1 dB of
