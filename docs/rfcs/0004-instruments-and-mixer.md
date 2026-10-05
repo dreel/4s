@@ -5,6 +5,9 @@
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC. Merging it with
   `Status: accepted` is the maintainer's approval.
+- Amended: 2026-10-05, maintainer decisions before implementation; see
+  "Amendment: maintainer decisions" at the end. Where it differs from the
+  sections above, the amendment wins.
 
 ## Summary
 
@@ -601,3 +604,51 @@ fixed: each step builds on the one before.
   version?
 - Channel limits (16 instruments, 32 channels): enough, and should channels
   get insert slots now or with the effects RFC?
+
+## Amendment: maintainer decisions (2026-10-05)
+
+Decided by the maintainer (@dreel) after acceptance and before
+implementation. Merging this amendment is the approval.
+
+### No backward compatibility for v1 projects
+
+The project is days old and has a single user, so existing project files can
+be discarded. Instead of the v1 -> v2 migration:
+
+- Project format version 2 is the oldest supported version. Loading a v1
+  file fails with a clear error ("projects from before RFC 0004 ... are no
+  longer supported; create a new project").
+- The v1 fixture is replaced by a v2 fixture. `docs/project-format.md` says
+  that v1 was dropped deliberately, and that migrations are required again
+  from version 2 on.
+- The "Migration and compatibility" fold of `mixer.N.*` into
+  `drums.<voice>.*` (with its lossy-solo note) and the migration checks in
+  the validation plan no longer apply. The new defaults still reproduce the
+  old kit's levels: voice level 0.8, channel fader at unity.
+- Protocol clients are not kept compatible either: `PROTOCOL_VERSION` 2 is a
+  clean break, and the bundled CLI and UI move with it.
+
+### One implementation PR, and no PR size guideline
+
+- The seven implementation steps land as one PR, so the interim rules for
+  steps 2-3 (save refusing a non-default graph, routing limits before the
+  main mix, per-step fader defaults, volume knobs on routed channels) are
+  not needed.
+- The ~800-line guideline in CONTRIBUTING.md's "Keep PRs reviewable" is
+  removed: a PR can be as large as the change needs, as long as the gates
+  pass. This is guidance, not one of the gates in the gate table, and the
+  implementation PR makes the edit.
+
+### Open questions, resolved
+
+- A MIDI **keyboard** device kind plays a note instrument (note on/off;
+  default the first `tb303`; choose one when connecting). A Livid Block
+  note-pattern mode is out of scope.
+- `sequencer.length` stays shared by every instrument.
+- No stereo width or mono-sum control for now.
+- Calls without `instrument` keep defaulting to the first instrument of the
+  matching type, with no plan to deprecate that.
+- Limits stay at 16 instruments and 32 channels. Channel inserts wait for
+  the effects RFC.
+- Removing an instrument also removes the channels its outputs fed if they
+  are left empty, unless `keep_channels` is set (as proposed).
