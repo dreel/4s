@@ -137,6 +137,7 @@ exec 8> "$TMP/kdev.in"
 for _ in $(seq 50); do grep -q ready "$TMP/kdev.out" && break; sleep 0.1; done
 for _ in $(seq 30); do s midi ports | grep -q "$KDEV" && break; sleep 0.1; done
 check "instrument only applies to keyboards" "only applies to --kind keyboard" s midi connect "$KDEV" --kind drums --instrument bass
+check "a keyboard plays a tb303 only" "is a tr808, not a tb303" s midi connect "$KDEV" --kind keyboard --instrument drums
 s instrument add tb303 --id keys --no-channel >/dev/null
 s midi connect "$KDEV" --kind keyboard --instrument keys >/dev/null
 check "removing a keyboard's instrument clears it" "(Keyboard) out: -" bash -c "$BIN/4s instrument rm keys >/dev/null && $BIN/4s midi ports | grep '$KDEV' | grep -v plays"
@@ -300,6 +301,7 @@ s pattern step clap 2 on >/dev/null
 wait $WATCH
 check "step events carry the instrument" '"instrument":"drums"' cat "$TMP/events.json"
 check "no 808 left: calls without instrument explain" "no tr808 instrument" bash -c "$BIN/4s instrument rm drums >/dev/null && $BIN/4s pattern show kick"
+check "no 303 left: note calls without instrument explain" "no tb303 instrument" s trigger --note C2
 check "controller has no target" "target: (none)" s controller
 check "no target: grid is dark" "dark" bash -c "$BIN/4s controller | grep -q '#' && echo lit || echo dark"
 check "adding an 808 makes it the target" "target: drums " bash -c "$BIN/4s instrument add tr808 >/dev/null && $BIN/4s controller"

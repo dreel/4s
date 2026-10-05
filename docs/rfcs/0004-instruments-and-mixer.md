@@ -812,5 +812,9 @@ How the implementation settled details the design left open:
 - `midi.connect` accepts `instrument` only for `kind: keyboard`.
 - Output buffers are always 2-lane (mono outputs use the left lane) rather
   than allocated by width; simpler, and the memory is negligible.
-- Project loads check the exact number of engine commands they will send
-  before changing anything, so a load is all or nothing.
+- Structural changes (and project loads) check that the command queue has
+  room for every command they will send before changing anything, instead
+  of rolling back after a failed push. With one producer holding the
+  `Core` lock, the pushes then cannot fail, so `Core` and the engine never
+  disagree. Note-offs do the same, so a full queue is an error rather than
+  a stuck note.

@@ -22,7 +22,8 @@ What exists today:
   offline render onsets match sequencer triggers, including dense
   mixed patterns and long tails that must not re-trigger.
 - **Protocol** (`crates/protocol`): wire formats, project file round trip,
-  v1 fixture loads, future versions rejected.
+  the v2 fixture loads; v1 (dropped with RFC 0004) and future versions are
+  rejected.
 - **Daemon** (`crates/daemon`): Livid Block LED paging and playhead
   inversion.
 - **CLI** (`crates/cli`): every RPC method has a CLI command

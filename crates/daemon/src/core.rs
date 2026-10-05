@@ -839,6 +839,8 @@ impl Core {
             None => self.held_notes.iter().find(|(_, h)| **h == held).map(|(s, _)| *s),
         };
         if let Some(slot) = slot {
+            // Never record a release the engine did not get.
+            self.ensure_room(1)?;
             self.held_notes.remove(&slot);
             self.send(Command::NoteOff { slot });
         }
