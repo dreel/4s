@@ -578,6 +578,60 @@ pub(crate) mod tests {
         }
     }
 
+    /// Regression: dragging the cutoff around while low, sliding square-wave
+    /// notes play used to drive the ladder's state to infinity after about a
+    /// minute, leaving a stuck, inaudible DC output until the instrument was
+    /// rebuilt. The output must keep moving (never a constant level) and stay
+    /// audible bar after bar.
+    #[test]
+    fn tb303_filter_never_sticks() {
+        let sr = 44100;
+        let mut e = Engine::new(sr);
+        let mut fb = |_| {};
+        let _ = e.apply(Command::SetChannelActive { ch: 0, active: true }, &mut fb);
+        let instrument = instrument::make(InstrumentType::Tb303, sr as f32);
+        let _ = e.apply(Command::AddInstrument { slot: 0, instrument }, &mut fb);
+        let _ = e.apply(Command::SetRoute { slot: 0, output: 0, channel: Some(0) }, &mut fb);
+        let notes = fours_protocol::parse_notes("D1~ D#1~ C1~ F#1~ A#3~ A#3 A#3 - - - - D#1 - C#1 - G1").unwrap();
+        let mut steps = [NoteStep::default(); MAX_STEPS];
+        steps.copy_from_slice(&notes);
+        let _ = e.apply(Command::SetNotes { slot: 0, steps }, &mut fb);
+        // Square wave, and the decay/accent the bug was found with.
+        for (index, value) in [(1u16, 1.0f32), (3, 0.5), (4, 0.5), (5, 0.62), (6, 0.74)] {
+            let _ = e.apply(Command::SetParam { target: ParamTarget::Instrument { slot: 0, index }, value }, &mut fb);
+        }
+        let _ = e.apply(Command::Play, &mut fb);
+        let mut out = vec![0.0f32; 512 * 2];
+        let mut rng = 12345u32;
+        let (mut bar_peak, mut silent_bars) = (0.0f32, 0);
+        let blocks = sr as usize * 90 / 512; // 90 s; it stuck at ~59 s before the fix
+        for block in 0..blocks {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            // A slider: slow drags across the range, with occasional jumps.
+            let t = block as f32 * 512.0 / sr as f32;
+            let cutoff = if rng % 50 == 0 {
+                (rng % 1000) as f32 / 999.0
+            } else {
+                0.5 + 0.5 * (t * 0.37).sin() * (t * 0.05).cos()
+            };
+            let target = ParamTarget::Instrument { slot: 0, index: 2 };
+            let _ = e.apply(Command::SetParam { target, value: cutoff }, &mut fb);
+            e.render(&mut out, 2, &mut |_| {});
+            let (lo, hi) = out.iter().step_by(2).fold((f32::MAX, f32::MIN), |(l, h), x| (l.min(*x), h.max(*x)));
+            assert!(lo.is_finite() && hi.is_finite(), "non-finite output at {t:.1}s");
+            assert!(!(hi - lo < 1e-6 && hi.abs() > 0.3), "stuck DC output {hi} at {t:.1}s (cutoff {cutoff:.2})");
+            bar_peak = bar_peak.max(hi.abs()).max(lo.abs());
+            if block % 172 == 171 {
+                // About one bar at 120 bpm.
+                silent_bars += (bar_peak < 0.01) as u32;
+                bar_peak = 0.0;
+            }
+        }
+        assert_eq!(silent_bars, 0, "the bass went silent");
+    }
+
     /// A slid note glides in without retriggering the filter envelope: the
     /// level stays continuous across the step boundary, and no gap opens.
     #[test]

@@ -244,12 +244,20 @@ impl Instrument for Tb303 {
             let fc = (base_cutoff * octaves.exp2()).min(max_fc);
             let g = 1.0 - (-std::f32::consts::TAU * fc / sr).exp();
 
-            // Ladder: four tanh one-pole stages with resonant feedback.
-            let input = (osc - k * self.ladder[3]).tanh();
-            let mut x = input;
+            // Ladder: four one-pole stages with resonant feedback, each
+            // saturating both its input and its state, so every stage moves
+            // toward its (bounded) input and none can run away. (Comparing
+            // a raw stage output against tanh of the state let a stage's
+            // state grow without limit once the previous stage exceeded 1,
+            // which ended in a stuck, inaudible DC output.)
+            let mut x = (osc - k * self.ladder[3]).tanh();
             for y in self.ladder.iter_mut() {
                 *y += g * (x - y.tanh());
-                x = *y;
+                x = y.tanh();
+            }
+            // Belt and braces: never let a bad state stick.
+            if !self.ladder[3].is_finite() {
+                self.ladder = [0.0; 4];
             }
             let filtered = self.ladder[3] * (1.0 + 0.5 * k);
 
@@ -260,7 +268,7 @@ impl Instrument for Tb303 {
                 (0.0, self.release_coef)
             };
             self.amp = target + (self.amp - target) * coef;
-            self.buf[f * 2] = soft_clip(0.6 * filtered * self.amp);
+            self.buf[f * 2] = soft_clip(0.75 * filtered * self.amp);
             self.buf[f * 2 + 1] = 0.0;
         }
     }
