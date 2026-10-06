@@ -1,5 +1,9 @@
 # RFCs
 
+> **Build phase ([RFC 0005](0005-build-phase.md)):** RFCs are optional. The
+> process below is how they work when used, and how they will be required
+> again once the project stabilizes.
+
 An RFC (request for comments) is how 4S agrees on a big change *before* code
 is written. Architecture / UX changes need one (see
 [CONTRIBUTING.md](../../CONTRIBUTING.md#change-classes)): how the engine
@@ -54,3 +58,4 @@ decisions (before implementation).
 | [0002](0002-testing-philosophy.md) | Testing philosophy | implemented |
 | [0003](0003-ci-agent-review.md) | Automatic CI agent review (Muse Contributor tier) | implemented |
 | [0004](0004-instruments-and-mixer.md) | Instruments and the channel mixer | implemented |
+| [0005](0005-build-phase.md) | Build phase: suspend the RFC gate, lighten the review bar | implemented |

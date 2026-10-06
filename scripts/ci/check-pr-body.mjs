@@ -10,6 +10,13 @@ import { pathToFileURL } from "node:url";
 
 const CLASSES = { fix: /fix/i, extension: /extension/i, architecture: /architecture/i };
 
+/**
+ * The RFC gate (G1: Architecture / UX changes need an RFC accepted on main).
+ * Suspended during the build phase (docs/rfcs/0005-build-phase.md). Set to
+ * true to restore it.
+ */
+export const RFC_GATE = false;
+
 /** Which change-class checkboxes are ticked. */
 export function checkedClasses(body) {
   const found = [];
@@ -32,16 +39,18 @@ function field(body, name) {
  * @param {string} p.diffSha256  hash of scripts/ci/review-diff.sh base..head
  * @param {(num: string) => string | null} p.rfcStatus  status of RFC NNNN on main, or null if absent
  * @param {string[]} [p.changedFiles]  files changed by the PR (to recognize RFC proposals)
+ * @param {boolean} [p.rfcGate]  enforce the RFC gate (default: RFC_GATE)
  * @returns {{ errors: string[], warnings: string[] }}
  */
-export function checkBody({ body, headSha, diffSha256, rfcStatus, changedFiles = [] }) {
+export function checkBody({ body, headSha, diffSha256, rfcStatus, changedFiles = [], rfcGate = RFC_GATE }) {
   const errors = [];
   const warnings = [];
   body = body ?? "";
   // Template placeholders live in HTML comments; never count them as evidence.
   const text = body.replace(/<!--[\s\S]*?-->/g, "");
 
-  // G1: exactly one change class; RFC-class needs an accepted RFC on main.
+  // G1: exactly one change class; with the RFC gate on, RFC-class needs an
+  // accepted RFC on main.
   const classes = checkedClasses(text);
   if (classes.length !== 1) {
     errors.push(`G1: tick exactly one change class (found ${classes.length}): Fix, Extension, or Architecture / UX`);
@@ -52,7 +61,7 @@ export function checkBody({ body, headSha, diffSha256, rfcStatus, changedFiles =
     changedFiles.length > 0 &&
     changedFiles.every((f) => f.startsWith("docs/rfcs/")) &&
     changedFiles.some((f) => /^docs\/rfcs\/\d{4}-[\w.-]+\.md$/.test(f) && !f.includes("/0000-"));
-  if (classes.includes("architecture") && !isRfcProposal) {
+  if (rfcGate && classes.includes("architecture") && !isRfcProposal) {
     const rfcs = [...new Set([...text.matchAll(/docs\/rfcs\/(\d{4})-[\w.-]+\.md/g)].map((m) => m[1]))].filter(
       (n) => n !== "0000",
     );

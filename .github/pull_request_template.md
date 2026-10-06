@@ -16,9 +16,9 @@ The pr-gates check reads this description; keep the headings.
 <!-- Tick exactly one. See CONTRIBUTING.md#change-classes. -->
 - [ ] Fix (bug fix, test, docs, behavior-neutral refactor)
 - [ ] Extension (instrument, controller mapping, parameter, CLI command + RPC + UI that follows existing patterns)
-- [ ] Architecture / UX (RFC required)
+- [ ] Architecture / UX (RFC optional during the build phase, RFC 0005)
 
-RFC: <!-- Architecture / UX: link the accepted RFC, e.g. docs/rfcs/0002-audio-routing.md. Otherwise: "not needed because ..." -->
+RFC: <!-- Optional during the build phase (RFC 0005): link one if it exists, e.g. docs/rfcs/0004-instruments-and-mixer.md, or write "none". -->
 
 ## Validation
 

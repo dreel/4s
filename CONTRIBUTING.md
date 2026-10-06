@@ -13,8 +13,10 @@ your PR.**
 
 ## The workflow
 
-1. **Classify your change** (below). If it is RFC-class, stop and write an RFC
-   first; implementation PRs for RFC-class changes need an *accepted* RFC.
+1. **Classify your change** (below). During the **build phase**
+   ([RFC 0005](docs/rfcs/0005-build-phase.md)), RFCs are optional: for a big
+   Architecture / UX change, a short RFC as a design note is welcome but
+   not required.
 2. **Build it** following [AGENTS.md](AGENTS.md), the design docs in
    [docs/](docs/), and for extensions the recipes in
    [docs/extending.md](docs/extending.md). Point your agent at AGENTS.md
@@ -37,7 +39,7 @@ accepts a review only if its `REVIEWED_SHA` is the PR's head commit, or its
 
 ## Change classes
 
-| Class | Examples | RFC? |
+| Class | Examples | RFC? (build phase: optional for all) |
 |-------|----------|------|
 | **Fix** | bug fix, test, docs fix, refactor with no behavior change | No |
 | **Extension** | a new or improved drum voice model, a new instrument type (see [docs/extending.md](docs/extending.md#6-add-an-instrument-type)), new parameters, a MIDI controller mapping, a new CLI command with matching RPC and UI control, a new UI panel that follows existing patterns -- see [docs/extending.md](docs/extending.md) for recipes | No |
@@ -58,7 +60,7 @@ See [docs/rfcs/README.md](docs/rfcs/README.md).
 
 | Gate | What | Proof in the PR |
 |------|------|-----------------|
-| **G1 Scope** | Change classified; RFC-class changes link an accepted RFC | Change class + RFC link (or why none is needed) |
+| **G1 Scope** | Change classified; RFC-class changes link an accepted RFC (suspended in the build phase, RFC 0005: classification only) | Change class (+ RFC link, if any) |
 | **G2 Checks** | `scripts/check.sh` passes: Rust tests, generated code in sync, CLI end-to-end, Electron end-to-end | Gate report (CI re-runs this on macOS) |
 | **G3 Validation** | The change was exercised through its real interface by an agent | Commands and observed output, renders, screenshots |
 | **G4 Independent review** | A fresh-context agent reviewed the diff against the principles and passed it | Review block with `REVIEWED_SHA`, `DIFF_SHA256`, `VERDICT: pass` |

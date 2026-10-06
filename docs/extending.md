@@ -213,10 +213,12 @@ Validate:
 
 ---
 
-## Not an extension: needs an RFC
+## Not an extension: big changes
 
-These change the system's shape. Write an RFC first
-([docs/rfcs/](rfcs/README.md)):
+These change the system's shape. Outside the build phase they need an RFC
+first ([docs/rfcs/](rfcs/README.md)); during the build phase
+([RFC 0005](rfcs/0005-build-phase.md)) an RFC is optional, but a short one
+is a good place to record the design:
 
 - Audio routing beyond instrument outputs to channels: effects, inserts,
   sends and returns, buses, sidechains.
