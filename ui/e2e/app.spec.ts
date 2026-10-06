@@ -165,12 +165,26 @@ test("MIDI panel connects a keyboard that plays a chosen 303", async () => {
   const name = `PW Keys ${process.pid}`;
   const dev = spawn(bin, [name], { stdio: "pipe" });
   try {
+    // Wait for the device to exist, then for CoreMIDI to announce it to the
+    // daemon (asynchronous, and slow on CI runners).
+    await new Promise<void>((resolve, reject) => {
+      let out = "";
+      dev.stdout!.on("data", (d) => {
+        out += d;
+        if (out.includes("ready")) resolve();
+      });
+      dev.on("exit", (code) => reject(new Error(`virtual_block exited (${code}): ${out}`)));
+      setTimeout(() => reject(new Error(`virtual_block not ready: ${out}`)), 10_000);
+    });
     await rpc("instrument.add", { type: "tb303", id: "lead", name: null, channel: null, no_channel: false });
     await expect
-      .poll(async () => {
-        await page.getByTestId("midi-refresh").click();
-        return page.getByTestId(`midi-connect-${name}`).count();
-      })
+      .poll(
+        async () => {
+          await page.getByTestId("midi-refresh").click();
+          return page.getByTestId(`midi-connect-${name}`).count();
+        },
+        { timeout: 20_000 },
+      )
       .toBe(1);
     await page.getByTestId("midi-kind").selectOption("keyboard");
     await page.getByTestId("midi-keyboard-instrument").selectOption("lead");

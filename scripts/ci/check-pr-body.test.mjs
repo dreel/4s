@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { checkBody, checkedClasses } from "./check-pr-body.mjs";
+import { RFC_GATE, checkBody, checkedClasses } from "./check-pr-body.mjs";
 
 const HEAD = "a".repeat(40);
 const DIFF = "d".repeat(64);
@@ -9,9 +9,11 @@ const report = (verdict = "pass", sha = HEAD, diff = DIFF) =>
   `<!-- gate-report -->\nREVIEWED_SHA: ${sha}\nDIFF_SHA256: ${diff}\nCHANGE_CLASS: fix\nVERDICT: ${verdict}\n`;
 const validation = "## Validation\n\n`4s pattern set kick x---` then `4s state` shows the kick on step 1.\n\n";
 const body = (cls, extra = "") =>
-  `## Change class\n- [${cls === "fix" ? "x" : " "}] Fix\n- [${cls === "ext" ? "x" : " "}] Extension\n- [${cls === "arch" ? "x" : " "}] Architecture / UX (RFC required)\n\n${validation}${extra}`;
+  `## Change class\n- [${cls === "fix" ? "x" : " "}] Fix\n- [${cls === "ext" ? "x" : " "}] Extension\n- [${cls === "arch" ? "x" : " "}] Architecture / UX (RFC optional during the build phase, RFC 0005)\n\n${validation}${extra}`;
 const rfc = (statuses) => (n) => statuses[n] ?? null;
 const run = (b, opts = {}) => checkBody({ body: b, headSha: HEAD, diffSha256: DIFF, rfcStatus: rfc({}), ...opts });
+// The RFC gate's own behavior, tested with it on (it is off in the build phase).
+const gated = (b, opts = {}) => run(b, { rfcGate: true, ...opts });
 
 test("valid fix passes", () => {
   assert.deepEqual(run(body("fix", report())), { errors: [], warnings: [] });
@@ -22,17 +24,22 @@ test("change class must be exactly one", () => {
   assert.match(run(body("none", report())).errors[0], /exactly one/);
 });
 
+test("build phase: architecture passes without an RFC", () => {
+  assert.equal(RFC_GATE, false);
+  assert.deepEqual(run(body("arch", report())).errors, []);
+});
+
 test("architecture needs an accepted RFC on main", () => {
-  assert.match(run(body("arch", report())).errors.join(), /must link an accepted RFC/);
+  assert.match(gated(body("arch", report())).errors.join(), /must link an accepted RFC/);
   const linked = body("arch", "RFC: docs/rfcs/0002-routing.md\n" + report());
-  assert.match(run(linked).errors.join(), /0002: not on main/);
-  assert.match(run(linked, { rfcStatus: rfc({ "0002": "proposed" }) }).errors.join(), /0002: proposed/);
-  assert.deepEqual(run(linked, { rfcStatus: rfc({ "0002": "accepted" }) }).errors, []);
+  assert.match(gated(linked).errors.join(), /0002: not on main/);
+  assert.match(gated(linked, { rfcStatus: rfc({ "0002": "proposed" }) }).errors.join(), /0002: proposed/);
+  assert.deepEqual(gated(linked, { rfcStatus: rfc({ "0002": "accepted" }) }).errors, []);
 });
 
 test("template link to 0000 does not count as an RFC", () => {
   const b = body("arch", "see docs/rfcs/0000-template.md\n" + report());
-  assert.match(run(b).errors.join(), /must link an accepted RFC/);
+  assert.match(gated(b).errors.join(), /must link an accepted RFC/);
 });
 
 test("missing report and failing verdicts are errors", () => {
@@ -59,9 +66,9 @@ test("the PR template's placeholder RFC link does not count", () => {
   const template = readFileSync(new URL("../../.github/pull_request_template.md", import.meta.url), "utf8");
   const arch = template.replace("- [ ] Architecture / UX", "- [x] Architecture / UX") + report();
   const accepted = rfc({ "0002": "accepted" });
-  assert.match(run(arch, { rfcStatus: accepted }).errors.join(), /must link an accepted RFC/);
+  assert.match(gated(arch, { rfcStatus: accepted }).errors.join(), /must link an accepted RFC/);
   const linked = arch.replace("RFC: <!--", "RFC: docs/rfcs/0002-audio-routing.md <!--");
-  assert.deepEqual(run(linked, { rfcStatus: accepted }).errors, []);
+  assert.deepEqual(gated(linked, { rfcStatus: accepted }).errors, []);
 });
 
 test("a verdict inside a comment does not count", () => {
@@ -72,9 +79,9 @@ test("a verdict inside a comment does not count", () => {
 test("an RFC proposal PR does not need an already-accepted RFC", () => {
   const b = body("arch", "RFC: this PR is the proposal, docs/rfcs/0007-instruments.md\n" + report());
   const proposal = ["docs/rfcs/0007-instruments.md", "docs/rfcs/README.md"];
-  assert.deepEqual(run(b, { changedFiles: proposal }).errors, []);
+  assert.deepEqual(gated(b, { changedFiles: proposal }).errors, []);
   // Touching anything outside docs/rfcs makes it an implementation PR again.
-  assert.match(run(b, { changedFiles: [...proposal, "crates/engine/src/engine.rs"] }).errors.join(), /0007: not on main/);
+  assert.match(gated(b, { changedFiles: [...proposal, "crates/engine/src/engine.rs"] }).errors.join(), /0007: not on main/);
   // Editing only the index is not a proposal.
-  assert.match(run(b, { changedFiles: ["docs/rfcs/README.md"] }).errors.join(), /0007: not on main/);
+  assert.match(gated(b, { changedFiles: ["docs/rfcs/README.md"] }).errors.join(), /0007: not on main/);
 });

@@ -16,6 +16,11 @@ exits non-zero if any automated gate fails.
 
 ## G1 Scope
 
+> **Build phase ([RFC 0005](rfcs/0005-build-phase.md)):** the RFC
+> requirement below is suspended (`RFC_GATE = false` in
+> `scripts/ci/check-pr-body.mjs`, and the reviewer does not use
+> `needs-rfc`). Only the change class tick is required; RFCs are optional.
+
 Classify the change as **Fix**, **Extension**, or **Architecture / UX** (see
 [CONTRIBUTING.md](../CONTRIBUTING.md#change-classes)). Architecture / UX
 changes need an RFC with status `accepted` in `docs/rfcs/` before the
@@ -23,7 +28,7 @@ implementation PR can merge.
 
 - Proof: the change class checkbox in the PR, plus the RFC link or one line
   on why none is needed.
-- Enforced by: the `pr-gates` CI check (an RFC-class PR must link an RFC file
+- Enforced by (outside the build phase): the `pr-gates` CI check (an RFC-class PR must link an RFC file
   whose status on `main` is `accepted`; a PR that only changes `docs/rfcs/`
   is an RFC proposal and is exempt, since merging it is the approval), the independent reviewer (which
   flags misclassified changes with `VERDICT: needs-rfc`), and CODEOWNERS on
@@ -64,6 +69,11 @@ commands or output.
 - Enforced by: the independent reviewer and the human reviewer.
 
 ## G4 Independent review
+
+> **Build phase ([RFC 0005](rfcs/0005-build-phase.md)):** the reviewer
+> blocks only on correctness bugs, audio-thread safety, missing RPC/CLI
+> parity, a missing e2e test of the main behavior, and stale or hand-edited
+> generated code. Everything else is a suggestion.
 
 A fresh agent reviews the diff against the project's principles. It has
 **none of the authoring agent's context**: no conversation, no plan, no
@@ -157,4 +167,6 @@ the gate scripts themselves, so the rules cannot be weakened in passing.
 
 ## Changing the gates
 
-The gates are RFC-class: propose changes with an RFC.
+The gates are RFC-class: propose changes with an RFC. (During the build
+phase, RFC 0005, RFCs are optional; record gate changes in one anyway, as
+RFC 0005 does.)

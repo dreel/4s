@@ -34,9 +34,11 @@ For each item, decide: OK, a finding, or not applicable.
    model, lifecycle or topology, the project format beyond an additive
    migration, the UI's overall structure or interaction model, the core
    principles, the gates (CONTRIBUTING.md, docs/gates.md, docs/review/,
-   scripts/gates.sh, scripts/review.sh, CI workflows). If it is
-   Architecture / UX, it needs an accepted RFC in `docs/rfcs/` that it
-   implements faithfully. If none exists, the verdict is `needs-rfc`.
+   scripts/gates.sh, scripts/review.sh, CI workflows). **Build phase
+   ([RFC 0005](../rfcs/0005-build-phase.md)): classify only.** An RFC is
+   optional; do not ask for one and do not use `needs-rfc`. If an RFC
+   exists for the change, a deviation from it is a suggestion, not
+   blocking.
 2. **Agent-drivable / API parity.** Every new user-facing capability is an
    RPC method declared in `crates/protocol/src/api.rs`, handled by the
    daemon, reachable from a dedicated CLI command, and only then exposed in
@@ -106,10 +108,22 @@ VERDICT: pass | changes-requested | needs-rfc
 
 Verdict rules:
 
-- `needs-rfc`: Architecture / UX change without an accepted RFC it
-  implements.
+- `needs-rfc`: not used during the build phase (RFC 0005).
 - `changes-requested`: any blocking finding.
 - `pass`: no blocking findings. Suggestions are fine.
+
+What is blocking (build phase, RFC 0005). Mark a finding `[blocking]` only
+for:
+
+- a correctness bug (wrong behavior, crash, data loss, a race);
+- audio-thread safety: locks, allocation, frees, or I/O on the audio path;
+- a user-facing capability with no RPC and CLI command (API parity);
+- no end-to-end test of the change's main behavior;
+- generated code edited by hand or out of date.
+
+Everything else is `[suggestion]`: docs gaps, process, spec or RFC
+completeness, coverage of edge paths or error messages, naming, style.
+When unsure, it is a suggestion.
 
 Be specific and concise. Do not praise; do not restate the diff. A finding
 must say what to change.

@@ -37,7 +37,7 @@ and agents can drive and verify every part of it.
 - [Topology](docs/topology.md) -- engine/bridge roles, remote and collaborative setups
 - [Extending](docs/extending.md) -- recipes: drum voices, parameters, controllers, RPC/CLI/UI features
 - [Contributing](CONTRIBUTING.md) and [Gates](docs/gates.md) -- change classes, RFCs, and what every PR must prove
-- [RFCs](docs/rfcs/README.md) -- how big changes get approved before code is written
+- [RFCs](docs/rfcs/README.md) -- design records for big changes (optional during the build phase, RFC 0005)
 - [Testing](docs/testing.md) -- e2e first; which unit tests are worth writing (RFC 0002)
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
@@ -98,9 +98,10 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
    Fix, Extension, or Architecture / UX. If it is Architecture / UX -- audio
    routing or processing model, real-time model, protocol or sync model,
    lifecycle or topology, project format, the UI's overall structure, the
-   principles, or the gates -- **stop and draft an RFC** from
-   `docs/rfcs/0000-template.md` for a human to approve. Do not implement it
-   first.
+   principles, or the gates. During the **build phase**
+   ([RFC 0005](docs/rfcs/0005-build-phase.md)) an RFC is optional: just
+   build it, and write a short RFC from `docs/rfcs/0000-template.md` only
+   when a design note helps.
 2. **Validate through real interfaces** and keep the commands and output
    (CLI against a daemon in an isolated data dir, `4s render`, UI tests,
    `virtual_block`).

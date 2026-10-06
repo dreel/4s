@@ -4,6 +4,8 @@
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC
+- Amended by: [RFC 0005](0005-build-phase.md) (build phase: G1's RFC
+  requirement suspended, lighter review bar)
 
 ## Summary
 
