@@ -1,6 +1,6 @@
 # RFC 0004: Instruments and the channel mixer
 
-- Status: accepted
+- Status: implemented
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-04
 - Discussion: the PR that introduces this RFC. Merging it with
@@ -8,6 +8,8 @@
 - Amended: 2026-10-04, maintainer decisions before implementation; see
   "Amendment: maintainer decisions" at the end. Where it differs from the
   sections above, the amendment wins.
+- Implemented: in one PR (per the amendment). "Implementation notes" at the
+  end records how the gaps the review left open were settled.
 
 ## Summary
 
@@ -602,15 +604,7 @@ fixed: each step builds on the one before.
 
 ## Open questions
 
-- Playing the 303 from a MIDI keyboard, and whether the Livid Block gets a
-  note-pattern mode for it.
-- Per-instrument pattern length versus the shared `sequencer.length`.
-- Whether a stereo channel needs a width / mono-sum control.
-- Do pattern edits sent without an `instrument` field keep defaulting to
-  the first `tr808` forever, or become an error in a later protocol
-  version?
-- Channel limits (16 instruments, 32 channels): enough, and should channels
-  get insert slots now or with the effects RFC?
+None. The amendment below resolved them.
 
 ## Amendment: maintainer decisions (2026-10-04)
 
@@ -775,3 +769,55 @@ be discarded. Instead of the v1 -> v2 migration:
   the effects RFC.
 - Removing an instrument also removes the channels its outputs fed if they
   are left empty, unless `keep_channels` is set (as proposed).
+
+## Implementation notes
+
+How the implementation settled details the design left open:
+
+- `instrument.add` takes `channel?: n` and `no_channel: bool` (two plain
+  fields) rather than a null-vs-omitted union.
+- `RenderTrigger` is `{time, step, instrument, voice?, note?, velocity}`,
+  matching the `trigger` event. `RenderResult` adds `left`/`right`
+  `{peak, rms}`.
+- `KnobMode::param_path(target, track)`: knob paths are
+  `<target>.<voice>.{level,tune,decay,tone}`; `knob_params` is empty with no
+  target. `controller.set_mode {target}` sets a target (a `tr808`); there is
+  no explicit clear, since the target only goes null when no `tr808` exists.
+- `voice.trigger` takes `voice` (drums) or `note` (note instruments, gated
+  for half a step), so the 303 editor can audition.
+- The snapshot carries `patterns: [{instrument, pattern}]`, where `pattern`
+  is `{kind: "drums", tracks}` or `{kind: "notes", steps}`.
+- Note-pattern RPCs take structured steps (`steps: [{note, accent,
+  slide}]`), and `notes_changed` carries `steps`. The string form
+  (`"C2 C2! D#2~ -"`) is parsed by the CLI (`parse_notes` in the protocol
+  crate) and used in project files.
+- Display names (channels, instruments, in RPCs and project files) are
+  trimmed and must not be empty.
+- New `pattern.set_note {instrument?, step, note}` alongside
+  `pattern.set_notes`, found by the UI e2e: editing one step by sending the
+  whole pattern lost quick successive edits (and would clobber another
+  client's). The UI edits one step at a time and applies it optimistically.
+  CLI: `4s note <id> <step> <token>`.
+- Held-note holders for RPC callers are keyed `conn:<id>` (the connection
+  id alone) rather than `name#id`: equally unique per connection, and a
+  renaming `session.hello` cannot change it.
+- A held keyboard note is tracked per instrument together with the
+  keyboard (input port) that started it: only that keyboard's note-off
+  releases it, and unplugging or disconnecting that keyboard releases it.
+  Removing an instrument clears any keyboard set to play it (it falls back
+  to the first `tb303`).
+- Default channel names: an instrument's new channel takes the instrument's
+  name ("Drums", "Bass", "Drums 2"); `channel.add` without a name gives
+  "Ch N".
+- The 303's `cutoff` spans ~40 Hz-6 kHz (not ~10 kHz): with up to five
+  octaves of envelope and the accent sweep on top, the upper part of a
+  10 kHz range only sounded harsh. The top is also clamped below Nyquist.
+- `midi.connect` accepts `instrument` only for `kind: keyboard`.
+- Output buffers are always 2-lane (mono outputs use the left lane) rather
+  than allocated by width; simpler, and the memory is negligible.
+- Structural changes (and project loads) check that the command queue has
+  room for every command they will send before changing anything, instead
+  of rolling back after a failed push. With one producer holding the
+  `Core` lock, the pushes then cannot fail, so `Core` and the engine never
+  disagree. Note-offs do the same, so a full queue is an error rather than
+  a stuck note.

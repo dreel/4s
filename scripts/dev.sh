@@ -11,7 +11,9 @@
 #
 # The daemon keeps running after the UI closes (dev mode = detached lifecycle,
 # see docs/lifecycle.md). If Rust code changed since it started, it is
-# restarted and the session carried over. Stop it with: target/debug/4s daemon stop
+# restarted and the session carried over; if that is impossible (an
+# incompatible older daemon, or a session the new build cannot load), it asks
+# before starting fresh. Stop it with: target/debug/4s daemon stop
 set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v cargo >/dev/null || export PATH="$HOME/.cargo/bin:$PATH"

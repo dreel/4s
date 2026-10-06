@@ -35,7 +35,9 @@ export function BlockMirror() {
   return (
     <section className="flex flex-col gap-3 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 w-fit" data-testid="block">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-zinc-500">Livid Block</span>
+        <span className="text-zinc-500">
+          Livid Block <span className="text-zinc-600" data-testid="block-target">{c.target ?? "no target"}</span>
+        </span>
         <span className={c.device ? "text-emerald-400" : "text-zinc-500"} data-testid="block-device">
           {c.device ?? "virtual"}
         </span>
@@ -66,7 +68,7 @@ export function BlockMirror() {
           <button
             key={m}
             data-testid={`knob-mode-${m}`}
-            onClick={() => void act(client.call("controller.set_mode", { knob_mode: m, page: null, follow: null }))}
+            onClick={() => void act(client.call("controller.set_mode", { target: null, knob_mode: m, page: null, follow: null }))}
             className={`px-1.5 py-0.5 rounded border ${
               c.knob_mode === m ? "bg-amber-500 text-zinc-950 border-amber-400" : "border-zinc-700 text-zinc-400"
             }`}
@@ -81,7 +83,7 @@ export function BlockMirror() {
           <button
             key={p}
             data-testid={`page-${p}`}
-            onClick={() => void act(client.call("controller.set_mode", { knob_mode: null, page: p, follow: null }))}
+            onClick={() => void act(client.call("controller.set_mode", { target: null, knob_mode: null, page: p, follow: null }))}
             className={`w-5 py-0.5 rounded border ${
               c.page === p ? "bg-zinc-200 text-zinc-950 border-zinc-100" : "border-zinc-700 text-zinc-400"
             }`}
@@ -91,7 +93,7 @@ export function BlockMirror() {
         ))}
         <button
           data-testid="follow"
-          onClick={() => void act(client.call("controller.set_mode", { knob_mode: null, page: null, follow: !c.follow }))}
+          onClick={() => void act(client.call("controller.set_mode", { target: null, knob_mode: null, page: null, follow: !c.follow }))}
           className={`ml-2 px-1.5 py-0.5 rounded border ${
             c.follow ? "bg-sky-500 text-zinc-950 border-sky-400" : "border-zinc-700 text-zinc-400"
           }`}

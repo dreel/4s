@@ -84,6 +84,8 @@ async fn handle_connection(core: Shared, daemon: Arc<Daemon>, stream: TcpStream,
     if let Some(h) = conn.subscription.take() {
         h.abort();
     }
+    // Notes this connection was holding end with it.
+    core.lock().unwrap().release_held_by(&format!("conn:{}", conn.id));
     drop(tx);
     let _ = writer.await;
     tracing::debug!("connection {id} closed");
@@ -150,7 +152,9 @@ async fn handle_text(
         }
         other => {
             let mut c = core.lock().unwrap();
-            c.handle(other, &conn.name)
+            // Holder key: the connection id alone, which a renaming
+            // `session.hello` cannot change.
+            c.handle(other, &conn.name, &format!("conn:{}", conn.id))
         }
     };
     (reply(result), shutdown)
@@ -215,7 +219,7 @@ fn subscribe(core: &Shared, conn: &mut Conn, tx: &mpsc::UnboundedSender<String>,
 }
 
 async fn render(core: &Shared, p: RenderParams) -> Result<Value, RpcError> {
-    let (values, pattern, path) = {
+    let (spec, path) = {
         let c = core.lock().unwrap();
         let path = match &p.path {
             Some(path) => c.resolve_data_path(path),
@@ -227,7 +231,7 @@ async fn render(core: &Shared, p: RenderParams) -> Result<Value, RpcError> {
                 c.data_dir().join("renders").join(format!("render-{ts}.wav"))
             }
         };
-        (c.engine_values(), c.pattern(), path)
+        (c.render_spec(), path)
     };
     let bars = p.bars.unwrap_or(1.0);
     if !(0.0..=64.0).contains(&bars) {
@@ -236,8 +240,10 @@ async fn render(core: &Shared, p: RenderParams) -> Result<Value, RpcError> {
     let tail = p.tail.unwrap_or(0.0).clamp(0.0, 30.0);
     let sr = p.sample_rate.unwrap_or(48000).clamp(8000, 192000);
     tokio::task::spawn_blocking(move || {
-        let r = offline::render_pattern(&values, &pattern, sr, bars, tail);
+        let r = offline::render_graph(&spec, sr, bars, tail);
         let a = offline::analyze(&r.samples, sr);
+        let (lp, lr) = offline::lane_level(&r.samples, 0);
+        let (rp, rr) = offline::lane_level(&r.samples, 1);
         offline::write_wav(&path, &r.samples, sr).map_err(|e| RpcError::failed(format!("write wav: {e}")))?;
         let result = RenderResult {
             path: path.to_string_lossy().into_owned(),
@@ -245,6 +251,8 @@ async fn render(core: &Shared, p: RenderParams) -> Result<Value, RpcError> {
             duration: r.samples.len() as f64 / 2.0 / sr as f64,
             peak: a.peak,
             rms: a.rms,
+            left: Level { peak: lp, rms: lr },
+            right: Level { peak: rp, rms: rr },
             onsets: a.onsets,
             triggers: r.triggers,
         };

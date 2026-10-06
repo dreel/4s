@@ -1,6 +1,6 @@
 # RPC Layer
 
-Status: implemented (v1). Run `4s methods` for the live method list.
+Status: implemented (protocol version 2, RFC 0004). Run `4s methods` for the live method list.
 
 ## Decision
 
@@ -33,9 +33,9 @@ Status: implemented (v1). Run `4s methods` for the live method list.
 
 ## Wire format
 
-Request: `{"jsonrpc": "2.0", "id": 1, "method": "param.set", "params": {"path": "mixer.3.volume", "value": 0.35}}`
+Request: `{"jsonrpc": "2.0", "id": 1, "method": "param.set", "params": {"path": "mixer.2.volume", "value": 0.35}}`
 
-Events are notifications: `{"jsonrpc": "2.0", "method": "event", "params": {"seq": 42, "origin": "cli", "event": {"type": "param_changed", "path": "mixer.3.volume", "value": 0.35}}}`
+Events are notifications: `{"jsonrpc": "2.0", "method": "event", "params": {"seq": 42, "origin": "cli", "event": {"type": "param_changed", "path": "mixer.2.volume", "value": 0.35}}}`
 
 Missing `params` are treated as `{}`. Error codes: -32700 parse, -32600 invalid
 request, -32601 unknown method, -32602 invalid params, -32000 failed,
@@ -46,16 +46,17 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 ### Structural methods
 
 Explicit methods for things that are not a single parameter: transport
-(`transport.play/stop`), pattern edits (`pattern.*`), auditioning
-(`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`), projects
+(`transport.play/stop`), the instrument graph (`instrument.*`, `channel.*`,
+`route.set`), pattern edits (`pattern.*`, drum steps and note steps),
+auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`), projects
 (`project.*`), rendering (`render.offline`), status (`engine.status`), and the
 daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).
 
 ### Generic parameters
 
 Everything that is a value is a parameter with a stable path, e.g.
-`transport.tempo`, `sequencer.length`, `drums.kick.decay`, `mixer.3.volume`,
-`mixer.master.volume`. Three methods cover them all:
+`transport.tempo`, `sequencer.length`, `drums.kick.decay`, `bass.cutoff`,
+`mixer.2.volume`, `mixer.master.volume`. Three methods cover them all:
 
 - `param.list {prefix?}` -- the registry: path, label, kind (continuous /
   integer / toggle) with range, default, unit.
@@ -74,8 +75,19 @@ current parameter set.
   `seq`. Clients **subscribe first, then fetch the snapshot**, then apply only
   buffered events with `seq` greater than the snapshot's -- nothing is missed or
   applied twice. The UI does exactly this on every (re)connect.
-- `reset` (project loaded/new) and `lagged` (subscriber fell behind) mean
-  "refetch `state.get`".
+- `reset` (project loaded/new), `graph` (instruments, channels, or routes
+  changed, so parameters may have been added or removed), and `lagged`
+  (subscriber fell behind) mean "refetch `state.get`" (and `param.list` for
+  `graph` and `reset`).
+- Pattern and trigger events name their instrument (`step_changed`,
+  `pattern_changed`, `notes_changed`, `trigger`), so clients know which
+  instrument an edit or hit belongs to.
+- **Connection-scoped state: held notes.** `voice.note_on` holds a note for
+  the calling connection until it sends `voice.note_off` for that note, or
+  until the connection closes (the daemon then releases it). Other
+  connections cannot release it. This is the only state tied to a
+  connection; everything else is shared. A bridge must therefore track
+  holders per local client (see [topology.md](topology.md)).
 - High-rate events: `playhead` (per step), `trigger` (per hit), `meters`
   (~30 Hz, suppressed while silent). JSON is fine at these rates.
 

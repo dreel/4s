@@ -5,13 +5,13 @@
 Every action available in the UI is an RPC to the daemon, and every RPC is
 reachable from the CLI. There are no UI-only capabilities. The mapping is 1:1.
 
-Example -- "set mixer channel 3 volume to 35%":
+Example -- "set mixer channel 2 volume to 35%":
 
 | Surface | Form |
 |---------|------|
-| UI      | drag channel 3 fader to 35% |
-| RPC     | `param.set {"path": "mixer.3.volume", "value": 0.35}` |
-| CLI     | `4s set mixer.3.volume 0.35` |
+| UI      | drag channel 2's fader in the console to 35% |
+| RPC     | `param.set {"path": "mixer.2.volume", "value": 0.35}` |
+| CLI     | `4s set mixer.2.volume 0.35` |
 
 (Exact names and syntax are illustrative until the API is built.)
 

@@ -9,33 +9,64 @@ use ts_rs::TS;
 
 /// Current project format version. Bump and add a migration when the format
 /// changes incompatibly.
-pub const PROJECT_FORMAT_VERSION: u32 = 1;
+pub const PROJECT_FORMAT_VERSION: u32 = 2;
+/// Oldest version this build can load. Version 1 (the fixed 8-track kit)
+/// was dropped with RFC 0004, without a migration.
+pub const OLDEST_PROJECT_FORMAT_VERSION: u32 = 2;
 pub const PROJECT_FILE_NAME: &str = "project.json";
 pub const PROJECT_EXTENSION: &str = "4s";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ProjectFile {
     pub format_version: u32,
+    /// In creation order.
+    pub instruments: Vec<ProjectInstrument>,
+    /// In display order. `n` is the channel number in `mixer.<n>.*` paths.
+    pub channels: Vec<ChannelInfo>,
+    /// Source (`drums`, `drums.kick`) -> channel number.
+    pub routes: BTreeMap<String, u32>,
     /// Parameter values by path. Unknown paths are ignored on load; missing
     /// paths take their defaults.
     pub params: BTreeMap<String, f64>,
-    /// Step strings per voice, e.g. `"kick": "x---x---x---x---"`.
-    pub patterns: BTreeMap<Voice, String>,
+    /// Per instrument id: drum step strings per voice
+    /// (`{"kick": "x---x---x---x---"}`) or a note string (`"C2 C2! D#2~ -"`).
+    /// Instruments with an empty pattern are omitted.
+    pub patterns: BTreeMap<String, ProjectPattern>,
     pub controller: ProjectController,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ProjectInstrument {
+    pub id: String,
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub kind: InstrumentType,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(untagged)]
+pub enum ProjectPattern {
+    Notes(String),
+    Drums(BTreeMap<Voice, String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ProjectController {
+    /// Drum instrument the controller drives.
+    #[serde(default)]
+    pub target: Option<String>,
     pub knob_mode: KnobMode,
     pub follow: bool,
 }
 
-/// A migration upgrades a project from version N to N+1. `MIGRATIONS[0]`
-/// upgrades v1 -> v2, and so on.
+/// A migration upgrades a project from version N to N+1.
+/// `MIGRATIONS[0]` upgrades `OLDEST_PROJECT_FORMAT_VERSION` to the next one,
+/// and so on.
 type Migration = fn(Value) -> Result<Value, String>;
 const MIGRATIONS: &[Migration] = &[];
 
-const _: () = assert!(MIGRATIONS.len() as u32 + 1 == PROJECT_FORMAT_VERSION);
+const _: () = assert!(MIGRATIONS.len() as u32 + OLDEST_PROJECT_FORMAT_VERSION == PROJECT_FORMAT_VERSION);
 
 /// Upgrade raw project JSON to the current format version.
 pub fn migrate_project(mut v: Value) -> Result<Value, String> {
@@ -43,12 +74,18 @@ pub fn migrate_project(mut v: Value) -> Result<Value, String> {
         .get("format_version")
         .and_then(Value::as_u64)
         .ok_or("project is missing format_version")? as u32;
-    if version == 0 || version > PROJECT_FORMAT_VERSION {
+    if version < OLDEST_PROJECT_FORMAT_VERSION {
+        return Err(format!(
+            "unsupported project format_version {version}: projects from before RFC 0004 (instruments and \
+             the channel mixer) are no longer supported; create a new project"
+        ));
+    }
+    if version > PROJECT_FORMAT_VERSION {
         return Err(format!(
             "unsupported project format_version {version} (this build supports up to {PROJECT_FORMAT_VERSION})"
         ));
     }
-    for m in &MIGRATIONS[(version as usize - 1)..] {
+    for m in &MIGRATIONS[(version - OLDEST_PROJECT_FORMAT_VERSION) as usize..] {
         v = m(v)?;
     }
     Ok(v)
@@ -82,19 +119,22 @@ pub fn steps_for_file(steps: &[u8], length: usize) -> String {
 mod tests {
     use super::*;
 
-    const V1_FIXTURE: &str = include_str!("../fixtures/project-v1.json");
+    const V2_FIXTURE: &str = include_str!("../fixtures/project-v2.json");
 
     #[test]
-    fn v1_fixture_loads() {
-        let p = parse_project(V1_FIXTURE).unwrap();
-        assert_eq!(p.format_version, 1);
-        assert_eq!(p.patterns[&Voice::Kick], "X---x---X---x---");
+    fn v2_fixture_loads() {
+        let p = parse_project(V2_FIXTURE).unwrap();
+        assert_eq!(p.format_version, 2);
+        let ProjectPattern::Drums(d) = &p.patterns["drums"] else { panic!("drums pattern") };
+        assert_eq!(d[&Voice::Kick], "X---x---X---x---");
+        assert!(matches!(&p.patterns["bass"], ProjectPattern::Notes(n) if n.starts_with("C2")));
+        assert_eq!(p.routes["bass"], 2);
         assert_eq!(p.params["transport.tempo"], 118.0);
     }
 
     #[test]
     fn round_trip_is_stable() {
-        let p = parse_project(V1_FIXTURE).unwrap();
+        let p = parse_project(V2_FIXTURE).unwrap();
         let s = project_to_json(&p);
         assert_eq!(parse_project(&s).unwrap(), p);
         assert_eq!(project_to_json(&parse_project(&s).unwrap()), s);

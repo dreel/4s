@@ -1,50 +1,145 @@
-//! The engine: sequencer + voices + mixer. `Engine::render` is called from the
-//! audio thread (or offline) and must not allocate, lock, or block.
+//! The engine: a shared step clock, a fixed table of instrument slots, and a
+//! fixed pool of stereo mixer channels. `Engine::render` and `Engine::apply`
+//! are called from the audio thread (or offline) and must not allocate, lock,
+//! or block. Instruments are built and dropped on the control side.
+//!
+//! Signal flow per block: each instrument renders its outputs; each routed
+//! output is summed into its channel with its own pan law (constant-power pan
+//! for mono, balance for stereo); each channel applies its fader and
+//! mute/solo; channels sum into the master, which has a soft clipper.
 
 use crate::dsp::{Smoother, soft_clip};
+use crate::instrument::{Instrument, MAX_BLOCK, MAX_OUTPUTS};
 use crate::params::*;
-use crate::voices::{DrumVoice, VoiceParams, make_voice};
-use fours_protocol::{MAX_STEPS, NUM_TRACKS, STEP_ACCENT, STEP_OFF, Voice};
+use fours_protocol::{MAX_CHANNELS, MAX_INSTRUMENTS, MAX_STEPS, NoteStep, OutputWidth};
 
-pub const VELOCITY_ON: f32 = 0.7;
-pub const VELOCITY_ACCENT: f32 = 1.0;
 /// Meter feedback rate.
 const METER_HZ: f32 = 30.0;
 
-/// Control messages into the engine.
-#[derive(Clone, Copy, Debug)]
+/// Where a parameter lives inside the engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParamTarget {
+    Global(usize),
+    Instrument { slot: u8, index: u16 },
+    /// `ch` is the 0-based channel index (channel number - 1).
+    Channel { ch: u8, index: u8 },
+}
+
+/// Control messages into the engine. Channel fields are 0-based indexes.
 pub enum Command {
-    SetParam { id: ParamId, value: f32 },
-    SetStep { track: u8, step: u8, level: u8 },
-    SetTrack { track: u8, steps: [u8; MAX_STEPS] },
+    SetParam { target: ParamTarget, value: f32 },
+    AddInstrument { slot: u8, instrument: Box<dyn Instrument> },
+    RemoveInstrument { slot: u8 },
+    SetRoute { slot: u8, output: u8, channel: Option<u8> },
+    SetChannelActive { ch: u8, active: bool },
+    SetDrumStep { slot: u8, track: u8, step: u8, level: u8 },
+    SetDrumTrack { slot: u8, track: u8, steps: [u8; MAX_STEPS] },
+    SetNotes { slot: u8, steps: [NoteStep; MAX_STEPS] },
+    Trigger { slot: u8, voice: u8, velocity: f32 },
+    /// A note; with `gate` it releases after half a step at the current tempo.
+    NoteOn { slot: u8, note: u8, velocity: f32, gate: bool },
+    NoteOff { slot: u8 },
     Play,
     Stop,
-    Trigger { track: u8, velocity: f32 },
+}
+
+impl std::fmt::Debug for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Command::SetParam { target, value } => write!(f, "SetParam({target:?}, {value})"),
+            Command::AddInstrument { slot, .. } => write!(f, "AddInstrument({slot})"),
+            Command::RemoveInstrument { slot } => write!(f, "RemoveInstrument({slot})"),
+            Command::SetRoute { slot, output, channel } => write!(f, "SetRoute({slot}, {output}, {channel:?})"),
+            Command::SetChannelActive { ch, active } => write!(f, "SetChannelActive({ch}, {active})"),
+            Command::SetDrumStep { slot, track, step, level } => {
+                write!(f, "SetDrumStep({slot}, {track}, {step}, {level})")
+            }
+            Command::SetDrumTrack { slot, track, .. } => write!(f, "SetDrumTrack({slot}, {track})"),
+            Command::SetNotes { slot, .. } => write!(f, "SetNotes({slot})"),
+            Command::Trigger { slot, voice, .. } => write!(f, "Trigger({slot}, {voice})"),
+            Command::NoteOn { slot, note, .. } => write!(f, "NoteOn({slot}, {note})"),
+            Command::NoteOff { slot } => write!(f, "NoteOff({slot})"),
+            Command::Play => write!(f, "Play"),
+            Command::Stop => write!(f, "Stop"),
+        }
+    }
 }
 
 /// Messages out of the engine. Times are engine time in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Feedback {
     Step { step: u32, time: f64 },
-    Trigger { track: u8, velocity: f32, time: f64, step: Option<u32> },
+    Trigger { slot: u8, voice: Option<u8>, note: Option<u8>, velocity: f32, time: f64, step: Option<u32> },
     Stopped { time: f64 },
-    Meters { tracks: [f32; NUM_TRACKS], master: [f32; 2] },
+    /// Peak (left, right) per channel index since the last meter message.
+    Meters { channels: [[f32; 2]; MAX_CHANNELS], master: [f32; 2] },
+}
+
+struct Slot {
+    instrument: Box<dyn Instrument>,
+    routes: [Option<u8>; MAX_OUTPUTS],
 }
 
 struct Channel {
+    active: bool,
+    params: [f32; CHANNEL_PARAMS],
     gain: Smoother,
-    pan_l: Smoother,
-    pan_r: Smoother,
-    peak: f32,
+    mono_l: Smoother,
+    mono_r: Smoother,
+    bal_l: Smoother,
+    bal_r: Smoother,
+    /// Per-frame smoothed coefficients for the current block: gain, mono
+    /// left/right, balance left/right.
+    coef: Vec<[f32; 5]>,
+    bus: Vec<f32>,
+    peak: [f32; 2],
+}
+
+impl Channel {
+    fn new(sr: f32) -> Self {
+        let (ml, mr) = mono_pan(0.0);
+        Self {
+            active: false,
+            params: channel_defaults(),
+            gain: Smoother::new(sr, 0.01, 0.0),
+            mono_l: Smoother::new(sr, 0.01, ml),
+            mono_r: Smoother::new(sr, 0.01, mr),
+            bal_l: Smoother::new(sr, 0.01, 1.0),
+            bal_r: Smoother::new(sr, 0.01, 1.0),
+            coef: vec![[0.0; 5]; MAX_BLOCK],
+            bus: vec![0.0; MAX_BLOCK * 2],
+            peak: [0.0; 2],
+        }
+    }
+
+    /// Targets: gain (with mute/solo), mono pan, balance.
+    fn targets(&self, any_solo: bool) -> [f32; 5] {
+        let muted = self.params[CH_MUTE] >= 0.5;
+        let soloed = self.params[CH_SOLO] >= 0.5;
+        let audible = !muted && (!any_solo || soloed);
+        let gain = if audible { volume_to_gain(self.params[CH_VOLUME]) } else { 0.0 };
+        let (ml, mr) = mono_pan(self.params[CH_PAN]);
+        let (bl, br) = balance(self.params[CH_PAN]);
+        [gain, ml, mr, bl, br]
+    }
+
+    fn snap(&mut self, any_solo: bool) {
+        let [g, ml, mr, bl, br] = self.targets(any_solo);
+        self.gain.value = g;
+        self.mono_l.value = ml;
+        self.mono_r.value = mr;
+        self.bal_l.value = bl;
+        self.bal_r.value = br;
+    }
 }
 
 pub struct Engine {
     sr: f32,
-    params: Vec<f32>,
-    pattern: [[u8; MAX_STEPS]; NUM_TRACKS],
-    voices: Vec<Box<dyn DrumVoice>>,
+    globals: [f32; NUM_GLOBALS],
+    slots: Vec<Option<Slot>>,
     channels: Vec<Channel>,
     master: Smoother,
+    master_bus: Vec<f32>,
     master_peak: [f32; 2],
     playing: bool,
     /// Index of the next step to fire.
@@ -57,29 +152,17 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// An engine with no instruments and no active channels.
     pub fn new(sample_rate: u32) -> Self {
         let sr = sample_rate as f32;
-        let params = default_values();
-        let voices = Voice::ALL.iter().map(|v| make_voice(*v, sr)).collect();
-        let channels = (0..NUM_TRACKS)
-            .map(|t| {
-                let vol = params[mixer_param(t, MixerParam::Volume)];
-                Channel {
-                    gain: Smoother::new(sr, 0.01, volume_to_gain(vol)),
-                    pan_l: Smoother::new(sr, 0.01, std::f32::consts::FRAC_1_SQRT_2),
-                    pan_r: Smoother::new(sr, 0.01, std::f32::consts::FRAC_1_SQRT_2),
-                    peak: 0.0,
-                }
-            })
-            .collect();
-        let master = Smoother::new(sr, 0.01, volume_to_gain(params[MASTER_VOLUME]));
+        let globals = global_defaults();
         Self {
             sr,
-            params,
-            pattern: [[STEP_OFF; MAX_STEPS]; NUM_TRACKS],
-            voices,
-            channels,
-            master,
+            globals,
+            slots: (0..MAX_INSTRUMENTS).map(|_| None).collect(),
+            channels: (0..MAX_CHANNELS).map(|_| Channel::new(sr)).collect(),
+            master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
+            master_bus: vec![0.0; MAX_BLOCK * 2],
             master_peak: [0.0; 2],
             playing: false,
             next_step: 0,
@@ -101,37 +184,110 @@ impl Engine {
         self.playing
     }
 
-    /// Load full state (non-real-time; used before the engine starts, e.g.
-    /// for offline renders).
-    pub fn load(&mut self, params: &[f32], pattern: &[[u8; MAX_STEPS]; NUM_TRACKS]) {
-        self.params.copy_from_slice(params);
-        self.pattern = *pattern;
-        // Start the gain smoothers at the loaded mix, so muted or non-soloed
-        // channels don't leak for the first few milliseconds.
-        let (targets, master) = self.mix_targets();
-        for (ch, (gain, l, r)) in self.channels.iter_mut().zip(targets) {
-            ch.gain.value = gain;
-            ch.pan_l.value = l;
-            ch.pan_r.value = r;
+    /// Jump every smoother to its target, so an offline render starts at the
+    /// loaded mix instead of fading in (non-real-time use).
+    pub fn snap(&mut self) {
+        let any_solo = self.any_solo();
+        for ch in &mut self.channels {
+            ch.snap(any_solo);
         }
-        self.master.value = master;
+        self.master.value = volume_to_gain(self.globals[MASTER_VOLUME]);
+        for slot in self.slots.iter_mut().flatten() {
+            slot.instrument.snap();
+        }
     }
 
-    pub fn apply(&mut self, cmd: Command, emit: &mut impl FnMut(Feedback)) {
+    fn any_solo(&self) -> bool {
+        self.channels.iter().any(|c| c.active && c.params[CH_SOLO] >= 0.5)
+    }
+
+    /// Apply a command. A removed instrument is handed back so the caller can
+    /// return it to the control side to be dropped there.
+    #[must_use]
+    pub fn apply(&mut self, cmd: Command, emit: &mut impl FnMut(Feedback)) -> Option<Box<dyn Instrument>> {
         match cmd {
-            Command::SetParam { id, value } => {
-                if id < self.params.len() {
-                    self.params[id] = value;
+            Command::SetParam { target, value } => match target {
+                ParamTarget::Global(i) => {
+                    if let Some(g) = self.globals.get_mut(i) {
+                        *g = value;
+                    }
+                }
+                ParamTarget::Instrument { slot, index } => {
+                    if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                        s.instrument.set_param(index as usize, value);
+                    }
+                }
+                ParamTarget::Channel { ch, index } => {
+                    if let Some(c) = self.channels.get_mut(ch as usize)
+                        && (index as usize) < CHANNEL_PARAMS
+                    {
+                        c.params[index as usize] = value;
+                    }
+                }
+            },
+            Command::AddInstrument { slot, instrument } => {
+                // Never drop an instrument here: an invalid slot hands it
+                // straight back to be freed on the control side.
+                let Some(s) = self.slots.get_mut(slot as usize) else { return Some(instrument) };
+                return s.replace(Slot { instrument, routes: [None; MAX_OUTPUTS] }).map(|s| s.instrument);
+            }
+            Command::RemoveInstrument { slot } => {
+                return self.slots.get_mut(slot as usize)?.take().map(|s| s.instrument);
+            }
+            Command::SetRoute { slot, output, channel } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize)
+                    && (output as usize) < MAX_OUTPUTS
+                {
+                    s.routes[output as usize] = channel.filter(|c| (*c as usize) < MAX_CHANNELS);
+                    s.instrument.set_routed(output as usize, s.routes[output as usize].is_some());
                 }
             }
-            Command::SetStep { track, step, level } => {
-                if (track as usize) < NUM_TRACKS && (step as usize) < MAX_STEPS {
-                    self.pattern[track as usize][step as usize] = level;
+            Command::SetChannelActive { ch, active } => {
+                let any_solo = self.any_solo();
+                if let Some(c) = self.channels.get_mut(ch as usize) {
+                    c.active = active;
+                    c.params = channel_defaults();
+                    c.peak = [0.0; 2];
+                    // A reused channel starts at its defaults, not ramping
+                    // from the previous channel's gain and pan.
+                    c.snap(any_solo);
                 }
             }
-            Command::SetTrack { track, steps } => {
-                if (track as usize) < NUM_TRACKS {
-                    self.pattern[track as usize] = steps;
+            Command::SetDrumStep { slot, track, step, level } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.set_drum_step(track as usize, step as usize, level);
+                }
+            }
+            Command::SetDrumTrack { slot, track, steps } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.set_drum_track(track as usize, &steps);
+                }
+            }
+            Command::SetNotes { slot, steps } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.set_notes(&steps);
+                }
+            }
+            Command::Trigger { slot, voice, velocity } => {
+                let time = self.time();
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize)
+                    && s.instrument.trigger(voice as usize, velocity)
+                {
+                    emit(Feedback::Trigger { slot, voice: Some(voice), note: None, velocity, time, step: None });
+                }
+            }
+            Command::NoteOn { slot, note, velocity, gate } => {
+                let time = self.time();
+                let gate = gate.then(|| self.sixteenth() * 0.5);
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize)
+                    && s.instrument.note_on(note, velocity, gate)
+                {
+                    emit(Feedback::Trigger { slot, voice: None, note: Some(note), velocity, time, step: None });
+                }
+            }
+            Command::NoteOff { slot } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.note_off();
                 }
             }
             Command::Play => {
@@ -142,61 +298,54 @@ impl Engine {
             Command::Stop => {
                 if self.playing {
                     self.playing = false;
+                    for s in self.slots.iter_mut().flatten() {
+                        s.instrument.on_stop();
+                    }
                     emit(Feedback::Stopped { time: self.time() });
                 }
             }
-            Command::Trigger { track, velocity } => {
-                self.trigger(track as usize, velocity, None, emit);
-            }
         }
+        None
     }
 
-    fn voice_params(&self, track: usize) -> VoiceParams {
-        VoiceParams {
-            tune: self.params[voice_param(track, VoiceParam::Tune)],
-            decay: self.params[voice_param(track, VoiceParam::Decay)],
-            tone: self.params[voice_param(track, VoiceParam::Tone)],
-        }
-    }
-
-    fn trigger(&mut self, track: usize, velocity: f32, step: Option<u32>, emit: &mut impl FnMut(Feedback)) {
-        if track >= NUM_TRACKS {
-            return;
-        }
-        // Closed hat chokes open hat, as on the 808.
-        if track == Voice::ClosedHat.index() {
-            self.voices[Voice::OpenHat.index()].choke();
-        }
-        let p = self.voice_params(track);
-        self.voices[track].trigger(velocity.clamp(0.0, 1.0), p);
-        emit(Feedback::Trigger { track: track as u8, velocity, time: self.time(), step });
+    fn sixteenth(&self) -> f64 {
+        let tempo = self.globals[TEMPO].clamp(20.0, 300.0) as f64;
+        60.0 / tempo / 4.0 * self.sr as f64
     }
 
     /// Length of step `index` in samples, including swing. Swing delays every
     /// second 16th: pairs keep their total length, the first note of each pair
     /// takes 50%..75% of it as swing goes 0..1.
     fn step_samples(&self, index: u32) -> f64 {
-        let tempo = self.params[TEMPO].clamp(20.0, 300.0) as f64;
-        let sixteenth = 60.0 / tempo / 4.0 * self.sr as f64;
-        let ratio = 0.5 + 0.25 * self.params[SWING].clamp(0.0, 1.0) as f64;
+        let sixteenth = self.sixteenth();
+        let ratio = 0.5 + 0.25 * self.globals[SWING].clamp(0.0, 1.0) as f64;
         if index % 2 == 0 { 2.0 * sixteenth * ratio } else { 2.0 * sixteenth * (1.0 - ratio) }
     }
 
     fn fire_step(&mut self, emit: &mut impl FnMut(Feedback)) {
-        let length = (self.params[LENGTH].round() as u32).clamp(1, MAX_STEPS as u32);
+        let length = (self.globals[LENGTH].round() as u32).clamp(1, MAX_STEPS as u32);
         if self.next_step >= length {
             self.next_step = 0;
         }
         let step = self.next_step;
-        emit(Feedback::Step { step, time: self.time() });
-        for track in 0..NUM_TRACKS {
-            let level = self.pattern[track][step as usize];
-            if level != STEP_OFF {
-                let vel = if level == STEP_ACCENT { VELOCITY_ACCENT } else { VELOCITY_ON };
-                self.trigger(track, vel, Some(step), emit);
+        let time = self.time();
+        let samples = self.step_samples(step);
+        emit(Feedback::Step { step, time });
+        for (slot, s) in self.slots.iter_mut().enumerate() {
+            if let Some(s) = s {
+                s.instrument.on_step(step as usize, samples, &mut |h| {
+                    emit(Feedback::Trigger {
+                        slot: slot as u8,
+                        voice: h.voice,
+                        note: h.note,
+                        velocity: h.velocity,
+                        time,
+                        step: Some(step),
+                    })
+                });
             }
         }
-        self.next_step_at += self.step_samples(step);
+        self.next_step_at += samples;
         self.next_step = step + 1;
     }
 
@@ -207,7 +356,7 @@ impl Engine {
         let frames = out.len() / channels;
         let mut frame = 0;
         while frame < frames {
-            let mut n = frames - frame;
+            let mut n = (frames - frame).min(MAX_BLOCK);
             if self.playing {
                 let until = (self.next_step_at - self.pos as f64).ceil();
                 if until <= 0.0 {
@@ -216,58 +365,82 @@ impl Engine {
                 }
                 n = n.min(until as usize);
             }
-            self.render_frames(&mut out[frame * channels..(frame + n) * channels], channels);
+            self.render_block(&mut out[frame * channels..(frame + n) * channels], channels, n);
             frame += n;
             self.pos += n as u64;
             self.tick_meters(n as u32, emit);
         }
     }
 
-    /// Per-channel (gain, left, right) targets from volume, pan, mute, and
-    /// solo, plus the master gain.
-    fn mix_targets(&self) -> ([(f32, f32, f32); NUM_TRACKS], f32) {
-        let any_solo = (0..NUM_TRACKS).any(|t| self.params[mixer_param(t, MixerParam::Solo)] >= 0.5);
-        let mut targets = [(0.0f32, 0.0f32, 0.0f32); NUM_TRACKS];
-        for (t, target) in targets.iter_mut().enumerate() {
-            let muted = self.params[mixer_param(t, MixerParam::Mute)] >= 0.5;
-            let soloed = self.params[mixer_param(t, MixerParam::Solo)] >= 0.5;
-            let audible = !muted && (!any_solo || soloed);
-            let gain = if audible { volume_to_gain(self.params[mixer_param(t, MixerParam::Volume)]) } else { 0.0 };
-            let pan = self.params[mixer_param(t, MixerParam::Pan)].clamp(-1.0, 1.0);
-            let angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
-            *target = (gain, angle.cos(), angle.sin());
+    fn render_block(&mut self, out: &mut [f32], channels: usize, n: usize) {
+        for s in self.slots.iter_mut().flatten() {
+            s.instrument.render(n);
         }
-        (targets, volume_to_gain(self.params[MASTER_VOLUME]))
-    }
 
-    fn render_frames(&mut self, out: &mut [f32], channels: usize) {
-        let (targets, master_target) = self.mix_targets();
-
-        for f in out.chunks_exact_mut(channels) {
-            let (mut l, mut r) = (0.0f32, 0.0f32);
-            for t in 0..NUM_TRACKS {
-                let s = self.voices[t].process();
-                let ch = &mut self.channels[t];
-                let (gt, plt, prt) = targets[t];
-                let g = ch.gain.next(gt);
-                let pl = ch.pan_l.next(plt);
-                let pr = ch.pan_r.next(prt);
-                let x = s * g;
-                ch.peak = ch.peak.max(x.abs());
-                l += x * pl;
-                r += x * pr;
+        let any_solo = self.any_solo();
+        for ch in self.channels.iter_mut().filter(|c| c.active) {
+            let t = ch.targets(any_solo);
+            for c in &mut ch.coef[..n] {
+                *c = [
+                    ch.gain.next(t[0]),
+                    ch.mono_l.next(t[1]),
+                    ch.mono_r.next(t[2]),
+                    ch.bal_l.next(t[3]),
+                    ch.bal_r.next(t[4]),
+                ];
             }
+            ch.bus[..n * 2].fill(0.0);
+        }
+
+        for s in self.slots.iter().flatten() {
+            for (o, route) in s.routes.iter().enumerate().take(s.instrument.num_outputs()) {
+                let Some(c) = route else { continue };
+                let ch = &mut self.channels[*c as usize];
+                if !ch.active {
+                    continue;
+                }
+                let buf = s.instrument.output(o);
+                let stereo = s.instrument.output_width(o) == OutputWidth::Stereo;
+                for f in 0..n {
+                    let k = &ch.coef[f];
+                    let (l, r) = if stereo {
+                        (buf[f * 2] * k[3], buf[f * 2 + 1] * k[4])
+                    } else {
+                        (buf[f * 2] * k[1], buf[f * 2] * k[2])
+                    };
+                    ch.bus[f * 2] += l;
+                    ch.bus[f * 2 + 1] += r;
+                }
+            }
+        }
+
+        let master = &mut self.master_bus[..n * 2];
+        master.fill(0.0);
+        for ch in self.channels.iter_mut().filter(|c| c.active) {
+            for f in 0..n {
+                let g = ch.coef[f][0];
+                let l = ch.bus[f * 2] * g;
+                let r = ch.bus[f * 2 + 1] * g;
+                ch.peak[0] = ch.peak[0].max(l.abs());
+                ch.peak[1] = ch.peak[1].max(r.abs());
+                master[f * 2] += l;
+                master[f * 2 + 1] += r;
+            }
+        }
+
+        let master_target = volume_to_gain(self.globals[MASTER_VOLUME]);
+        for (f, o) in out.chunks_exact_mut(channels).enumerate().take(n) {
             let m = self.master.next(master_target);
-            l = soft_clip(l * m);
-            r = soft_clip(r * m);
+            let l = soft_clip(self.master_bus[f * 2] * m);
+            let r = soft_clip(self.master_bus[f * 2 + 1] * m);
             self.master_peak[0] = self.master_peak[0].max(l.abs());
             self.master_peak[1] = self.master_peak[1].max(r.abs());
             if channels == 1 {
-                f[0] = 0.5 * (l + r);
+                o[0] = 0.5 * (l + r);
             } else {
-                f[0] = l;
-                f[1] = r;
-                for x in &mut f[2..] {
+                o[0] = l;
+                o[1] = r;
+                for x in &mut o[2..] {
                     *x = 0.0;
                 }
             }
@@ -280,20 +453,33 @@ impl Engine {
             return;
         }
         self.meter_countdown = (self.sr / METER_HZ) as u32;
-        let mut tracks = [0.0; NUM_TRACKS];
-        for (t, ch) in self.channels.iter_mut().enumerate() {
-            tracks[t] = ch.peak;
-            ch.peak = 0.0;
+        let mut channels = [[0.0; 2]; MAX_CHANNELS];
+        for (i, ch) in self.channels.iter_mut().enumerate() {
+            channels[i] = ch.peak;
+            ch.peak = [0.0; 2];
         }
-        emit(Feedback::Meters { tracks, master: self.master_peak });
+        emit(Feedback::Meters { channels, master: self.master_peak });
         self.master_peak = [0.0; 2];
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use fours_protocol::STEP_ON;
+    use crate::instrument;
+    use fours_protocol::{InstrumentType, STEP_OFF, STEP_ON, Voice};
+
+    /// An engine with a `tr808` in slot 0, its main out on channel index 0.
+    pub(crate) fn drum_engine() -> Engine {
+        let mut e = Engine::new(48000);
+        let mut fb = |_| {};
+        let _ = e.apply(Command::SetChannelActive { ch: 0, active: true }, &mut fb);
+        let instrument = instrument::make(InstrumentType::Tr808, 48000.0);
+        let _ = e.apply(Command::AddInstrument { slot: 0, instrument }, &mut fb);
+        let _ = e.apply(Command::SetRoute { slot: 0, output: 0, channel: Some(0) }, &mut fb);
+        e.snap();
+        e
+    }
 
     fn render_secs(e: &mut Engine, secs: f32, fb: &mut Vec<Feedback>) -> Vec<f32> {
         let frames = (secs * e.sample_rate() as f32) as usize;
@@ -307,9 +493,9 @@ mod tests {
     #[test]
     fn every_voice_sounds_and_decays() {
         for v in Voice::ALL {
-            let mut e = Engine::new(48000);
+            let mut e = drum_engine();
             let mut fb = vec![];
-            e.apply(Command::Trigger { track: v.index() as u8, velocity: 1.0 }, &mut |f| fb.push(f));
+            let _ = e.apply(Command::Trigger { slot: 0, voice: v.index() as u8, velocity: 1.0 }, &mut |f| fb.push(f));
             let out = render_secs(&mut e, 0.2, &mut fb);
             let peak = out.iter().fold(0.0f32, |a, x| a.max(x.abs()));
             assert!(peak > 0.02, "{v:?} too quiet: {peak}");
@@ -322,19 +508,19 @@ mod tests {
 
     #[test]
     fn sequencer_fires_on_time() {
-        let mut e = Engine::new(48000);
+        let mut e = drum_engine();
         let mut fb = vec![];
         let mut steps = [STEP_OFF; MAX_STEPS];
         steps[0] = STEP_ON;
         steps[4] = STEP_ON;
-        e.apply(Command::SetTrack { track: 0, steps }, &mut |_| {});
-        e.apply(Command::Play, &mut |_| {});
+        let _ = e.apply(Command::SetDrumTrack { slot: 0, track: 0, steps }, &mut |_| {});
+        let _ = e.apply(Command::Play, &mut |_| {});
         // 120 bpm: 16th = 0.125s, one 16-step bar = 2s.
         render_secs(&mut e, 4.0, &mut fb);
         let kicks: Vec<f64> = fb
             .iter()
             .filter_map(|f| match f {
-                Feedback::Trigger { track: 0, time, .. } => Some(*time),
+                Feedback::Trigger { voice: Some(0), time, .. } => Some(*time),
                 _ => None,
             })
             .collect();
@@ -343,20 +529,131 @@ mod tests {
         for (k, x) in kicks.iter().zip(expect) {
             assert!((k - x).abs() < 1.0 / 48000.0 * 2.0, "{k} vs {x}");
         }
-        let steps: Vec<u32> = fb.iter().filter_map(|f| if let Feedback::Step { step, .. } = f { Some(*step) } else { None }).collect();
+        let steps: Vec<u32> =
+            fb.iter().filter_map(|f| if let Feedback::Step { step, .. } = f { Some(*step) } else { None }).collect();
         assert_eq!(&steps[..17], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]);
     }
 
     #[test]
     fn swing_delays_offbeats() {
-        let mut e = Engine::new(48000);
+        let mut e = drum_engine();
         let mut fb = vec![];
-        e.apply(Command::SetParam { id: SWING, value: 1.0 }, &mut |_| {});
-        e.apply(Command::Play, &mut |_| {});
+        let _ = e.apply(Command::SetParam { target: ParamTarget::Global(SWING), value: 1.0 }, &mut |_| {});
+        let _ = e.apply(Command::Play, &mut |_| {});
         render_secs(&mut e, 0.6, &mut fb);
-        let times: Vec<f64> = fb.iter().filter_map(|f| if let Feedback::Step { time, .. } = f { Some(*time) } else { None }).collect();
+        let times: Vec<f64> =
+            fb.iter().filter_map(|f| if let Feedback::Step { time, .. } = f { Some(*time) } else { None }).collect();
         // Pair = 0.25s; full swing puts the offbeat at 75% of the pair.
         assert!((times[1] - 0.1875).abs() < 1e-3, "{times:?}");
         assert!((times[2] - 0.25).abs() < 1e-3, "{times:?}");
+    }
+
+    fn note_engine() -> Engine {
+        let mut e = Engine::new(48000);
+        let mut fb = |_| {};
+        let _ = e.apply(Command::SetChannelActive { ch: 0, active: true }, &mut fb);
+        let instrument = instrument::make(InstrumentType::Tb303, 48000.0);
+        let _ = e.apply(Command::AddInstrument { slot: 0, instrument }, &mut fb);
+        let _ = e.apply(Command::SetRoute { slot: 0, output: 0, channel: Some(0) }, &mut fb);
+        e.snap();
+        e
+    }
+
+    #[test]
+    fn tb303_sounds_and_decays() {
+        for (square, accent) in [(0.0, false), (1.0, false), (0.0, true), (1.0, true)] {
+            let mut e = note_engine();
+            let mut fb = vec![];
+            let _ = e.apply(Command::SetParam { target: ParamTarget::Instrument { slot: 0, index: 1 }, value: square }, &mut |_| {});
+            let _ = e.apply(Command::SetParam { target: ParamTarget::Instrument { slot: 0, index: 3 }, value: 1.0 }, &mut |_| {});
+            let velocity = if accent { 1.0 } else { 0.7 };
+            let _ = e.apply(Command::NoteOn { slot: 0, note: 36, velocity, gate: true }, &mut |f| fb.push(f));
+            let out = render_secs(&mut e, 0.1, &mut fb);
+            let peak = out.iter().fold(0.0f32, |a, x| a.max(x.abs()));
+            assert!(peak > 0.05, "square={square} accent={accent}: too quiet {peak}");
+            assert!(peak <= 1.0, "square={square} accent={accent}: clipped {peak}");
+            let tail = render_secs(&mut e, 0.5, &mut fb);
+            let end_peak = tail[tail.len() - 4800..].iter().fold(0.0f32, |a, x| a.max(x.abs()));
+            assert!(end_peak < 0.001, "square={square} accent={accent}: did not release {end_peak}");
+        }
+    }
+
+    /// Regression: dragging the cutoff around while low, sliding square-wave
+    /// notes play used to drive the ladder's state to infinity after about a
+    /// minute, leaving a stuck, inaudible DC output until the instrument was
+    /// rebuilt. The output must keep moving (never a constant level) and stay
+    /// audible bar after bar.
+    #[test]
+    fn tb303_filter_never_sticks() {
+        let sr = 44100;
+        let mut e = Engine::new(sr);
+        let mut fb = |_| {};
+        let _ = e.apply(Command::SetChannelActive { ch: 0, active: true }, &mut fb);
+        let instrument = instrument::make(InstrumentType::Tb303, sr as f32);
+        let _ = e.apply(Command::AddInstrument { slot: 0, instrument }, &mut fb);
+        let _ = e.apply(Command::SetRoute { slot: 0, output: 0, channel: Some(0) }, &mut fb);
+        let notes = fours_protocol::parse_notes("D1~ D#1~ C1~ F#1~ A#3~ A#3 A#3 - - - - D#1 - C#1 - G1").unwrap();
+        let mut steps = [NoteStep::default(); MAX_STEPS];
+        steps.copy_from_slice(&notes);
+        let _ = e.apply(Command::SetNotes { slot: 0, steps }, &mut fb);
+        // Square wave, and the decay/accent the bug was found with.
+        for (index, value) in [(1u16, 1.0f32), (3, 0.5), (4, 0.5), (5, 0.62), (6, 0.74)] {
+            let _ = e.apply(Command::SetParam { target: ParamTarget::Instrument { slot: 0, index }, value }, &mut fb);
+        }
+        let _ = e.apply(Command::Play, &mut fb);
+        let mut out = vec![0.0f32; 512 * 2];
+        let mut rng = 12345u32;
+        let (mut bar_peak, mut silent_bars) = (0.0f32, 0);
+        let blocks = sr as usize * 90 / 512; // 90 s; it stuck at ~59 s before the fix
+        for block in 0..blocks {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            // A slider: slow drags across the range, with occasional jumps.
+            let t = block as f32 * 512.0 / sr as f32;
+            let cutoff = if rng % 50 == 0 {
+                (rng % 1000) as f32 / 999.0
+            } else {
+                0.5 + 0.5 * (t * 0.37).sin() * (t * 0.05).cos()
+            };
+            let target = ParamTarget::Instrument { slot: 0, index: 2 };
+            let _ = e.apply(Command::SetParam { target, value: cutoff }, &mut fb);
+            e.render(&mut out, 2, &mut |_| {});
+            let (lo, hi) = out.iter().step_by(2).fold((f32::MAX, f32::MIN), |(l, h), x| (l.min(*x), h.max(*x)));
+            assert!(lo.is_finite() && hi.is_finite(), "non-finite output at {t:.1}s");
+            assert!(!(hi - lo < 1e-6 && hi.abs() > 0.3), "stuck DC output {hi} at {t:.1}s (cutoff {cutoff:.2})");
+            bar_peak = bar_peak.max(hi.abs()).max(lo.abs());
+            if block % 172 == 171 {
+                // About one bar at 120 bpm.
+                silent_bars += (bar_peak < 0.01) as u32;
+                bar_peak = 0.0;
+            }
+        }
+        assert_eq!(silent_bars, 0, "the bass went silent");
+    }
+
+    /// A slid note glides in without retriggering the filter envelope: the
+    /// level stays continuous across the step boundary, and no gap opens.
+    #[test]
+    fn tb303_slide_holds_the_gate() {
+        let mut steps = [NoteStep::default(); MAX_STEPS];
+        steps[0] = NoteStep { note: Some(36), accent: false, slide: true };
+        steps[1] = NoteStep { note: Some(43), accent: false, slide: false };
+        let mut slid = note_engine();
+        let _ = slid.apply(Command::SetNotes { slot: 0, steps }, &mut |_| {});
+        steps[0].slide = false;
+        let mut plain = note_engine();
+        let _ = plain.apply(Command::SetNotes { slot: 0, steps }, &mut |_| {});
+        // Step 0 is 0..0.125s; without slide its gate closes at 0.0625s.
+        let gap_level = |e: &mut Engine| {
+            let _ = e.apply(Command::Play, &mut |_| {});
+            let out = render_secs(e, 0.25, &mut vec![]);
+            let (a, b) = ((0.10 * 48000.0) as usize * 2, (0.12 * 48000.0) as usize * 2);
+            out[a..b].iter().fold(0.0f32, |m, x| m.max(x.abs()))
+        };
+        let held = gap_level(&mut slid);
+        let released = gap_level(&mut plain);
+        assert!(held > 0.05, "slide should hold the gate: {held}");
+        assert!(released < 0.01, "without slide the gate should close: {released}");
     }
 }

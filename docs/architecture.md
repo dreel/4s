@@ -32,8 +32,9 @@ The core Rust binary and the single source of truth. It owns:
 
 - **Audio engine**: real-time audio output, the processing graph.
 - **Sequencer and clock**: transport, tempo, patterns, timing.
-- **Synthesis**: instrument voices (starting with 808-style drums).
-- **Mixer**: channels, levels, pan, mute/solo, master bus.
+- **Synthesis**: instruments (808-style drums, a 303-style bass).
+- **Mixer**: stereo channels (any number up to 32), levels, pan/balance,
+  mute/solo, master bus; routes from instrument outputs to channels.
 - **MIDI and controller I/O**: including the Livid Block (input and LED output).
 - **State and persistence**: projects, patterns, settings.
 
@@ -65,19 +66,27 @@ business logic: it renders daemon state, subscribes to events, and sends RPCs.
 
 ## Modular graph model
 
-- Nodes: instruments, effects, mixer channels, master bus, MIDI devices.
-- Edges: audio routing (instrument -> channel -> master) and control mappings
-  (controller input -> parameter).
-- Every parameter has a stable, human-readable path, e.g. `mixer.3.volume`,
-  `drums.kick.decay`, `transport.tempo`. Paths are the shared vocabulary of the
-  RPC API, CLI, UI, and controller mappings.
+Implemented by RFC 0004 for instruments, channels, and routes:
+
+- Nodes: instruments (`tr808`, `tb303`, added and removed at runtime), stereo
+  mixer channels, the master bus, MIDI devices. Effects are future work.
+- Edges: audio routing (instrument output -> channel -> master; an output is
+  mono or stereo, an instrument has a main out and optionally direct outs)
+  and control mappings (controller input -> parameter; the Livid Block
+  targets one drum instrument).
+- Every parameter has a stable, human-readable path, e.g. `mixer.2.volume`,
+  `drums.kick.decay`, `bass.cutoff`, `transport.tempo`. An instrument's id is
+  the first segment of its paths. Paths are the shared vocabulary of the RPC
+  API, CLI, UI, and controller mappings.
+- The UI is a console (transport, channel strips, master) with the selected
+  instrument's editor below it.
 
 ## Repo layout
 
 ```
 crates/
   protocol/   # shared types: API (api! macro), events, state, project format
-  engine/     # real-time engine: voices, sequencer, mixer, offline render
+  engine/     # real-time engine: instruments, sequencer, mixer, offline render
   daemon/     # 4sd: core state, RPC server, audio output, MIDI, Livid Block
   cli/        # 4s: CLI client
 ui/           # Electron + React + Tailwind; src/generated is codegen output

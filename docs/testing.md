@@ -36,14 +36,19 @@ Write a unit test when either:
    - `every_voice_sounds_and_decays`, `sequencer_fires_on_time`,
      `swing_delays_offbeats` (`crates/engine/src/engine.rs`)
    - the onset tests in `crates/engine/src/offline.rs`
-   - `steps_round_trip` and the project fixture tests (`crates/protocol`)
+   - `steps_round_trip`, `notes_round_trip`, and the project fixture tests
+     (`crates/protocol`)
+   - the `tb303` DSP tests (`tb303_sounds_and_decays`,
+     `tb303_slide_holds_the_gate` in `crates/engine/src/engine.rs`)
    - `leds_show_steps_and_inverted_playhead` (`crates/daemon/src/controller.rs`)
    - the PR-description checker tests (`scripts/ci/check-pr-body.test.mjs`)
 2. **An invariant would fail silently, far from its cause**:
-   - `layout_matches_registry` (param index layout vs. paths)
+   - `process_never_allocates` (`crates/engine/tests/no_alloc.rs`: the
+     audio thread makes no heap operations while instruments are added,
+     routed, played, and removed)
    - `cli_covers_every_method` (every RPC has a CLI command)
    - the wire-format tests (JSON shapes the TypeScript client depends on)
-   - `v1_fixture_loads` (old projects keep loading)
+   - `v2_fixture_loads` (supported projects keep loading)
 
 ## Don't write change detectors
 

@@ -1,25 +1,114 @@
 {
-  "format_version": 1,
+  "format_version": 2,
+  "instruments": [
+    {
+      "id": "drums",
+      "type": "tr808",
+      "name": "Drums"
+    },
+    {
+      "id": "bass",
+      "type": "tb303",
+      "name": "Bass"
+    }
+  ],
+  "channels": [
+    {
+      "n": 1,
+      "name": "Drums"
+    },
+    {
+      "n": 2,
+      "name": "Bass"
+    }
+  ],
+  "routes": {
+    "bass": 2,
+    "drums": 1
+  },
   "params": {
+    "bass.accent": 0.5,
+    "bass.cutoff": 0.3,
+    "bass.decay": 0.4,
+    "bass.env_mod": 0.6,
+    "bass.resonance": 0.7,
+    "bass.tune": 0.0,
+    "bass.waveform": 0.0,
+    "drums.clap.decay": 0.4,
+    "drums.clap.level": 0.8,
+    "drums.clap.mute": 0.0,
+    "drums.clap.pan": 0.0,
+    "drums.clap.tone": 0.5,
+    "drums.clap.tune": 0.0,
+    "drums.closed_hat.decay": 0.3,
+    "drums.closed_hat.level": 0.65,
+    "drums.closed_hat.mute": 0.0,
+    "drums.closed_hat.pan": 0.0,
+    "drums.closed_hat.tone": 0.5,
+    "drums.closed_hat.tune": 0.0,
+    "drums.cowbell.decay": 0.4,
+    "drums.cowbell.level": 0.55,
+    "drums.cowbell.mute": 0.0,
+    "drums.cowbell.pan": 0.3,
+    "drums.cowbell.tone": 0.5,
+    "drums.cowbell.tune": 0.0,
+    "drums.high_tom.decay": 0.5,
+    "drums.high_tom.level": 0.8,
+    "drums.high_tom.mute": 0.0,
+    "drums.high_tom.pan": 0.0,
+    "drums.high_tom.tone": 0.5,
+    "drums.high_tom.tune": 0.0,
     "drums.kick.decay": 0.65,
+    "drums.kick.level": 0.8,
+    "drums.kick.mute": 0.0,
+    "drums.kick.pan": 0.0,
+    "drums.kick.tone": 0.5,
+    "drums.kick.tune": 0.0,
+    "drums.low_tom.decay": 0.5,
+    "drums.low_tom.level": 0.8,
+    "drums.low_tom.mute": 0.0,
+    "drums.low_tom.pan": 0.0,
+    "drums.low_tom.tone": 0.5,
+    "drums.low_tom.tune": 0.0,
     "drums.open_hat.decay": 0.35,
-    "mixer.4.volume": 0.65,
-    "mixer.5.volume": 0.6,
-    "mixer.8.pan": 0.3,
-    "mixer.8.volume": 0.55,
+    "drums.open_hat.level": 0.6,
+    "drums.open_hat.mute": 0.0,
+    "drums.open_hat.pan": 0.0,
+    "drums.open_hat.tone": 0.5,
+    "drums.open_hat.tune": 0.0,
+    "drums.snare.decay": 0.4,
+    "drums.snare.level": 0.8,
+    "drums.snare.mute": 0.0,
+    "drums.snare.pan": 0.0,
+    "drums.snare.tone": 0.5,
+    "drums.snare.tune": 0.0,
+    "mixer.1.mute": 0.0,
+    "mixer.1.pan": 0.0,
+    "mixer.1.solo": 0.0,
+    "mixer.1.volume": 1.0,
+    "mixer.2.mute": 0.0,
+    "mixer.2.pan": 0.0,
+    "mixer.2.solo": 0.0,
+    "mixer.2.volume": 0.85,
+    "mixer.master.volume": 0.8,
+    "sequencer.length": 16.0,
     "transport.swing": 0.25,
     "transport.tempo": 112.0
   },
   "patterns": {
-    "kick": "X-----x---X--x--",
-    "snare": "----X-------X---",
-    "clap": "------------x---",
-    "closed_hat": "x-x-x-x-x-x-x---",
-    "open_hat": "--------------x-",
-    "low_tom": "-----------x----",
-    "cowbell": "---x------x-----"
+    "bass": "C2! - C2 D#2~ G2 - C2 - A#1 - C2! C3~ G2 - D#2 -",
+    "drums": {
+      "kick": "X-----x---X--x--",
+      "snare": "----X-------X---",
+      "clap": "------------x---",
+      "closed_hat": "x-x-x-x-x-x-x---",
+      "open_hat": "--------------x-",
+      "low_tom": "-----------x----",
+      "cowbell": "---x------x-----"
+    }
   },
   "controller": {
+    "target": "drums",
     "knob_mode": "volume",
     "follow": true
   }

@@ -7,9 +7,9 @@ routes audio, the real-time model, the protocol or sync model, lifecycle or
 topology, the project format, the UI's overall structure, the core
 principles, or the gates.
 
-Adding or improving a drum voice, a parameter, a controller mapping, or
-fixing a bug does not need one. New instrument types do (see
-[extending.md](../extending.md#not-an-extension-needs-an-rfc)).
+Adding or improving a drum voice, a new instrument type, a parameter, a
+controller mapping, or fixing a bug does not need one (see
+[extending.md](../extending.md)).
 
 ## Process
 
@@ -53,4 +53,4 @@ decisions (before implementation).
 | [0001](0001-contribution-gates.md) | Contribution gates | implemented |
 | [0002](0002-testing-philosophy.md) | Testing philosophy | implemented |
 | [0003](0003-ci-agent-review.md) | Automatic CI agent review (Muse Contributor tier) | implemented |
-| [0004](0004-instruments-and-mixer.md) | Instruments and the channel mixer | accepted |
+| [0004](0004-instruments-and-mixer.md) | Instruments and the channel mixer | implemented |

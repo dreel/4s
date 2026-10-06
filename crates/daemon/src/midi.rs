@@ -100,6 +100,7 @@ impl Midi {
         input_query: &str,
         output_query: Option<&str>,
         kind: DeviceKind,
+        instrument: Option<String>,
         tx: Sender<MidiMessage>,
     ) -> Result<MidiConnection> {
         let (inputs, outputs) = list_ports();
@@ -148,7 +149,7 @@ impl Midi {
             None => None,
         };
 
-        let info = MidiConnection { input: input_name, output: output_name, kind };
+        let info = MidiConnection { input: input_name, output: output_name, kind, instrument };
         self.conns.push(Conn { info: info.clone(), _input: input, output });
         Ok(info)
     }
@@ -165,6 +166,19 @@ impl Midi {
         let before = self.conns.len();
         self.conns.retain(|c| inputs.contains(&c.info.input));
         before != self.conns.len()
+    }
+
+    /// Forget an instrument a keyboard was set to play (it was removed); the
+    /// keyboard falls back to the first `tb303`. Returns true if any changed.
+    pub fn clear_instrument(&mut self, id: &str) -> bool {
+        let mut changed = false;
+        for c in &mut self.conns {
+            if c.info.instrument.as_deref() == Some(id) {
+                c.info.instrument = None;
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// The connected Livid Block, if any.

@@ -1,5 +1,5 @@
 import { act, client, setParam, useApp } from "../store";
-import { ParamKnob } from "./Mixer";
+import { ParamKnob } from "./ParamKnob";
 
 export function Transport() {
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
@@ -7,7 +7,7 @@ export function Transport() {
   const tempo = useApp((s) => s.snapshot?.params["transport.tempo"] ?? 120);
   const length = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   return (
-    <section className="flex items-center gap-5 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800">
+    <div className="flex items-center gap-5" data-testid="transport">
       <button
         data-testid="transport-toggle"
         data-playing={playing}
@@ -59,6 +59,6 @@ export function Transport() {
           ))}
         </div>
       </label>
-    </section>
+    </div>
   );
 }

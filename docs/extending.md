@@ -21,9 +21,9 @@ Conventions used throughout:
 
 ## 1. Improve or replace a drum voice
 
-The kit has eight voices (`Voice` in `crates/protocol/src/types.rs`), each
-synthesized by a type implementing `DrumVoice` in
-`crates/engine/src/voices.rs`.
+The `tr808` instrument (`crates/engine/src/tr808.rs`) has eight voices
+(`Voice` in `crates/protocol/src/types.rs`), each synthesized by a type
+implementing `DrumVoice` in `crates/engine/src/voices.rs`.
 
 1. Edit the voice's struct, or write a new one implementing `DrumVoice`
    (`trigger`, `process`, `active`, optionally `choke`). Keep `process`
@@ -36,7 +36,7 @@ synthesized by a type implementing `DrumVoice` in
    voice table in [engine.md](engine.md).
 
 Pitfalls:
-- Parameters are read at trigger time (`Engine::voice_params`). A parameter
+- Parameters are read at trigger time (`Tr808::play`). A parameter
   that must change a sounding note needs to be read per block instead.
 - Keep peaks at or below 1.0 at velocity 1.0. The master soft clipper is a
   safety net, not a mixer.
@@ -51,28 +51,26 @@ Validate:
 
 ## 2. Add a parameter
 
-Parameters are addressed by path (`drums.kick.decay`, `mixer.3.pan`) and
-stored in a flat array indexed by `ParamId`
-(`crates/engine/src/params.rs`).
+Parameters are addressed by path (`drums.kick.decay`, `mixer.2.pan`). Inside
+the engine each one is a `ParamTarget`: a global, a channel parameter, or an
+instrument parameter by index. The daemon rebuilds the registry from the
+graph (`Core::rebuild_params`), so a parameter only needs to be declared in
+one place:
 
-1. Extend the index layout. The offsets are derived from each other
-   (`VOICE_BASE`, `MIXER_BASE`, `MASTER_VOLUME`, `NUM_PARAMS =
-   MASTER_VOLUME + 1`), so:
-   - a new **per-voice** parameter: add a `VoiceParam` variant, bump
-     `VOICE_PARAMS`, add the field to `VoiceParams`
-     (`crates/engine/src/voices.rs`), and fill it in `Engine::voice_params`;
-   - a new **per-channel** parameter: add a `MixerParam` variant and bump
-     `MIXER_PARAMS`;
-   - a new **global** parameter: add a constant after `MASTER_VOLUME` and
-     update `NUM_PARAMS`.
-   Then add the matching `ParamInfo` entry **in the same position** in
-   `registry()`. `layout_matches_registry` catches a mismatch; add your path
-   to it.
-2. Use the value in the engine (`Engine` reads `self.params[...]`).
+1. Declare it:
+   - an **instrument** parameter: add it to the type's `params(id)` list
+     (e.g. `Tr808::params`, `Tb303::params`) and handle its index in that
+     type's `set_param`. For the 808, per-voice parameters are
+     `track * VOICE_PARAMS + p`; add a constant and bump `VOICE_PARAMS`;
+   - a **channel** parameter: add it to `params::channel()`, add an index
+     constant, bump `CHANNEL_PARAMS`, and use it in `Channel::targets`;
+   - a **global** parameter: add it to `params::globals()`, add an index
+     constant, and bump `NUM_GLOBALS`.
+2. Use the value in the engine.
 3. Clients: `param.list`, `4s params`, `4s get/set`, and project files pick
    it up automatically. **The UI does not**: controls are placed by path.
-   Add a `ParamKnob` for it (e.g. in a mixer strip in
-   `ui/src/components/Mixer.tsx`, or in `Transport.tsx`). Range, label, and
+   Add a `ParamKnob` for it (e.g. in `DrumEditor.tsx`, `BassEditor.tsx`, a
+   console strip in `Console.tsx`, or `Transport.tsx`). Range, label, and
    default come from the registry. Without that, the parameter has no UI
    control, which breaks UI/CLI parity.
 
@@ -93,9 +91,13 @@ Validate:
 
 Controllers are MIDI devices whose input the daemon decodes into the same
 actions the UI and CLI use. The Livid Block is the reference for a grid
-controller with feedback; `DeviceKind::GenericDrums` (note-on triggers
-voices, in `Core::handle_midi`) is the simpler reference for note-only
-devices.
+controller with feedback. `DeviceKind::GenericDrums` (note-on triggers
+the controller target's voices) and `DeviceKind::Keyboard` (note on/off
+plays a note instrument, the connection's `instrument` or the first
+`tb303`, holding the note until its note-off), both in `Core::handle_midi`,
+are the simpler references for note-only devices. A keyboard is connected
+with `4s midi connect <port> --kind keyboard [--instrument bass]` or the
+UI's MIDI panel.
 
 1. Add a `DeviceKind` variant in `crates/protocol/src/types.rs` and
    regenerate bindings (`cargo run -p fours-protocol --bin gen-bindings`).
@@ -160,7 +162,7 @@ Validate:
 1. Add a component in `ui/src/components/`, reading state with `useApp` /
    `useLive` selectors (return primitives or stable references) and acting
    through `client.call`, `setParam`, or `act`.
-2. Use `ParamKnob` (`Mixer.tsx`) for parameters, so range, label, and
+2. Use `ParamKnob` (`ParamKnob.tsx`) for parameters, so range, label, and
    default come from the registry instead of being duplicated.
 3. Give interactive elements a `data-testid`.
 4. Everything the panel does must already be an RPC with a CLI command
@@ -168,8 +170,46 @@ Validate:
    ([api-parity.md](api-parity.md)).
 
 Validate:
-- A Playwright test in `ui/e2e/`. Check the screenshot the suite writes
-  (`ui/test-results/groove.png`) for layout regressions.
+- A Playwright test in `ui/e2e/`. Check the screenshots the suite writes
+  (`ui/test-results/groove.png`, `bass.png`) for layout regressions.
+
+## 6. Add an instrument type
+
+Instruments are nodes in the graph (RFC 0004): the daemon creates instances
+with `instrument.add`, each instance's id prefixes its parameter paths, and
+its outputs are routed to mixer channels. A new type (a sampler, an FM synth,
+a second drum machine) is an Extension.
+
+1. **Protocol.** Add a variant to `InstrumentType` in
+   `crates/protocol/src/types.rs` (`id`, `default_id`, `label`, `parse`).
+   If it needs a new kind of pattern, add a `PatternData` variant and a
+   `ProjectPattern` form; otherwise reuse drum steps or note steps.
+   Regenerate bindings.
+2. **Engine.** Write a type implementing `Instrument`
+   (`crates/engine/src/instrument.rs`) in its own file, following
+   `tb303.rs` (one mono voice, note pattern) or `tr808.rs` (several voices,
+   a main mix plus direct outs):
+   - allocate everything in `new` (output buffers of `MAX_BLOCK * 2`); never
+     allocate in `render`, `on_step`, or the setters;
+   - declare `params(id)` and outputs (each mono or stereo; main first);
+   - keep peaks at or below 1.0.
+   Add it to `instrument::make`, `params`, and `outputs`.
+3. **Daemon.** Patterns are stored per instance in `Core` (`PatternState`).
+   A type that reuses drum or note patterns works with the existing
+   `pattern.*` methods; `Core::resolve` picks the default instance by type.
+4. **CLI.** Usually nothing: `4s instrument add <type>` and the pattern
+   commands cover it. Extend `InstrumentType::parse` aliases if helpful.
+5. **UI.** Add an editor component (like `BassEditor.tsx`) and show it from
+   `Editor.tsx` for the new type. Use `ParamKnob` for every parameter.
+
+Validate:
+- An engine test that the instrument sounds, stays at or below 1.0, and
+  decays; `crates/engine/tests/no_alloc.rs` must still pass with it added
+  to the command list.
+- CLI e2e: add it, program a pattern, and check `4s render` triggers and
+  onsets; remove it and check its params are gone.
+- A Playwright test for its editor, and a look at the screenshots.
+- Document it in [engine.md](engine.md) (synthesis, parameters, outputs).
 
 ---
 
@@ -178,27 +218,10 @@ Validate:
 These change the system's shape. Write an RFC first
 ([docs/rfcs/](rfcs/README.md)):
 
-- **New instrument types** (a synth, a sampler, a second drum machine). The
-  engine is currently one fixed 8-voice kit: `Voice`, `NUM_TRACKS`, the
-  8x8 Block layout, and `mixer.1..8` all assume it.
-- Audio routing: effects, sends and returns, buses, sidechains.
-- More or fewer than 8 tracks, or multiple patterns and song arrangement.
+- Audio routing beyond instrument outputs to channels: effects, inserts,
+  sends and returns, buses, sidechains.
+- Multiple patterns per instrument, per-instrument lengths (polymeter), or
+  song arrangement.
 - Protocol or sync model changes, the daemon lifecycle, the multiplayer
   topology.
 - The UI's overall structure or interaction model.
-
-### Next RFC to write: an instrument framework
-
-To let contributors add instruments as Extensions, 4S needs an instrument
-abstraction. Questions that RFC should answer:
-
-- How an instrument is instantiated and addressed. Parameter paths like
-  `instruments.<id>.<param>`, and how the current `drums.*` and `mixer.N.*`
-  paths migrate.
-- How instruments receive notes or steps (a sequencer per instrument?) and
-  route into mixer channels.
-- How the real-time engine adds and removes instruments without allocating
-  on the audio thread.
-- How controllers and the UI discover an instrument's controls (the
-  parameter registry generalizes naturally).
-- Project-format and protocol changes, with migration for existing projects.

@@ -22,7 +22,8 @@ What exists today:
   offline render onsets match sequencer triggers, including dense
   mixed patterns and long tails that must not re-trigger.
 - **Protocol** (`crates/protocol`): wire formats, project file round trip,
-  v1 fixture loads, future versions rejected.
+  the v2 fixture loads; v1 (dropped with RFC 0004) and future versions are
+  rejected.
 - **Daemon** (`crates/daemon`): Livid Block LED paging and playhead
   inversion.
 - **CLI** (`crates/cli`): every RPC method has a CLI command
@@ -37,7 +38,8 @@ What exists today:
   pruned. Uses an isolated data dir and random port.
 - **UI e2e** (`ui/e2e`): UI edits verified over RPC, RPC edits verified in the
   UI, transport, Block mirror, project round trip, render; writes
-  `ui/test-results/groove.png` for visual review. Lifecycle tests: the app
+  `ui/test-results/groove.png` (console + 808 editor) and `bass.png` (303
+  editor) for visual review. Lifecycle tests: the app
   starts and stops an owned daemon, an owned daemon exits when the app is
   killed, a detached daemon survives the app, and an existing daemon is never
   stopped.
