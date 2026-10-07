@@ -824,7 +824,10 @@ How the implementation settled details the design left open:
 - Mixer UX follow-up (after the API table above):
   - `instrument.add` with no `channel` routes `main` to the first channel,
     in display order, that nothing feeds. It creates a new channel (named
-    after the instrument) only if every channel is in use.
+    after the instrument) only if every channel is in use. A reused channel
+    keeps its name and settings, and from then on counts as the
+    instrument's channel: `instrument.remove` removes it once it is empty
+    again, unless `keep_channels` is set.
   - `route.set` takes `swap: bool`. When set, the other sources on the
     target channel move to the source's old channel (or are unrouted if it
     had none). The strip's input select and the editor's `out` select use
