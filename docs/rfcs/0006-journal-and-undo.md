@@ -76,7 +76,7 @@ decodes to:
 
 The origin is `midi:<port>`, and the user is the host user.
 
-`project.new` and `project.load` start a fresh history.
+`project.new`, `project.load`, and `project.import` start a fresh history.
 
 The journal keeps the last 10k entries in memory (`journal.get`, and a
 `journal` event per entry). A writer thread appends entries to JSONL files

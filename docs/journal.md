@@ -154,6 +154,10 @@ EOF
    `4s render` (audio is not part of the comparison, so render to hear or
    measure it), and the UI pointed at the isolated daemon.
 4. If the bug depends on timing (playing, note lengths), use `--realtime`.
+   Replay restores the controller page before each pad or knob entry, but
+   not the playhead. If the recording was made while playing with the page
+   following the playhead, only `--realtime` comes close to the live page
+   movement.
 
 **Narrowing it down.** Truncate the recording and replay the prefix:
 
@@ -244,5 +248,7 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
   instead.
 - **Several RPCs are several steps.** A UI action that sends several RPCs
   (e.g. a strip's `(none)`) undoes one RPC at a time.
+- **An undo or redo with nothing to do is not journaled.** It changes
+  nothing.
 - **`user` is self-asserted.** Any client that may connect can claim any
   user.
