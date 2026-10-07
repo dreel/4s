@@ -384,6 +384,7 @@ check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project revea
 check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
 check "new is the default graph" "ch 1  Drums        vol 100%  pan C          <- drums" s mixer
 check "a new project starts a fresh history" "undo: (empty)" s history
+check "undoing the only 808's removal gives the Block its target back" "target: drums" bash -c "$BIN/4s instrument rm drums >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s controller"
 check "load restores" "kick        X--- x--- X--- x---" bash -c "$BIN/4s project load e2e >/dev/null && $BIN/4s pattern show kick"
 check "load restores the 303 and its channel" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
 check "load restores notes" "bass: C2 - G1! C3~" s notes bass

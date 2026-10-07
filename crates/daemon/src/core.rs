@@ -1635,6 +1635,10 @@ impl Core {
             } else {
                 let slot = self.slot_used.iter().position(|u| !u).unwrap() as u8;
                 self.add_instrument_unchecked(id, *kind, name, slot);
+                // As `instrument.add`: a drum machine is the Block's target if it has none.
+                if self.controller.target.is_none() && *kind == InstrumentType::Tr808 {
+                    self.controller.target = Some(id.clone());
+                }
                 added.push(id.clone());
             }
             graph = true;
