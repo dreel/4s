@@ -398,6 +398,11 @@ check "...so it replays cleanly after" "replay matched" env FOURS_DATA_DIR="$B_D
 for f in tests/journals/*.json; do
   check "fixture $(basename "$f") replays" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$f"
 done
+FOURS_DATA_DIR=$B_DIR s project new >/dev/null
+FOURS_DATA_DIR=$B_DIR s pattern set kick "x-x-x-x-" >/dev/null
+FOURS_DATA_DIR=$B_DIR s tempo 99 >/dev/null
+check "a journal file's last segment (after project new) replays without its starting request" "replay matched: 2 entries" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$(ls -t "$B_DIR"/journal/*.jsonl | head -1)"
+check "--accept refuses a journal file before touching the daemon" "rewrites a recording" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force --accept "$(ls -t "$B_DIR"/journal/*.jsonl | head -1)"
 check "project import sends a local project inline" "ch 2  Bass" bash -c "FOURS_DATA_DIR='$B_DIR' $BIN/4s project import '$FOURS_DATA_DIR/projects/e2e.4s' >/dev/null && FOURS_DATA_DIR='$B_DIR' $BIN/4s mixer"
 check "export as a script of 4s calls" "4s call project.import" s journal export --format sh
 FOURS_DATA_DIR=$B_DIR s daemon stop >/dev/null

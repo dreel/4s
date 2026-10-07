@@ -14,8 +14,8 @@ use std::path::Path;
 
 /// Recorded methods that are not replayed: they depend on the engine host's
 /// disk or real MIDI ports and never change the undoable state. (A
-/// successful `project.load` starts a new segment, so one inside a segment
-/// is a failed load.)
+/// successful `project.load` starts a new segment and is not part of it, so
+/// one inside a segment is a failed load.)
 pub const NOT_REPLAYED: &[&str] = &["project.save", "project.load", "midi.connect", "midi.disconnect"];
 
 /// The client name of the replay's own connection; its entries (the import,
@@ -43,23 +43,26 @@ pub fn load(file: &Path, segment: Option<usize>) -> Result<Recording> {
     if let Ok(r) = serde_json::from_str::<Recording>(&text) {
         return Ok(r);
     }
-    let mut segments: Vec<Recording> = Vec::new();
+    // (segment start seq, recording). The request that started a segment is
+    // written after its segment line but belongs before it: entries count
+    // only if their seq is greater than the segment's.
+    let mut segments: Vec<(u64, Recording)> = Vec::new();
     for (n, line) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
         let v: Value = serde_json::from_str(line).with_context(|| format!("{}:{}: not JSON", file.display(), n + 1))?;
         if let Some(seg) = v.get("segment") {
             let base = serde_json::from_value(seg["base"].clone())
                 .with_context(|| format!("{}:{}: bad segment base", file.display(), n + 1))?;
-            segments.push(Recording {
-                format_version: RECORDING_FORMAT_VERSION,
-                base,
-                entries: Vec::new(),
-                digest: String::new(),
-            });
+            let seq = seg["seq"].as_u64().unwrap_or(0);
+            segments.push((
+                seq,
+                Recording { format_version: RECORDING_FORMAT_VERSION, base, entries: Vec::new(), digest: String::new() },
+            ));
         } else {
             let entry: JournalEntry =
                 serde_json::from_value(v).with_context(|| format!("{}:{}: not a journal entry", file.display(), n + 1))?;
             match segments.last_mut() {
-                Some(s) => s.entries.push(entry),
+                Some((start, s)) if entry.seq > *start => s.entries.push(entry),
+                Some(_) => {}
                 None => bail!("{}: entries before any segment line", file.display()),
             }
         }
@@ -69,7 +72,7 @@ pub fn load(file: &Path, segment: Option<usize>) -> Result<Recording> {
         bail!("{}: neither a recording nor a journal file with a segment", file.display());
     }
     let i = segment.unwrap_or(count - 1);
-    segments.into_iter().nth(i).ok_or_else(|| anyhow!("{}: segment {i} of {count} (0-based)", file.display()))
+    segments.into_iter().nth(i).map(|(_, r)| r).ok_or_else(|| anyhow!("{}: segment {i} of {count} (0-based)", file.display()))
 }
 
 fn short(changes: &[Change]) -> String {
@@ -82,6 +85,9 @@ fn short(changes: &[Change]) -> String {
 
 pub async fn run(o: Options<'_>) -> Result<()> {
     let rec = load(o.file, o.segment)?;
+    if o.accept && serde_json::from_str::<Recording>(&std::fs::read_to_string(o.file)?).is_err() {
+        bail!("--accept rewrites a recording (.json from `4s journal export`), not a journal file");
+    }
     let mut main = Client::connect(o.url, o.token.clone(), REPLAY, Some(REPLAY.into())).await?;
     let snap: Snapshot = serde_json::from_value(main.call(&Request::StateGet(Empty {})).await?)?;
     if snap.project.dirty && !o.force {
@@ -98,9 +104,6 @@ pub async fn run(o: Options<'_>) -> Result<()> {
         .iter()
         .filter(|e| !NOT_REPLAYED.contains(&e.method.as_str()) && e.origin != REPLAY)
         .collect();
-    if o.accept && serde_json::from_str::<Recording>(&std::fs::read_to_string(o.file)?).is_err() {
-        bail!("--accept rewrites a recording (.json from `4s journal export`), not a journal file");
-    }
     // One connection per recorded (user, origin), so per-user undo and held
     // notes behave as they did.
     let mut conns: HashMap<(String, String), Client> = HashMap::new();
@@ -116,8 +119,11 @@ pub async fn run(o: Options<'_>) -> Result<()> {
         if matches!(e.method.as_str(), "controller.press" | "controller.knob") {
             let c: ControllerState = serde_json::from_value(main.call(&Request::ControllerGet(Empty {})).await?)?;
             if c.page != e.context.page {
+                // Keep `follow` as it is (choosing a page while playing
+                // would otherwise turn it off).
                 main.call(&Request::ControllerSetMode(ControllerModeParams {
                     page: Some(e.context.page),
+                    follow: Some(c.follow),
                     ..Default::default()
                 }))
                 .await?;
