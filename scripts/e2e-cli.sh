@@ -278,6 +278,12 @@ s set mixer.1.pan 0 >/dev/null; s undo >/dev/null; s set mixer.1.pan 0 >/dev/nul
 check "the journal says who did what" 'alice  cli  param.set {"path":"mixer.1.pan","value":0.5} -> param:mixer.1.pan' s journal --for alice
 check "undo is journaled with what it reverts" "history.undo -> param:mixer.1.pan  (reverts #" s journal --for bob
 check "the journal is written on the engine host" "jsonl" ls "$FOURS_DATA_DIR/journal"
+LAST=$(s --json journal --limit 1 | python3 -c "import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])")
+s tempo 121 >/dev/null; s tempo 120 >/dev/null
+check "journal --since shows only newer entries" "2 entries, first param.set" bash -c "$BIN/4s --json journal --since $LAST | python3 -c \"import json,sys;e=json.load(sys.stdin)['entries'];print(len(e),'entries, first',e[0]['method'])\""
+check "journal --limit keeps the newest" '"value":120' s journal --limit 1
+check "journal --follow streams entries" 'param.set {"path":"transport.tempo","value":122.0}' bash -c "$BIN/4s journal --follow > $TMP/follow.txt & P=\$!; sleep 0.5; $BIN/4s tempo 122 >/dev/null; sleep 0.5; kill \$P; cat $TMP/follow.txt"
+s tempo 120 >/dev/null
 mkdir -p "$FOURS_DATA_DIR/projects/bad.4s"
 python3 -c "
 import json

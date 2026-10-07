@@ -64,6 +64,9 @@ doc again. That gives one entry:
 
 There is no per-RPC inverse code: a new RPC is journaled and undoable as soon
 as it changes state. Failed requests are journaled too, with `error`.
+Requests that can never change the doc (transport, notes and triggers,
+controller mode, MIDI connections, project save) are journaled without
+building the doc, which matters for a stream of notes from a keyboard.
 
 MIDI input is recorded as the **equivalent RPC** that the input already
 decodes to:
@@ -89,6 +92,11 @@ belongs to the **daemon host's user**. So in solo use the UI, the CLI, and
 the Livid Block share one history. Connections can't be the identity,
 because the CLI opens a new connection per command.
 
+`user` is self-asserted: any client that may connect (has the token, if
+one is set) can claim any user, and so undo as them. That matches today's
+trust model, where every connected client is a trusted collaborator. Real
+accounts are a later change.
+
 ### Undo and redo
 
 - Each user has an undo stack and a redo stack, capped at 200 steps.
@@ -99,6 +107,8 @@ because the CLI opens a new connection per command.
   - The rule is key-based, not time-based, so replay is deterministic. The
     cost: two separate tweaks of the same knob, with nothing in between by
     that user, are one step.
+  - Another user's edit of the same key in between breaks the run, so your
+    undo never jumps back past their value.
 - **Applying a step** sets each key back to its `before`:
   - It is checked as one batch first: queue room, free slots, instruments
     in flight, and channel limits.

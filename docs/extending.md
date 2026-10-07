@@ -105,9 +105,10 @@ UI's MIDI panel.
    For a grid or knob controller, follow `BlockMap` and `decode_block`
    (`crates/daemon/src/controller.rs`): keep the note/CC map in a JSON file
    in the data dir so users can correct it without a rebuild.
-3. Turn input into existing core actions (`set_step`, `set_param`,
-   `controller_pad`, `controller_knob`) so events fire and all clients sync.
-   Don't add a parallel state path.
+3. Turn input into the equivalent RPC `Request` (`controller.press`,
+   `controller.knob`, `voice.note_on`, ...) and pass it to `Core::handle`,
+   so events fire, all clients sync, and the input is journaled and
+   undoable (RFC 0006). Don't add a parallel state path.
 4. Feedback (LEDs, displays): today's output path is Block-specific
    (`Midi::send_block`, `BlockMap::led_message`, `Midi::block_name`, called
    from `refresh_controller`). A second device kind with feedback needs a
@@ -133,10 +134,14 @@ Validate:
    `crates/protocol/src/api.rs`, with param and result structs. Add any new
    event variants to `Event` in `types.rs`, and new state to `Snapshot` so
    reconnecting clients resync. Regenerate bindings.
-2. **Daemon.** Handle it in `Core::handle` (`crates/daemon/src/core.rs`).
+2. **Daemon.** Handle it in `Core::dispatch` (`crates/daemon/src/core.rs`).
    Mutate state, push a `Command` to the engine if audio is involved, and
    `emit` an event. Validate inputs and return `RpcError::invalid` with a
-   helpful message.
+   helpful message. Classify the method in `read_only` (an exhaustive
+   match): anything that can change state is journaled, and its changes to
+   the doc (`Core::doc`) are undoable with no extra code. If it adds new
+   state, add keys for it to `Core::doc` and `apply_sets`. If it can never
+   change the doc (performance, like notes), list it in `changes_doc`.
 3. **CLI.** Add a subcommand and map it to the request in `plan()`
    (`crates/cli/src/main.rs`). Add the command to `cli_covers_every_method`.
    That test fails until every method has a CLI command. Format the result

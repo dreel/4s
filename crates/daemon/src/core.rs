@@ -1731,9 +1731,9 @@ impl Core {
         // A project load or new replaces everything and starts a fresh history.
         let fresh = matches!(req, Request::ProjectNew(_) | Request::ProjectLoad(_));
         let context = self.journal_context();
-        let before = self.doc();
+        let before = (!fresh && changes_doc(&req)).then(|| self.doc());
         let result = self.dispatch(req, origin, client);
-        let changes = if fresh { Vec::new() } else { journal::diff(&before, &self.doc()) };
+        let changes = before.map(|b| journal::diff(&b, &self.doc())).unwrap_or_default();
         let seq = self.journal.next_seq();
         if fresh && result.is_ok() {
             for u in self.history.clear() {
@@ -1921,6 +1921,24 @@ fn read_only(req: &Request) -> bool {
         | ControllerKnob(_) | ControllerSetMode(_) | MidiConnect(_) | MidiDisconnect(_) | ProjectNew(_)
         | ProjectSave(_) | ProjectLoad(_) => false,
     }
+}
+
+/// Whether a journaled request can change the doc (`Core::doc`). Those that
+/// cannot (performance, transport, connections) skip building it twice,
+/// which matters for a stream of keyboard notes.
+fn changes_doc(req: &Request) -> bool {
+    !matches!(
+        req,
+        Request::TransportPlay(_)
+            | Request::TransportStop(_)
+            | Request::VoiceTrigger(_)
+            | Request::VoiceNoteOn(_)
+            | Request::VoiceNoteOff(_)
+            | Request::ControllerSetMode(_)
+            | Request::MidiConnect(_)
+            | Request::MidiDisconnect(_)
+            | Request::ProjectSave(_)
+    )
 }
 
 fn unix_time() -> f64 {

@@ -34,10 +34,7 @@ function inTextField(): boolean {
 /** Undo/redo shortcuts. In Electron they come from the app menu (Edit >
  * Undo, Redo); in a plain browser, from Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z, and
  * Ctrl+Y. A focused text field keeps its own undo. */
-let undoKeysInstalled = false;
-function installUndoKeys() {
-  if (undoKeysInstalled) return;
-  undoKeysInstalled = true;
+export function installUndoKeys() {
   if (desktop) {
     desktop.onHistory((what) => {
       if (inTextField()) document.execCommand(what);
@@ -90,7 +87,6 @@ function Header() {
 
 export function App() {
   const ready = useApp((s) => s.snapshot !== null);
-  installUndoKeys();
   return (
     <div className="flex flex-col h-full">
       <Header />

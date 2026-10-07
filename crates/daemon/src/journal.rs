@@ -119,8 +119,10 @@ pub struct History {
 
 impl History {
     /// Record an edit. Consecutive edits of the same params merge into one
-    /// step; any other edit starts a new one and clears the user's redo.
+    /// step (unless another user changed one of them in between); any other
+    /// edit starts a new one and clears the user's redo.
     pub fn record(&mut self, user: &str, seq: u64, label: String, changes: &[Change]) {
+        let interleaved = changes.iter().any(|c| self.last_touch.get(&c.key).is_some_and(|u| u != user));
         for c in changes {
             self.last_touch.insert(c.key.clone(), user.to_string());
         }
@@ -128,6 +130,7 @@ impl History {
         st.redo.clear();
         let params_only = changes.iter().all(|c| c.key.starts_with("param:"));
         if params_only
+            && !interleaved
             && let Some(top) = st.undo.last_mut()
             && top.mergeable
             && top.changes.len() == changes.len()
@@ -388,6 +391,18 @@ mod tests {
         set(&mut h, "a", 6, &v(0.7), &v(0.3));
         assert_eq!(h.summary("a").undo_count, 2);
         assert_eq!(h.plan("a", false).unwrap().sets, vec![("param:mixer.1.volume".into(), json!(0.7))]);
+    }
+
+    #[test]
+    fn another_users_edit_in_between_breaks_a_drag() {
+        let mut h = History::default();
+        let v = |x: f64| doc(&[("param:mixer.1.volume", json!(x))]);
+        set(&mut h, "alice", 1, &v(1.0), &v(0.9));
+        set(&mut h, "bob", 2, &v(0.9), &v(0.5));
+        set(&mut h, "alice", 3, &v(0.5), &v(0.4));
+        // Alice's undo returns to bob's value, not past it.
+        assert_eq!(h.plan("alice", false).unwrap().sets, vec![("param:mixer.1.volume".into(), json!(0.5))]);
+        assert_eq!(h.summary("alice").undo_count, 2);
     }
 
     #[test]

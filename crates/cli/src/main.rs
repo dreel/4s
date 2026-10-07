@@ -201,7 +201,7 @@ enum Cmd {
         #[arg(long, default_value_t = 50)]
         limit: u32,
         /// Keep printing new entries as they are recorded.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["since", "for_user"])]
         follow: bool,
     },
     /// Call any RPC method with JSON params.
