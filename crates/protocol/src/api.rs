@@ -166,7 +166,8 @@ pub struct InstrumentAddParams {
     pub id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
-    /// Route the main output to this existing channel instead of a new one.
+    /// Route the main output to this existing channel. By default it goes to
+    /// the first empty channel in display order, or a new one if none is empty.
     #[serde(default)]
     pub channel: Option<u32>,
     /// Leave the main output unrouted (no new channel).
@@ -200,6 +201,13 @@ pub struct ChannelRenameParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ChannelMoveParams {
+    pub n: u32,
+    /// New display position, 1 = leftmost.
+    pub position: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct RouteSetParams {
     /// `drums` (main out) or `drums.kick` (direct out).
     pub source: String,
@@ -207,6 +215,10 @@ pub struct RouteSetParams {
     /// through its instrument's main mix again).
     #[serde(default)]
     pub channel: Option<u32>,
+    /// If the channel already has other sources, move them to this source's
+    /// current channel (or unroute them if it had none).
+    #[serde(default)]
+    pub swap: bool,
 }
 
 // ---- pattern -------------------------------------------------------------
@@ -490,7 +502,7 @@ api! {
     InstrumentTypes = "instrument.types" (Empty) -> InstrumentTypesResult;
     /// Instruments in creation order.
     InstrumentList = "instrument.list" (Empty) -> InstrumentListResult;
-    /// Add an instrument; by default on a new channel.
+    /// Add an instrument; by default on the first empty channel, else a new one.
     InstrumentAdd = "instrument.add" (InstrumentAddParams) -> InstrumentInfo;
     /// Remove an instrument (and channels left empty, unless kept).
     InstrumentRemove = "instrument.remove" (InstrumentRemoveParams) -> Graph;
@@ -500,6 +512,8 @@ api! {
     ChannelRemove = "channel.remove" (ChannelRemoveParams) -> Graph;
     /// Rename a mixer channel.
     ChannelRename = "channel.rename" (ChannelRenameParams) -> ChannelInfo;
+    /// Move a mixer channel to a new display position.
+    ChannelMove = "channel.move" (ChannelMoveParams) -> Graph;
     /// Route an instrument output to a channel, or unroute it.
     RouteSet = "route.set" (RouteSetParams) -> Graph;
 

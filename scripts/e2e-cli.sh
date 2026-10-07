@@ -209,6 +209,16 @@ check "rename a channel" "ch 3 Hits" s channel rename 3 Hits
 check "remove a channel" "ch 2  Bass         <- bass" s channel rm 3
 check "a reused channel number starts at defaults" "mixer.3.mute = 0" bash -c "$BIN/4s channel add >/dev/null && $BIN/4s get mixer.3.mute"
 s channel rm 3 >/dev/null
+s channel add --name Spare >/dev/null
+check "a new instrument takes the first empty channel" "ch 3  Spare        vol 100%  pan C          <- fill" bash -c "$BIN/4s instrument add tb303 --id fill >/dev/null && $BIN/4s mixer"
+check "route --swap trades channels" "ch 2  Bass         <- fill
+ch 3  Spare        <- bass" s route fill 2 --swap
+s route bass 2 --swap >/dev/null
+check "channel move reorders the mixer" "ch 3  Spare        vol 100%  pan C          <- fill
+ch 1  Drums" bash -c "$BIN/4s channel move 3 1 >/dev/null && $BIN/4s mixer"
+check "move position is checked" "position must be 1..=3" s channel move 3 4
+s channel move 3 3 >/dev/null
+s instrument rm fill >/dev/null
 check "unknown source" "no output 'nope'" s route nope 1
 check "instrument list" "bass       tb303  Bass" s instrument list
 check "add onto an existing channel" "ch 2  Bass         vol 100%  pan C          <- bass, bass2" bash -c "$BIN/4s instrument add tb303 --channel 2 >/dev/null && $BIN/4s mixer"

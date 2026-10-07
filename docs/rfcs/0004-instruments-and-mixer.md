@@ -821,3 +821,18 @@ How the implementation settled details the design left open:
   `Core` lock, the pushes then cannot fail, so `Core` and the engine never
   disagree. Note-offs do the same, so a full queue is an error rather than
   a stuck note.
+- Mixer UX follow-up (after the API table above):
+  - `instrument.add` with no `channel` routes `main` to the first channel,
+    in display order, that nothing feeds. It creates a new channel (named
+    after the instrument) only if every channel is in use.
+  - `route.set` takes `swap: bool`. When set, the other sources on the
+    target channel move to the source's old channel (or are unrouted if it
+    had none). The strip's input select and the editor's `out` select use
+    it, so rearranging never silently drops an instrument. CLI:
+    `4s route <source> <n> --swap`.
+  - `channel.move {n, position}` (1 = leftmost) -> Graph reorders the
+    display order (the `channels` list, saved in projects). Channel numbers
+    and parameter paths don't change. CLI: `4s channel move <n> <position>`.
+    UI: `<` / `>` on each strip.
+  - Each editor tab has its own remove button, which asks once
+    ("remove?") before calling `instrument.remove`.

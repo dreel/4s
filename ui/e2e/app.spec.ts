@@ -106,11 +106,52 @@ test("console: add, rename, and remove channels; remove an instrument from the e
   await expect.poll(async () => (await rpc("controller.get", {})).target).toBe("drums2");
   await expect(page.getByTestId("block-target")).toHaveText("drums2");
 
+  // The tab's remove button asks once before removing.
+  await page.getByTestId("remove-drums2").click();
+  await expect(page.getByTestId("remove-drums2")).toHaveAttribute("data-armed", "true");
+  expect((await rpc("instrument.list", {})).instruments.map((i) => i.id)).toEqual(["drums", "drums2"]);
   await page.getByTestId("remove-drums2").click();
   await expect.poll(async () => (await rpc("instrument.list", {})).instruments.map((i) => i.id)).toEqual(["drums"]);
   await expect.poll(async () => (await rpc("controller.get", {})).target).toBe("drums");
   await expect(page.getByTestId("select-drums2")).toHaveCount(0);
   await expect(page.getByTestId("strip-2")).toHaveCount(0);
+});
+
+test("console: new instruments fill empty channels; strip inputs swap; channels reorder", async () => {
+  const { page, rpc } = h;
+  // An empty channel is used before a new one is made.
+  await page.getByTestId("add-channel").click();
+  await expect(page.getByTestId("strip-2")).toBeVisible();
+  await page.getByTestId("add-instrument-type").selectOption("tb303");
+  await page.getByTestId("add-instrument").click();
+  await expect(page.getByTestId("strip-input-2")).toHaveValue("bass");
+  let g = (await rpc("state.get", {})).graph;
+  expect(g.channels.map((c) => c.n)).toEqual([1, 2]);
+  expect(g.routes).toEqual({ drums: 1, bass: 2 });
+
+  // Picking bass as channel 1's input swaps: drums moves to channel 2.
+  await page.getByTestId("strip-input-1").selectOption("bass");
+  await expect.poll(async () => (await rpc("state.get", {})).graph.routes).toEqual({ drums: 2, bass: 1 });
+  await expect(page.getByTestId("strip-input-2")).toHaveValue("drums");
+
+  // The editor's out select does the same from the instrument side.
+  await page.getByTestId("select-bass").click();
+  await expect(page.getByTestId("instrument-out-bass")).toHaveValue("1");
+  await page.getByTestId("instrument-out-bass").selectOption("2");
+  await expect.poll(async () => (await rpc("state.get", {})).graph.routes).toEqual({ drums: 1, bass: 2 });
+
+  // Move buttons reorder the strips (display order only; numbers stay).
+  await expect(page.getByTestId("channel-left-1")).toBeDisabled();
+  await page.getByTestId("channel-right-1").click();
+  await expect.poll(async () => (await rpc("state.get", {})).graph.channels.map((c) => c.n)).toEqual([2, 1]);
+  await expect(page.getByTestId("channel-right-1")).toBeDisabled();
+  await rpc("channel.move", { n: 1, position: 1 });
+  await expect(page.getByTestId("channel-left-1")).toBeDisabled();
+
+  // (none) unroutes the channel's input.
+  await page.getByTestId("strip-input-2").selectOption("");
+  await expect.poll(async () => (await rpc("state.get", {})).graph.routes).toEqual({ drums: 1 });
+  await rpc("instrument.remove", { id: "bass", keep_channels: false });
 });
 
 test("303 note editor edits the daemon's note pattern, and back", async () => {
@@ -148,7 +189,7 @@ test("808 voice output: route a voice to its own channel from the UI and over RP
   await expect.poll(async () => (await rpc("state.get", {})).graph.routes["drums.kick"]).toBe(ch.n);
   await expect(page.getByTestId(`strip-source-${ch.n}`)).toHaveText("drums.kick");
 
-  await rpc("route.set", { source: "drums.kick", channel: null });
+  await rpc("route.set", { source: "drums.kick", channel: null, swap: false });
   await expect(page.getByTestId("out-kick")).toHaveValue("");
 
   await rpc("param.set", { path: "drums.kick.level", value: 0.5 });

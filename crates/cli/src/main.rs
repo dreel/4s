@@ -115,14 +115,20 @@ enum Cmd {
         #[command(subcommand)]
         cmd: InstrumentCmd,
     },
-    /// Add, remove, and rename mixer channels.
+    /// Add, remove, rename, and reorder mixer channels.
     Channel {
         #[command(subcommand)]
         cmd: ChannelCmd,
     },
     /// Route an instrument output to a channel, e.g. `4s route drums.kick 2`,
     /// or unroute it with `none` (a direct out returns to the main mix).
-    Route { source: String, channel: String },
+    Route {
+        source: String,
+        channel: String,
+        /// Move whatever else feeds the channel to this source's old channel.
+        #[arg(long)]
+        swap: bool,
+    },
     /// Show the mixer: channels, their sources, levels, mute/solo.
     Mixer,
     /// Stream events. Ctrl-C to stop.
@@ -234,6 +240,8 @@ enum ChannelCmd {
     Rm { n: u32 },
     /// Rename a channel.
     Rename { n: u32, name: String },
+    /// Move a channel to a display position (1 = leftmost).
+    Move { n: u32, position: u32 },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -514,13 +522,16 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             ChannelCmd::Rename { n, name } => {
                 vec![Request::ChannelRename(ChannelRenameParams { n: *n, name: name.clone() })]
             }
+            ChannelCmd::Move { n, position } => {
+                vec![Request::ChannelMove(ChannelMoveParams { n: *n, position: *position })]
+            }
         },
-        Cmd::Route { source, channel } => {
+        Cmd::Route { source, channel, swap } => {
             let channel = match channel.trim().to_ascii_lowercase().as_str() {
                 "none" | "-" => None,
                 n => Some(n.parse::<u32>().map_err(|_| anyhow!("channel must be a number or `none`"))?),
             };
-            vec![Request::RouteSet(RouteSetParams { source: source.clone(), channel })]
+            vec![Request::RouteSet(RouteSetParams { source: source.clone(), channel, swap: *swap })]
         }
         Cmd::Mixer => vec![Request::StateGet(e)],
         Cmd::Watch { types, .. } => vec![
@@ -885,7 +896,9 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
         Cmd::Instrument { cmd: InstrumentCmd::Add { .. } } => {
             print_instrument(&serde_json::from_value(last)?);
         }
-        Cmd::Instrument { .. } | Cmd::Route { .. } | Cmd::Channel { cmd: ChannelCmd::Rm { .. } } => {
+        Cmd::Instrument { .. }
+        | Cmd::Route { .. }
+        | Cmd::Channel { cmd: ChannelCmd::Rm { .. } | ChannelCmd::Move { .. } } => {
             print_graph(&serde_json::from_value(last)?);
         }
         Cmd::Channel { .. } => {
@@ -1296,7 +1309,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "route drums.closed_hat 2",
+            "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",
             "pattern set kick x---x---", "pattern set sd ----x---", "set mixer.1.pan -0.5", "pattern step kick 1 accent", "pattern toggle sd 5",

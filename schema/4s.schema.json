@@ -899,6 +899,26 @@
         },
         "type": "object"
       },
+      "ChannelMoveParams": {
+        "properties": {
+          "n": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "position": {
+            "description": "New display position, 1 = leftmost.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "n",
+          "position"
+        ],
+        "type": "object"
+      },
       "ChannelRemoveParams": {
         "properties": {
           "n": {
@@ -1022,7 +1042,7 @@
         "properties": {
           "channel": {
             "default": null,
-            "description": "Route the main output to this existing channel instead of a new one.",
+            "description": "Route the main output to this existing channel. By default it goes to\nthe first empty channel in display order, or a new one if none is empty.",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -1508,6 +1528,11 @@
           "source": {
             "description": "`drums` (main out) or `drums.kick` (direct out).",
             "type": "string"
+          },
+          "swap": {
+            "default": false,
+            "description": "If the channel already has other sources, move them to this source's\ncurrent channel (or unroute them if it had none).",
+            "type": "boolean"
           }
         },
         "required": [
@@ -1841,7 +1866,7 @@
         "type": "object"
       },
       {
-        "description": "Add an instrument; by default on a new channel.",
+        "description": "Add an instrument; by default on the first empty channel, else a new one.",
         "properties": {
           "method": {
             "const": "instrument.add",
@@ -1917,6 +1942,23 @@
           },
           "params": {
             "$ref": "#/$defs/ChannelRenameParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Move a mixer channel to a new display position.",
+        "properties": {
+          "method": {
+            "const": "channel.move",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ChannelMoveParams"
           }
         },
         "required": [
