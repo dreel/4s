@@ -121,6 +121,9 @@ accounts are a later change.
     key, or (when removing) anything it owns. The keys it owns are skipped
     with it.
   - A channel that still has other sources is not removed.
+  - Undoing an instrument's removal restores everything in the doc, but not
+    what lives outside it. If the restored instrument was the Block's target
+    or a keyboard's instrument, those stay on the fallback they moved to.
   - Skipped keys are reported (`skipped`). A step whose keys were all
     skipped is dropped from the stack.
 - **The entry it writes:** an undo is journaled as `history.undo` with

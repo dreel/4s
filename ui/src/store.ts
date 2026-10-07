@@ -107,6 +107,23 @@ export function useLive<S>(select: (s: LiveState) => S): S {
 
 let buffered: EventEnvelope[] | null = null;
 
+const UI_EVENTS: EventEnvelope["event"]["type"][] = [
+  "param_changed",
+  "step_changed",
+  "pattern_changed",
+  "notes_changed",
+  "graph",
+  "transport",
+  "playhead",
+  "trigger",
+  "meters",
+  "controller",
+  "midi",
+  "project",
+  "history",
+  "reset",
+];
+
 async function resync() {
   // Subscribe first and buffer, then fetch the snapshot, then replay any
   // buffered events newer than it. Nothing is missed or applied twice.
@@ -134,7 +151,9 @@ client.onConnect = async () => {
   // No user: the daemon's host user, so this app and a local CLI share one history.
   await client.call("session.hello", { client_name: "ui", protocol_version: PROTOCOL_VERSION, token: null, user: null });
   buffered = [];
-  await client.call("events.subscribe", { types: null });
+  // Everything the UI applies; not `journal` or `midi_in`, which can be
+  // dense under MIDI input.
+  await client.call("events.subscribe", { types: UI_EVENTS });
   await resync();
 };
 client.onState((connection) => app.set({ connection }));

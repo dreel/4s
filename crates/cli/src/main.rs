@@ -852,13 +852,8 @@ fn print_event(e: &EventEnvelope, json: bool) {
 /// `seq  time  user  origin  method params -> changed keys`, plus what an
 /// undo reverts and any error.
 fn journal_line(e: &JournalEntry) -> String {
-    let secs = e.time.rem_euclid(86_400.0);
-    let time = format!(
-        "{:02}:{:02}:{:06.3}Z",
-        (secs / 3600.0) as u32,
-        (secs / 60.0) as u32 % 60,
-        secs % 60.0
-    );
+    let ms = (e.time * 1000.0).round() as u64 % 86_400_000;
+    let time = format!("{:02}:{:02}:{:02}.{:03}Z", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
     let params = match &e.params {
         Value::Object(m) if m.is_empty() => String::new(),
         Value::Null => String::new(),

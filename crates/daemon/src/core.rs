@@ -985,9 +985,11 @@ impl Core {
         let d = &msg.data;
         let req = match msg.kind {
             DeviceKind::LividBlock => match decode_block(&self.block_map, d) {
-                Some(BlockInput::Pad { row, col, pressed }) => {
-                    Some(Request::ControllerPress(PadParams { row: row as u32, col: col as u32, pressed: Some(pressed) }))
+                // A release does nothing (pads toggle on press).
+                Some(BlockInput::Pad { row, col, pressed: true }) => {
+                    Some(Request::ControllerPress(PadParams { row: row as u32, col: col as u32, pressed: Some(true) }))
                 }
+                Some(BlockInput::Pad { pressed: false, .. }) => None,
                 Some(BlockInput::Knob { index, value }) => {
                     Some(Request::ControllerKnob(KnobParams { index: index as u32, value }))
                 }
