@@ -38,6 +38,38 @@ test("UI step click edits the daemon pattern", async () => {
   expect(snare[4]).toBe(2);
 });
 
+test("undo and redo: header buttons, the Edit menu, and edits from other local clients", async () => {
+  const { page, rpc, app } = h;
+  const kick0 = page.getByTestId("step-kick-0");
+  await expect(page.getByTestId("undo")).toBeDisabled();
+  await expect(page.getByTestId("redo")).toBeDisabled();
+
+  await kick0.click();
+  await expect(kick0).toHaveAttribute("data-level", "1");
+  await page.getByTestId("undo").click();
+  await expect
+    .poll(async () => (await rpc("pattern.get", { instrument: null, voice: "kick" })).tracks[0].steps[0])
+    .toBe(0);
+  await expect(kick0).toHaveAttribute("data-level", "0");
+  await page.getByTestId("redo").click();
+  await expect(kick0).toHaveAttribute("data-level", "1");
+
+  // Edit > Undo / Redo in the app menu (Cmd/Ctrl+Z, Shift+Cmd+Z / Ctrl+Y).
+  const menu = (id: string) => app.evaluate(({ Menu }, id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.click(), id);
+  await menu("undo");
+  await expect(kick0).toHaveAttribute("data-level", "0");
+  await menu("redo");
+  await expect(kick0).toHaveAttribute("data-level", "1");
+
+  // A client that names no user (the CLI, a script) shares the host user's
+  // history, so its change is undoable here.
+  await rpc("param.set", { path: "mixer.1.volume", value: 0.5 });
+  await expect(page.getByTestId("undo")).toHaveAttribute("title", "undo param.set mixer.1.volume");
+  await page.getByTestId("undo").click();
+  await expect.poll(async () => (await rpc("param.get", { path: "mixer.1.volume" })).value).toBe(1);
+  await expect(page.getByTestId("history")).toHaveAttribute("data-redo", "1");
+});
+
 test("daemon-side changes show up in the UI", async () => {
   const { page, rpc } = h;
   await rpc("param.set", { path: "mixer.1.volume", value: 0.35 });

@@ -95,5 +95,11 @@ clients use `external` mode and never start or stop it. See
   their origin so UIs can show who changed what.
 - Conflicts: the engine applies commands in arrival order (last write wins).
   Ownership (e.g. a collaborator claims a track) is deferred until needed.
+- Undo is per user and selective ([RFC 0006](rfcs/0006-journal-and-undo.md)):
+  each user (`user` in `session.hello`; default the engine host's user)
+  undoes only their own changes, and keys someone else changed since are
+  kept and reported as skipped.
+- The engine journals every request that could change state (who, when, the
+  request, and what it changed), in memory and under `<data_dir>/journal/`.
 - Remote listening (collaborators not in the same room as the engine's audio
   out) requires audio streaming. Deferred.

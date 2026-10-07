@@ -6,6 +6,7 @@ import { client } from "./store";
 type DesktopBridge = {
   platform: string;
   revealPath: (path: string) => Promise<{ ok: boolean; error: string | null }>;
+  onHistory: (cb: (what: "undo" | "redo") => void) => void;
 };
 
 declare global {

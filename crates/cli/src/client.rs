@@ -16,7 +16,9 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn connect(url: &str, token: Option<String>, name: &str) -> Result<Client> {
+    /// Connect and say hello. `user` owns this connection's undo history
+    /// (None: the daemon host's user).
+    pub async fn connect(url: &str, token: Option<String>, name: &str, user: Option<String>) -> Result<Client> {
         let (ws, _) = tokio_tungstenite::connect_async(url)
             .await
             .with_context(|| format!("could not connect to 4sd at {url} (is it running?)"))?;
@@ -25,6 +27,7 @@ impl Client {
             client_name: name.into(),
             protocol_version: PROTOCOL_VERSION,
             token,
+            user,
         }))
         .await?;
         Ok(c)

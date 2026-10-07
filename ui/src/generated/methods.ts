@@ -12,11 +12,15 @@ import type { Empty } from "./Empty";
 import type { Graph } from "./Graph";
 import type { HelloParams } from "./HelloParams";
 import type { HelloResult } from "./HelloResult";
+import type { HistoryInfo } from "./HistoryInfo";
+import type { HistoryStepResult } from "./HistoryStepResult";
 import type { InstrumentAddParams } from "./InstrumentAddParams";
 import type { InstrumentInfo } from "./InstrumentInfo";
 import type { InstrumentListResult } from "./InstrumentListResult";
 import type { InstrumentRemoveParams } from "./InstrumentRemoveParams";
 import type { InstrumentTypesResult } from "./InstrumentTypesResult";
+import type { JournalGetParams } from "./JournalGetParams";
+import type { JournalGetResult } from "./JournalGetResult";
 import type { KnobParams } from "./KnobParams";
 import type { MidiConnectParams } from "./MidiConnectParams";
 import type { MidiDisconnectParams } from "./MidiDisconnectParams";
@@ -72,6 +76,10 @@ export interface Methods {
   "channel.rename": { params: ChannelRenameParams; result: ChannelInfo };
   "channel.move": { params: ChannelMoveParams; result: Graph };
   "route.set": { params: RouteSetParams; result: Graph };
+  "history.undo": { params: Empty; result: HistoryStepResult };
+  "history.redo": { params: Empty; result: HistoryStepResult };
+  "history.get": { params: Empty; result: HistoryInfo };
+  "journal.get": { params: JournalGetParams; result: JournalGetResult };
   "pattern.get": { params: PatternGetParams; result: PatternResult };
   "pattern.set": { params: PatternSetParams; result: TrackPattern };
   "pattern.set_step": { params: SetStepParams; result: StepResult };
@@ -121,6 +129,10 @@ export const METHODS: MethodName[] = [
   "channel.rename",
   "channel.move",
   "route.set",
+  "history.undo",
+  "history.redo",
+  "history.get",
+  "journal.get",
   "pattern.get",
   "pattern.set",
   "pattern.set_step",

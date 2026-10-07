@@ -7,6 +7,7 @@
 mod audio;
 mod controller;
 mod core;
+mod journal;
 mod midi;
 mod runtime;
 mod server;
@@ -49,6 +50,9 @@ struct Args {
     /// a crashed app never leaves an orphaned daemon behind).
     #[arg(long)]
     parent_pid: Option<u32>,
+    /// Keep the journal in memory only (no files under <data-dir>/journal).
+    #[arg(long)]
+    no_journal_file: bool,
 }
 
 fn init_logging(log_file: Option<&PathBuf>) -> Result<()> {
@@ -138,7 +142,21 @@ fn run(args: Args) -> Result<()> {
     // Must precede any other MIDI use so hotplugged devices are seen.
     midi::start_device_watcher();
     let (midi_tx, midi_rx) = std::sync::mpsc::channel();
-    let core = Arc::new(Mutex::new(core::Core::new(commands, midi_tx, data_dir.clone(), audio_status)));
+    // Clients that do not name a user share the host user's undo history.
+    let host_user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| "local".into());
+    let journal_dir = (!args.no_journal_file).then(|| data_dir.join("journal"));
+    let core = Arc::new(Mutex::new(core::Core::new(
+        commands,
+        midi_tx,
+        data_dir.clone(),
+        audio_status,
+        journal_dir,
+        host_user,
+    )));
     tracing::info!("data dir: {}", data_dir.display());
 
     if let Some(p) = &args.project {

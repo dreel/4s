@@ -41,6 +41,8 @@ pub async fn serve(core: Shared, listener: TcpListener, token: Option<String>, i
 struct Conn {
     id: u64,
     name: String,
+    /// Owner of this connection's undo history (None: the host user).
+    user: Option<String>,
     authed: bool,
     subscription: Option<JoinHandle<()>>,
 }
@@ -63,7 +65,7 @@ async fn handle_connection(core: Shared, daemon: Arc<Daemon>, stream: TcpStream,
         }
     });
 
-    let mut conn = Conn { id, name: format!("client-{id}"), authed: token.is_none(), subscription: None };
+    let mut conn = Conn { id, name: format!("client-{id}"), user: None, authed: token.is_none(), subscription: None };
     while let Some(msg) = source.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -154,7 +156,7 @@ async fn handle_text(
             let mut c = core.lock().unwrap();
             // Holder key: the connection id alone, which a renaming
             // `session.hello` cannot change.
-            c.handle(other, &conn.name, &format!("conn:{}", conn.id))
+            c.handle(other, &conn.name, &format!("conn:{}", conn.id), conn.user.as_deref())
         }
     };
     (reply(result), shutdown)
@@ -176,6 +178,7 @@ fn hello(conn: &mut Conn, token: Option<&str>, p: HelloParams) -> Result<Value, 
     if !p.client_name.trim().is_empty() {
         conn.name = p.client_name.trim().to_string();
     }
+    conn.user = p.user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
     Ok(serde_json::to_value(HelloResult {
         protocol_version: PROTOCOL_VERSION,
         server_version: env!("CARGO_PKG_VERSION").into(),
