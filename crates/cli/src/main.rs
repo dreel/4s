@@ -125,7 +125,8 @@ enum Cmd {
     Route {
         source: String,
         channel: String,
-        /// Move whatever else feeds the channel to this source's old channel.
+        /// Move whatever else feeds the channel to this source's old channel
+        /// (if it had none, they stay and share the channel).
         #[arg(long)]
         swap: bool,
     },

@@ -214,6 +214,9 @@ check "a new instrument takes the first empty channel" "ch 3  Spare        vol 1
 check "route --swap trades channels" "ch 2  Bass         <- fill
 ch 3  Spare        <- bass" s route fill 2 --swap
 s route bass 2 --swap >/dev/null
+s instrument add tb303 --id loose --no-channel >/dev/null
+check "swapping in an unrouted source keeps the channel's input" "ch 2  Bass         <- bass, loose" s route loose 2 --swap
+s instrument rm loose >/dev/null
 check "channel move reorders the mixer" "ch 3  Spare        vol 100%  pan C          <- fill
 ch 1  Drums" bash -c "$BIN/4s channel move 3 1 >/dev/null && $BIN/4s mixer"
 check "move position is checked" "position must be 1..=3" s channel move 3 4

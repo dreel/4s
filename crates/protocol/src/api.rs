@@ -216,7 +216,7 @@ pub struct RouteSetParams {
     #[serde(default)]
     pub channel: Option<u32>,
     /// If the channel already has other sources, move them to this source's
-    /// current channel (or unroute them if it had none).
+    /// current channel (if it had none, they stay and share the channel).
     #[serde(default)]
     pub swap: bool,
 }

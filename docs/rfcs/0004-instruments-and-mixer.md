@@ -829,8 +829,8 @@ How the implementation settled details the design left open:
     instrument's channel: `instrument.remove` removes it once it is empty
     again, unless `keep_channels` is set.
   - `route.set` takes `swap: bool`. When set, the other sources on the
-    target channel move to the source's old channel (or are unrouted if it
-    had none). The strip's input select and the editor's `out` select use
+    target channel move to the source's old channel. If it had none, they
+    stay and share the channel. The strip's input select and the editor's `out` select use
     it, so rearranging never silently drops an instrument. CLI:
     `4s route <source> <n> --swap`.
   - `channel.move {n, position}` (1 = leftmost) -> Graph reorders the

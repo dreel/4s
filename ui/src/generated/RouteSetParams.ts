@@ -12,6 +12,6 @@ source: string,
 channel: number | null, 
 /**
  * If the channel already has other sources, move them to this source's
- * current channel (or unroute them if it had none).
+ * current channel (if it had none, they stay and share the channel).
  */
 swap: boolean, };

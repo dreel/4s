@@ -525,9 +525,11 @@ impl Core {
             self.check_channel(n)?;
         }
         // With `swap`, whatever else feeds the target channel takes this
-        // source's old place.
+        // source's old place. If it had none, they stay and share the channel,
+        // so nothing goes silent.
+        let old = self.routes.get(&p.source).copied();
         let displaced: Vec<(String, usize)> = match p.channel {
-            Some(n) if p.swap => self
+            Some(n) if p.swap && old.is_some() => self
                 .routes
                 .iter()
                 .filter(|(s, c)| **c == n && **s != p.source)
@@ -535,7 +537,6 @@ impl Core {
                 .collect(),
             _ => Vec::new(),
         };
-        let old = self.routes.get(&p.source).copied();
         self.ensure_room(2 * (1 + displaced.len()))?;
         for (did, doutput) in &displaced {
             self.set_route_unchecked(did, *doutput, old);
