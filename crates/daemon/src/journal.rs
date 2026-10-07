@@ -123,9 +123,7 @@ impl History {
     /// edit starts a new one and clears the user's redo.
     pub fn record(&mut self, user: &str, seq: u64, label: String, changes: &[Change]) {
         let interleaved = changes.iter().any(|c| self.last_touch.get(&c.key).is_some_and(|u| u != user));
-        for c in changes {
-            self.last_touch.insert(c.key.clone(), user.to_string());
-        }
+        self.touch(user, changes);
         let st = self.users.entry(user.to_string()).or_default();
         st.redo.clear();
         let params_only = changes.iter().all(|c| c.key.starts_with("param:"));
@@ -183,9 +181,7 @@ impl History {
     /// changes actually made, so redoing restores exactly what undo
     /// replaced. A step that changed nothing is dropped.
     pub fn finish(&mut self, user: &str, redo: bool, seq: u64, changes: Vec<Change>) {
-        for c in &changes {
-            self.last_touch.insert(c.key.clone(), user.to_string());
-        }
+        self.touch(user, &changes);
         let st = self.users.entry(user.to_string()).or_default();
         let Some(step) = (if redo { st.redo.pop() } else { st.undo.pop() }) else { return };
         if let Some(top) = st.undo.last_mut() {
@@ -196,6 +192,24 @@ impl History {
         }
         let next = Step { seq, label: step.label, changes, mergeable: false };
         if redo { st.undo.push(next) } else { st.redo.push(next) }
+    }
+
+    /// Note `user` as the last writer of each changed key. A removed
+    /// instrument's keys are forgotten, so whoever edited the old one does
+    /// not block undoing a new instrument with the same id.
+    fn touch(&mut self, user: &str, changes: &[Change]) {
+        let removed: Vec<&str> = changes
+            .iter()
+            .filter(|c| c.after.is_null())
+            .filter_map(|c| c.key.strip_prefix("instrument:"))
+            .collect();
+        self.last_touch.retain(|k, _| !owner(k).is_some_and(|id| removed.contains(&id)));
+        for c in changes {
+            let gone_with_it = !c.key.starts_with("instrument:") && owner(&c.key).is_some_and(|id| removed.contains(&id));
+            if !gone_with_it {
+                self.last_touch.insert(c.key.clone(), user.to_string());
+            }
+        }
     }
 
     /// Forget all history (a project was loaded or started). Returns the
@@ -403,6 +417,25 @@ mod tests {
         // Alice's undo returns to bob's value, not past it.
         assert_eq!(h.plan("alice", false).unwrap().sets, vec![("param:mixer.1.volume".into(), json!(0.5))]);
         assert_eq!(h.summary("alice").undo_count, 2);
+    }
+
+    #[test]
+    fn a_removed_instruments_old_edits_do_not_block_a_new_one() {
+        let mut h = History::default();
+        let bass = |cutoff: Option<f64>| {
+            let mut d = doc(&[("instrument:bass", json!({"type": "tb303", "name": "Bass"}))]);
+            if let Some(c) = cutoff {
+                d.insert("param:bass.cutoff".into(), json!(c));
+            }
+            d
+        };
+        set(&mut h, "bob", 1, &Doc::new(), &bass(None));
+        set(&mut h, "bob", 2, &bass(None), &bass(Some(0.2)));
+        set(&mut h, "bob", 3, &bass(Some(0.2)), &Doc::new());
+        set(&mut h, "alice", 4, &Doc::new(), &bass(None));
+        let p = h.plan("alice", false).unwrap();
+        assert!(p.skipped.is_empty());
+        assert_eq!(p.sets, vec![("instrument:bass".to_string(), Value::Null)]);
     }
 
     #[test]

@@ -1481,25 +1481,39 @@ impl Core {
         let context = self.journal_context();
         let before = self.doc();
         let mut skipped = plan.skipped;
-        skipped.extend(self.apply_sets(&plan.sets, origin)?);
+        let applied = self.apply_sets(&plan.sets, origin);
         let changes = journal::diff(&before, &self.doc());
-        let changed = changes.iter().map(|c| c.key.clone()).collect();
-        let seq = self.journal.next_seq();
-        self.history.finish(user, redo, seq, changes.clone());
-        self.emit_history(user, origin);
-        let entry = JournalEntry {
+        let method = if redo { "history.redo" } else { "history.undo" };
+        let entry = |seq: u64, changes: Vec<Change>, error: Option<String>| JournalEntry {
             seq,
             time: unix_time(),
             user: user.to_string(),
             origin: origin.to_string(),
-            method: if redo { "history.redo" } else { "history.undo" }.to_string(),
+            method: method.to_string(),
             params: json!({}),
-            context,
+            context: context.clone(),
             changes,
             reverts: Some(plan.seq),
-            error: None,
+            error,
         };
-        self.journal_push(entry, origin);
+        let more = match applied {
+            Ok(more) => more,
+            Err(e) => {
+                // A limit was hit before anything changed: journal the failure
+                // and leave the stacks as they were.
+                let seq = self.journal.next_seq();
+                let failed = entry(seq, changes, Some(e.message.clone()));
+                self.journal_push(failed, origin);
+                return Err(e);
+            }
+        };
+        skipped.extend(more);
+        let changed = changes.iter().map(|c| c.key.clone()).collect();
+        let seq = self.journal.next_seq();
+        self.history.finish(user, redo, seq, changes.clone());
+        self.emit_history(user, origin);
+        let done = entry(seq, changes, None);
+        self.journal_push(done, origin);
         Ok(HistoryStepResult { label: Some(plan.label), changed, skipped, history: self.history.info(user) })
     }
 
@@ -1507,8 +1521,9 @@ impl Core {
     /// params and steps), in an order that keeps the graph valid: channels
     /// and instruments are created first, then order, routes, params, and
     /// steps are restored, then instruments and channels are removed. Every
-    /// limit is checked before anything changes. Returns keys that could not
-    /// be set (a channel that still has other sources is not removed).
+    /// limit is checked before anything changes, so an error means nothing
+    /// changed. Returns keys that could not be set (e.g. a channel that still
+    /// has other sources is not removed).
     fn apply_sets(&mut self, sets: &[(String, Value)], origin: &str) -> Result<Vec<String>, RpcError> {
         let mut channels: Vec<(u32, Option<String>)> = Vec::new();
         let mut instruments: Vec<(String, Option<(InstrumentType, String)>)> = Vec::new();
@@ -1655,7 +1670,9 @@ impl Core {
             match self.index.get(&path) {
                 Some(&i) => {
                     let value = v.unwrap_or(self.params[i].info.default);
-                    self.set_param(&path, value, origin)?;
+                    if self.set_param(&path, value, origin).is_err() {
+                        skipped.push(format!("param:{path}"));
+                    }
                 }
                 None => skipped.push(format!("param:{path}")),
             }
@@ -1669,7 +1686,9 @@ impl Core {
             for (i, level) in steps {
                 full[i] = level;
             }
-            self.set_track(&id, voice, &full, origin)?;
+            if self.set_track(&id, voice, &full, origin).is_err() {
+                skipped.push(format!("step:{id}.{}", voice.id()));
+            }
         }
         for (id, steps) in notes {
             let Some(PatternState::Notes(current)) = self.patterns.get(&id) else {
@@ -1680,7 +1699,9 @@ impl Core {
             for (i, step) in steps {
                 full[i] = step;
             }
-            self.set_notes(&id, &full, origin)?;
+            if self.set_notes(&id, &full, origin).is_err() {
+                skipped.push(format!("note:{id}"));
+            }
         }
         for id in &removing {
             if let Some(pos) = self.instruments.iter().position(|i| &i.id == id) {

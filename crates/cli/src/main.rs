@@ -189,7 +189,7 @@ enum Cmd {
     /// Your undo and redo stacks.
     History,
     /// The journal: every request that could change state, who sent it, and
-    /// what it changed.
+    /// what it changed. Times are UTC.
     Journal {
         /// Only entries after this seq.
         #[arg(long)]
@@ -854,7 +854,7 @@ fn print_event(e: &EventEnvelope, json: bool) {
 fn journal_line(e: &JournalEntry) -> String {
     let secs = e.time.rem_euclid(86_400.0);
     let time = format!(
-        "{:02}:{:02}:{:06.3}",
+        "{:02}:{:02}:{:06.3}Z",
         (secs / 3600.0) as u32,
         (secs / 60.0) as u32 % 60,
         secs % 60.0
