@@ -268,12 +268,12 @@ New methods, each with a CLI command (`cli_covers_every_method`) and UI:
 |--------|--------|-------|
 | `instrument.types` | - | available types, their outputs and params |
 | `instrument.list` | - | instances: id, type, name, outputs |
-| `instrument.add` | `{type, id?, name?, channel?}` | `channel`: omitted = create a new channel named after the instrument and route `main` to it; a number = route `main` to that existing channel; `null` = leave `main` unrouted, as in `route.set` (CLI: `--channel N`, `--no-channel`) |
+| `instrument.add` | `{type, id?, name?, channel?}` | `channel`: omitted = create a new channel named after the instrument and route `main` to it (later: the first empty channel, else a new one; see implementation notes); a number = route `main` to that existing channel; `null` = leave `main` unrouted, as in `route.set` (CLI: `--channel N`, `--no-channel`) |
 | `instrument.remove` | `{id, keep_channels?}` | unroutes all its sources, and removes the channels they fed that are left with no source, unless `keep_channels` (CLI: `--keep-channels`). Channels that were already empty are untouched. |
 | `channel.add` | `{name?}` | returns the new `n` |
 | `channel.remove` | `{n}` | unroutes sources that fed it |
 | `channel.rename` | `{n, name}` | |
-| `route.set` | `{source, channel: n \| null}` | null = unroute (back into the main mix for direct outs) |
+| `route.set` | `{source, channel: n \| null}` | null = unroute (back into the main mix for direct outs). Later: `swap?` and `channel.move`; see the mixer UX implementation note |
 | `pattern.get_notes` / `pattern.set_notes` | `{instrument, notes}` | note patterns, string or structured (superseded: see the amendment's note-pattern API) |
 
 Changed:

@@ -205,7 +205,7 @@ enum InstrumentCmd {
     Types,
     /// Instruments in the project.
     List,
-    /// Add an instrument, by default on a new channel.
+    /// Add an instrument, by default on the first empty channel, else a new one.
     Add {
         /// tr808 or tb303.
         kind: String,
