@@ -34,7 +34,7 @@ pub async fn serve(core: Shared, listener: TcpListener, token: Option<String>, i
         };
         let id = ids.fetch_add(1, Ordering::Relaxed);
         tracing::debug!("connection {id} from {addr}");
-        let local = addr.ip().is_loopback();
+        let local = addr.ip().to_canonical().is_loopback();
         tokio::spawn(handle_connection(core.clone(), daemon.clone(), stream, id, local, token.clone()));
     }
 }

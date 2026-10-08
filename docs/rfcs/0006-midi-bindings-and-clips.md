@@ -94,7 +94,7 @@ Three layers, split by what each describes:
 
 An unknown port gets a name derived from its port name (lowercased,
 `[a-z0-9_]`, e.g. `arturia_keystep_37`) and is written back so the user can
-rename it (`4s midi name <port> keys`). A port containing "block" gets the
+rename it (`4s midi rename <port> keys`). A port containing "block" gets the
 `livid_block` profile, as autoconnect does today. `livid-block.json` (the
 note/LED map) stays as the profile's hardware map.
 
@@ -193,7 +193,7 @@ parameters each (paths relative to the instance):
 - `tr808`: `volume`, `tune`, `decay`, `tone`, each one parameter per
   voice (today's `KnobMode` values).
 - `tb303`: `main` (cutoff, resonance, env mod, decay, accent, tune,
-  volume, glide).
+  waveform).
 
 A device (or a range of its CCs) can be set to **follow focus**: its
 knobs control the current page of the seat's focused instrument, so
@@ -407,6 +407,12 @@ differ from the sections above, these win):
 - **Pickup** applies to MIDI knobs (CC maps, following knobs, the Block's
   knobs). `controller.knob` (virtual knobs, scripts) sets the value
   directly.
+- **Reserved id**: `focus` is now a reserved instrument id (it names the
+  seat's focus in bindings). A project with an instrument called `focus`
+  fails to load with "instrument id 'focus' is reserved"; rename it in the
+  file. No migration, as no project is known to use it.
+- **Device names**: connecting a port with a name that a now-absent port
+  had moves the name to the new port (a replacement keyboard keeps `keys`).
 - **Not built yet**: the bridge itself, so the remote input delay exists
   only as the design above.
 

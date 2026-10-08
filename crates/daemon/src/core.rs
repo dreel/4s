@@ -965,6 +965,15 @@ impl Core {
         if self.midi.is_connected(&port) {
             return Err(RpcError::failed(format!("'{port}' is already connected")));
         }
+        // A name held by a port that is not here any more moves to this one
+        // (a replacement keyboard keeps `keys`).
+        if let Some(n) = &p.name
+            && let Some(old) = self.hardware.port_named(n)
+            && old != port
+            && !list_ports().0.contains(&old)
+        {
+            self.hardware.forget(&old);
+        }
         let (name, profile) =
             self.hardware.resolve(&port, p.name.as_deref(), p.profile).map_err(RpcError::invalid)?;
         if self.midi.by_device(&name).is_some() {
@@ -1318,9 +1327,13 @@ impl Core {
         for (name, config) in &file.seats {
             self.seats.insert(name.clone(), SeatState { config: config.clone(), saved: true, learning: None });
         }
+        // Settle the host seat for this project first: re-seating looks at it.
+        self.refresh_host_seat();
         self.reseat_clients();
         self.refresh_host_seat();
         self.emit(origin, Event::Reset);
+        let state = self.seats_state();
+        self.emit(origin, Event::Seats { state });
         self.refresh_controller(origin, true);
         Ok(warnings)
     }

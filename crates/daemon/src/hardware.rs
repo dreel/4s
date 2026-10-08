@@ -47,6 +47,13 @@ impl Hardware {
             }),
             Err(_) => File::default(),
         };
+        let mut file = file;
+        if let Some(s) = &file.seat
+            && let Err(e) = validate_name("seat", s)
+        {
+            tracing::warn!("{}: ignoring the pinned seat: {e}", path.display());
+            file.seat = None;
+        }
         Hardware { path: path.to_path_buf(), file }
     }
 
@@ -151,6 +158,13 @@ impl Hardware {
         e.name = name.to_string();
         self.save();
         Ok(())
+    }
+
+    /// Drop a port's entry.
+    pub fn forget(&mut self, port: &str) {
+        if self.file.devices.remove(port).is_some() {
+            self.save();
+        }
     }
 
     /// The port with this logical name, if any.

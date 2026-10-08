@@ -68,7 +68,9 @@ pool limits of 16 instruments and 32 channels) before anything changes.
   users: loading a v1 file fails with a clear error. From version 2 on,
   format changes come with migrations.
 - v2 -> v3 (RFC 0006) drops the controller's `target` and `knob_mode` (now
-  each seat's focus and knob page) and adds `seats`.
+  each seat's focus and knob page) and adds `seats`. `focus` became a
+  reserved instrument id; a project with an instrument called `focus` must
+  be renamed by hand.
 - Parameters are stored by path, so added params take their defaults from the
   parameter registry. Unknown paths are warned about (whether they are kept or
   dropped is decided when building).

@@ -119,6 +119,8 @@ async function resync() {
   const pending = buffered;
   buffered = null;
   app.set({ registry: registry.params, snapshot });
+  // No seat after a (re)connect or a project load: ask.
+  if (!mySeat(app.state)) app.set({ choosingSeat: true });
   live.set({ channels: {} });
   for (const e of pending) if (e.seq > snapshot.seq) apply(e);
 }

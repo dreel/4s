@@ -3,7 +3,8 @@
 
 import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startHarness, type Harness } from "./harness";
@@ -235,6 +236,25 @@ test("seats: joined automatically, chooser to ignore, rejoin, and re-ask when th
   await page.getByTestId("seat-create").click();
   await expect(page.getByTestId("seat")).toHaveAttribute("data-seat", "solo");
   await expect.poll(async () => (await rpc("seat.list", {})).host).toBe("solo");
+
+  // A project whose only seat is someone else's: the app asks, and can join it.
+  const bundle = path.join(mkdtempSync(path.join(tmpdir(), "4s-seats-")), "theirs.4s");
+  mkdirSync(bundle);
+  const theirs = {
+    format_version: 3,
+    instruments: [{ id: "drums", type: "tr808", name: "Drums" }],
+    channels: [{ n: 1, name: "Drums" }],
+    routes: { drums: 1 },
+    params: {},
+    patterns: {},
+    controller: { follow: true },
+    seats: { pwother: { focus: "drums", bindings: [{ device: "pads", target: "drums" }] } },
+  };
+  writeFileSync(path.join(bundle, "project.json"), JSON.stringify(theirs));
+  await rpc("project.load", { path: bundle });
+  await expect(page.getByTestId("seat-chooser")).toBeVisible();
+  await page.getByTestId("seat-join-pwother").click();
+  await expect(page.getByTestId("seat")).toHaveAttribute("data-seat", "pwother");
 });
 
 test("transport: play from UI, playhead moves, stop", async () => {
