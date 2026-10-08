@@ -823,7 +823,7 @@ impl Core {
             None => self.default_instrument(holder)?,
         };
         let slot = self.slot(&id)?;
-        self.hold_note(holder, note, slot, note, velocity)
+        self.hold_note(holder, seats::input_key(0, note), slot, note, velocity)
     }
 
     /// Release a held note, if `holder` is holding it (on `id` only, if
@@ -833,9 +833,9 @@ impl Core {
     fn note_off(&mut self, id: Option<&str>, note: u8, holder: &str) -> Result<(), RpcError> {
         let slot = id.map(|id| self.slot(id)).transpose()?;
         // Never record a release the engine did not get.
-        let releases = self.held.iter().filter(|h| h.holder == holder && h.key == note).count();
+        let releases = self.held.iter().filter(|h| h.holder == holder && h.key == seats::input_key(0, note)).count();
         self.ensure_room(releases.max(1))?;
-        self.release_note(holder, note, slot);
+        self.release_note(holder, seats::input_key(0, note), slot);
         Ok(())
     }
 
@@ -989,11 +989,17 @@ impl Core {
         let old = self.midi.connection(&port).map(|c| c.device.clone());
         self.hardware.rename(&port, &p.name).map_err(RpcError::invalid)?;
         self.midi.rename(&port, &p.name);
-        // Notes the device holds keep sounding under its new name.
+        // Notes the device holds keep sounding under its new name, whether
+        // it plays here or through `midi.input`.
         if let Some(old) = old {
             let (from, to) = (format!("midi:{old}"), format!("midi:{}", p.name));
-            for h in self.held.iter_mut().filter(|h| h.holder == from) {
-                h.holder = to.clone();
+            let (suffix, new_suffix) = (format!(":{old}"), format!(":{}", p.name));
+            for h in self.held.iter_mut() {
+                if h.holder == from {
+                    h.holder = to.clone();
+                } else if h.holder.starts_with("input:") && h.holder.ends_with(&suffix) {
+                    h.holder = format!("{}{new_suffix}", &h.holder[..h.holder.len() - suffix.len()]);
+                }
             }
         }
         self.midi_changed(origin);

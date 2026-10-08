@@ -252,6 +252,19 @@ echo "raw 99 25 64" >&6; echo "raw 89 25 00" >&6   # the DAW Port's copy of it
 wait $WATCH; sleep 0.3
 check "keys play the focus" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
 check "pads play the 808's voices in order" '"instrument":"drums","voice":"snare"' cat "$TMP/mpk.json"
+# A held key (channel 1, note 48) survives a pad with the same note number
+# on channel 10 (bank B pad 5) being tapped.
+"$BIN/4s" watch --type meters --json > "$TMP/mpk-hold.json" &
+WATCH=$!; sleep 0.2
+echo "raw 90 30 64" >&5; sleep 0.2
+echo "raw 99 30 64" >&5; echo "raw 89 30 00" >&5; sleep 0.6
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+echo "raw 80 30 00" >&5
+check "a pad's note-off on channel 10 does not end a held key on channel 1" "still sounding" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/mpk-hold.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('still sounding' if levels and levels[-1] > 0.01 else f'levels {levels}')"
 s set bass.cutoff 0.5 >/dev/null
 echo "raw B0 18 0A" >&6; sleep 0.3   # knob 1 turned up 10 steps
 check "an endless knob moves the focus's page parameter by steps" "bass.cutoff = 0.55" s get bass.cutoff

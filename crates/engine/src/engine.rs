@@ -734,6 +734,28 @@ pub(crate) mod tests {
         assert_eq!(silent_bars, 0, "the bass went silent");
     }
 
+    /// Pitch bend moves a sounding 303 note: +2 semitones raises the
+    /// waveform's rate by 2^(2/12) (counted as rising zero crossings of a
+    /// bright saw).
+    #[test]
+    fn pitch_bend_bends_the_303() {
+        let crossings = |bend: f32| {
+            let mut e = note_engine();
+            for (index, value) in [(2u16, 1.0f32), (4, 0.0)] {
+                // Cutoff open, no envelope sweep: the saw passes through.
+                let _ = e.apply(Command::SetParam { target: ParamTarget::Instrument { slot: 0, index }, value }, &mut |_| {});
+            }
+            let _ = e.apply(Command::NoteOn { slot: 0, note: 45, velocity: 0.7, gate: false }, &mut |_| {});
+            let _ = e.apply(Command::PitchBend { slot: 0, semitones: bend }, &mut |_| {});
+            render_secs(&mut e, 0.2, &mut vec![]); // let the bend settle
+            let out = render_secs(&mut e, 0.5, &mut vec![]);
+            let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+            left.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() as f32
+        };
+        let ratio = crossings(2.0) / crossings(0.0);
+        assert!((ratio - 2f32.powf(2.0 / 12.0)).abs() < 0.03, "ratio {ratio}");
+    }
+
     /// A clip note that ends while a later one on the same pitch sounds must
     /// not cut that one short (both are C2; the first ends at tick 30, the
     /// second at 36 = 0.1875 s at 120 bpm).

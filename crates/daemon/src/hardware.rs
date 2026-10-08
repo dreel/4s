@@ -56,7 +56,10 @@ impl Hardware {
     pub fn load(path: &Path) -> Hardware {
         let file = match std::fs::read_to_string(path) {
             Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-                tracing::warn!("invalid {}: {e}; starting empty", path.display());
+                // Keep the user's file: it is moved aside, not overwritten.
+                let bak = path.with_extension("json.bak");
+                let _ = std::fs::rename(path, &bak);
+                tracing::warn!("invalid {}: {e}; moved to {} and starting empty", path.display(), bak.display());
                 File::default()
             }),
             Err(_) => File::default(),

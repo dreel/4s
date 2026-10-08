@@ -36,11 +36,11 @@ pub(super) struct ClientState {
     pub drives_host: bool,
 }
 
-/// A note held by someone: `key` is the input note, `note` what it played
+/// A note held by someone: `key` is the input note and channel (`input_key`), `note` what it played
 /// (after transpose) on instrument `slot`.
 pub(super) struct Held {
     pub holder: String,
-    pub key: u8,
+    pub key: u16,
     pub slot: u8,
     pub note: u8,
 }
@@ -62,6 +62,13 @@ fn check_target(t: &str) -> Result<(), RpcError> {
             .ok_or_else(|| RpcError::invalid(format!("unknown instrument type in target '{t}'"))),
         None => validate_instrument_id(t).map_err(RpcError::invalid),
     }
+}
+
+/// What a held note is released by: the input note and its MIDI channel
+/// (0 for notes started over RPC), so a note-off on another channel (a pad
+/// on channel 10 sharing a key's note number) never ends it.
+pub(super) fn input_key(channel: u8, note: u8) -> u16 {
+    channel as u16 * 128 + note as u16
 }
 
 /// Relative encoder steps per parameter range.
@@ -600,7 +607,7 @@ impl Core {
 
     /// Start a held note for `holder`. `key` is what the holder will
     /// release it by (the input note).
-    pub(super) fn hold_note(&mut self, holder: &str, key: u8, slot: u8, note: u8, velocity: f32) -> Result<(), RpcError> {
+    pub(super) fn hold_note(&mut self, holder: &str, key: u16, slot: u8, note: u8, velocity: f32) -> Result<(), RpcError> {
         self.ensure_room(1)?;
         // One entry per played note: a key layered onto one instrument by
         // two bindings holds both notes, and its note-off releases both.
@@ -612,7 +619,7 @@ impl Core {
 
     /// Release what `holder` holds by `key` (on `slot` only, if given).
     /// The engine hears a note-off only when nobody else holds that note.
-    pub(super) fn release_note(&mut self, holder: &str, key: u8, slot: Option<u8>) {
+    pub(super) fn release_note(&mut self, holder: &str, key: u16, slot: Option<u8>) {
         let mut released = Vec::new();
         self.held.retain(|h| {
             let hit = h.holder == holder && h.key == key && slot.is_none_or(|s| s == h.slot);
@@ -699,7 +706,7 @@ impl Core {
         let (status, channel, a, b) = (d[0] & 0xf0, (d[0] & 0x0f) + 1, d[1], d[2]);
         match status {
             0x90 if b > 0 => self.input_note_on(seat, device, holder, channel, a, b as f32 / 127.0),
-            0x80 | 0x90 => self.release_note(holder, a, None),
+            0x80 | 0x90 => self.release_note(holder, input_key(channel, a), None),
             0xb0 => self.input_cc(seat, device, channel, a, b, origin),
             0xe0 => self.input_pitch_bend(seat, device, ((b as i32) << 7 | a as i32) - 8192),
             _ => {}
@@ -777,7 +784,7 @@ impl Core {
         for b in bindings.iter().filter(|b| b.matches(device, channel, note)) {
             let target = self.resolve_target(seat, &b.target);
             let (Some(slot), Some(out)) = (target.and_then(|t| self.slot_of(&t)), b.output(note)) else { continue };
-            let _ = self.hold_note(holder, note, slot, out, velocity);
+            let _ = self.hold_note(holder, input_key(channel, note), slot, out, velocity);
         }
     }
 

@@ -129,10 +129,10 @@ feedback, like the Livid Block (the reference). For one:
    from `refresh_controller`). A second device kind with feedback needs a
    per-kind send path in `crates/daemon/src/midi.rs`, still diffing so only
    changes go out.
-5. Auto-connect, if appropriate: `midi_autoconnect` connects ports named
-   like a Block, and every port connected before (`midi-devices.json`);
-   default your profile by port name in `Hardware::resolve` (as
-   `looks_like_block` does).
+5. Auto-connect and the default profile come from a device model: add a
+   model file with `"profile": "<your profile>"` (as `livid-block.json`
+   does). `midi_autoconnect` connects every known model's ports, and every
+   port connected before (`midi-devices.json`).
 6. Expose it in `4s midi connect --profile ...` and the UI's MIDI panel (the
    profile list).
 7. Document the mapping in `docs/hardware/<device>.md`, following
