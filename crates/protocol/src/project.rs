@@ -9,7 +9,7 @@ use ts_rs::TS;
 
 /// Current project format version. Bump and add a migration when the format
 /// changes incompatibly.
-pub const PROJECT_FORMAT_VERSION: u32 = 2;
+pub const PROJECT_FORMAT_VERSION: u32 = 3;
 /// Oldest version this build can load. Version 1 (the fixed 8-track kit)
 /// was dropped with RFC 0004, without a migration.
 pub const OLDEST_PROJECT_FORMAT_VERSION: u32 = 2;
@@ -33,6 +33,10 @@ pub struct ProjectFile {
     /// Instruments with an empty pattern are omitted.
     pub patterns: BTreeMap<String, ProjectPattern>,
     pub controller: ProjectController,
+    /// Performer setups by seat name (RFC 0006): focus, knob page, note
+    /// bindings, CC maps.
+    #[serde(default)]
+    pub seats: BTreeMap<String, SeatConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -53,10 +57,7 @@ pub enum ProjectPattern {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ProjectController {
-    /// Drum instrument the controller drives.
-    #[serde(default)]
-    pub target: Option<String>,
-    pub knob_mode: KnobMode,
+    /// The grid page follows the playhead.
     pub follow: bool,
 }
 
@@ -64,7 +65,20 @@ pub struct ProjectController {
 /// `MIGRATIONS[0]` upgrades `OLDEST_PROJECT_FORMAT_VERSION` to the next one,
 /// and so on.
 type Migration = fn(Value) -> Result<Value, String>;
-const MIGRATIONS: &[Migration] = &[];
+const MIGRATIONS: &[Migration] = &[v2_to_v3];
+
+/// v3 (RFC 0006): the controller's `target` and `knob_mode` became each
+/// seat's focus and knob page. A v2 project has no seats, so both are
+/// dropped: seats start focused on the first instrument, on its first page.
+fn v2_to_v3(mut v: Value) -> Result<Value, String> {
+    if let Some(c) = v.get_mut("controller").and_then(Value::as_object_mut) {
+        c.remove("target");
+        c.remove("knob_mode");
+    }
+    v["seats"] = Value::Object(Default::default());
+    v["format_version"] = 3.into();
+    Ok(v)
+}
 
 const _: () = assert!(MIGRATIONS.len() as u32 + OLDEST_PROJECT_FORMAT_VERSION == PROJECT_FORMAT_VERSION);
 
@@ -124,7 +138,9 @@ mod tests {
     #[test]
     fn v2_fixture_loads() {
         let p = parse_project(V2_FIXTURE).unwrap();
-        assert_eq!(p.format_version, 2);
+        assert_eq!(p.format_version, 3);
+        assert!(p.seats.is_empty());
+        assert!(p.controller.follow);
         let ProjectPattern::Drums(d) = &p.patterns["drums"] else { panic!("drums pattern") };
         assert_eq!(d[&Voice::Kick], "X---x---X---x---");
         assert!(matches!(&p.patterns["bass"], ProjectPattern::Notes(n) if n.starts_with("C2")));

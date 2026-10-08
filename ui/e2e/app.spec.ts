@@ -98,17 +98,17 @@ test("console: add, rename, and remove channels; remove an instrument from the e
   await expect(page.getByTestId("strip-2")).toHaveCount(0);
   expect((await rpc("state.get", {})).graph.channels.map((c) => c.n)).toEqual([1]);
 
-  // A second 808: the Block follows it after "control with Block", and
-  // removing it from the editor hands the Block back to `drums`.
+  // A second 808: the Block follows it once focused, and removing it from
+  // the editor hands the focus back to the first instrument, `drums`.
   await rpc("instrument.add", { type: "tr808", id: null, name: null, channel: null, no_channel: false });
   await page.getByTestId("select-drums2").click();
   await page.getByTestId("make-target").click();
-  await expect.poll(async () => (await rpc("controller.get", {})).target).toBe("drums2");
+  await expect.poll(async () => (await rpc("controller.get", {})).focus).toBe("drums2");
   await expect(page.getByTestId("block-target")).toHaveText("drums2");
 
   await page.getByTestId("remove-drums2").click();
   await expect.poll(async () => (await rpc("instrument.list", {})).instruments.map((i) => i.id)).toEqual(["drums"]);
-  await expect.poll(async () => (await rpc("controller.get", {})).target).toBe("drums");
+  await expect.poll(async () => (await rpc("controller.get", {})).focus).toBe("drums");
   await expect(page.getByTestId("select-drums2")).toHaveCount(0);
   await expect(page.getByTestId("strip-2")).toHaveCount(0);
 });
@@ -155,7 +155,7 @@ test("808 voice output: route a voice to its own channel from the UI and over RP
   await expect(page.getByTestId("knob-drums.kick.level")).toHaveAttribute("data-value", "0.5");
 });
 
-test("MIDI panel connects a keyboard that plays a chosen 303", async () => {
+test("MIDI panel connects a device by name; with no bindings it plays the seat's focus", async () => {
   const { page, rpc } = h;
   // A real virtual MIDI port, from a separate process (as in the CLI e2e).
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -186,17 +186,55 @@ test("MIDI panel connects a keyboard that plays a chosen 303", async () => {
         { timeout: 20_000 },
       )
       .toBe(1);
-    await page.getByTestId("midi-kind").selectOption("keyboard");
-    await page.getByTestId("midi-keyboard-instrument").selectOption("lead");
+    await page.getByTestId("midi-profile").selectOption("generic");
     await page.getByTestId(`midi-connect-${name}`).click();
+    const device = `pw_keys_${process.pid}`;
     await expect
       .poll(async () => (await rpc("midi.ports", {})).connections.find((c) => c.input === name))
-      .toMatchObject({ kind: "keyboard", instrument: "lead" });
+      .toMatchObject({ device, profile: "generic" });
+    await expect(page.getByTestId(`midi-device-${device}`)).toBeVisible();
+
+    // Focus the 303 from its editor; the device's notes then play it.
+    await page.getByTestId("select-lead").click();
+    await page.getByTestId("make-target").click();
+    await expect.poll(async () => (await rpc("controller.get", {})).focus).toBe("lead");
+    await rpc("midi.input", { device, data: [0x90, 36, 100], seat: null });
+    await expect(page.getByTestId("bass-last-note")).toHaveAttribute("data-note", "36");
     await page.getByTestId(`midi-disconnect-${name}`).click();
     await expect.poll(async () => (await rpc("midi.ports", {})).connections.length).toBe(0);
   } finally {
     dev.kill();
   }
+});
+
+test("seats: joined automatically, chooser to ignore, rejoin, and re-ask when the seat goes", async () => {
+  const { page, rpc } = h;
+  // The app's user matches the host seat, so it sat down without asking.
+  const host = (await rpc("seat.list", {})).host;
+  await expect(page.getByTestId("seat")).toHaveAttribute("data-seat", host);
+  await expect(page.getByTestId("seat-chooser")).toHaveCount(0);
+
+  // Ignore: a seat for this session only.
+  await page.getByTestId("seat").click();
+  await page.getByTestId("seat-ignore").click();
+  await expect(page.getByTestId("seat-chooser")).toHaveCount(0);
+  await expect(page.getByTestId("seat")).toContainText("session only");
+  const temp = await page.getByTestId("seat").getAttribute("data-seat");
+  expect((await rpc("seat.list", {})).seats.find((s) => s.name === temp)?.saved).toBe(false);
+
+  // Back to the saved seat; the empty session-only one goes away.
+  await page.getByTestId("seat").click();
+  await page.getByTestId(`seat-join-${host}`).click();
+  await expect(page.getByTestId("seat")).toHaveAttribute("data-seat", host);
+  await expect.poll(async () => (await rpc("seat.list", {})).seats.map((s) => s.name)).not.toContain(temp);
+
+  // The seat is deleted elsewhere: the app asks again.
+  await rpc("seat.remove", { name: host });
+  await expect(page.getByTestId("seat-chooser")).toBeVisible();
+  await page.getByTestId("seat-name").fill("solo");
+  await page.getByTestId("seat-create").click();
+  await expect(page.getByTestId("seat")).toHaveAttribute("data-seat", "solo");
+  await expect.poll(async () => (await rpc("seat.list", {})).host).toBe("solo");
 });
 
 test("transport: play from UI, playhead moves, stop", async () => {
@@ -226,9 +264,9 @@ test("virtual Livid Block pads, LEDs, and knobs", async () => {
   await rpc("pattern.set_step", { instrument: null, voice: "cowbell", step: 7, level: 1 });
   await expect(page.getByTestId("pad-7-7")).toHaveAttribute("data-lit", "1");
 
-  // Knob mode: decay; knob 1 controls kick decay.
-  await page.getByTestId("knob-mode-decay").click();
-  await expect.poll(async () => (await rpc("controller.get", {})).knob_mode).toBe("decay");
+  // Knob page: decay; knob 1 controls kick decay.
+  await page.getByTestId("knob-page-decay").click();
+  await expect.poll(async () => (await rpc("controller.get", {})).knob_page).toBe("decay");
   await rpc("controller.knob", { index: 0, value: 1 });
   await expect(page.getByTestId("knob-drums.kick.decay")).toHaveAttribute("data-value", "1");
 });

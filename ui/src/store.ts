@@ -8,10 +8,11 @@ import type { EventEnvelope } from "./generated/EventEnvelope";
 import type { ParamInfo } from "./generated/ParamInfo";
 import type { InstrumentPattern } from "./generated/InstrumentPattern";
 import type { NoteStep } from "./generated/NoteStep";
+import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
 import { RpcClient, type ConnectionState } from "./rpc";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export type AppState = {
   connection: ConnectionState;
@@ -20,6 +21,10 @@ export type AppState = {
   error: string | null;
   /** Instrument shown in the editor (view state only). */
   selected: string | null;
+  /** This connection's client id (`ui#n`), to find our seat. */
+  clientId: string | null;
+  /** The seat chooser is open (opened by the user, or because we have no seat). */
+  choosingSeat: boolean;
 };
 
 export type LiveState = {
@@ -56,10 +61,20 @@ function daemonUrl(): string {
 export const launch = {
   lifecycle: query.get("lifecycle") ?? "external",
   error: query.get("daemonError"),
+  /** The person using the app; seats are matched by this name (RFC 0006). */
+  user: query.get("user"),
 };
 
 export const client = new RpcClient(daemonUrl());
-export const app = new Store<AppState>({ connection: "closed", snapshot: null, registry: [], error: null, selected: null });
+export const app = new Store<AppState>({
+  connection: "closed",
+  snapshot: null,
+  registry: [],
+  error: null,
+  selected: null,
+  clientId: null,
+  choosingSeat: false,
+});
 export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {} });
 
 /** Select an instrument for the editor. */
@@ -73,6 +88,12 @@ export function useSelected(): string | null {
     const ids = s.snapshot?.graph.instruments.map((i) => i.id) ?? [];
     return s.selected && ids.includes(s.selected) ? s.selected : (ids[0] ?? null);
   });
+}
+
+/** The seat this client sits in, if any. */
+export function mySeat(s: AppState): Seat | null {
+  const id = s.clientId;
+  return (id && s.snapshot?.seats.seats.find((seat) => seat.occupants.includes(id))) || null;
 }
 
 export function useApp<S>(select: (s: AppState) => S): S {
@@ -103,7 +124,15 @@ async function resync() {
 }
 
 client.onConnect = async () => {
-  await client.call("session.hello", { client_name: "ui", protocol_version: PROTOCOL_VERSION, token: null });
+  const hello = await client.call("session.hello", {
+    client_name: "ui",
+    protocol_version: PROTOCOL_VERSION,
+    token: null,
+    user: launch.user,
+    seat: null,
+    auto_seat: true,
+  });
+  app.set({ clientId: hello.client_id, choosingSeat: hello.choose_seat });
   buffered = [];
   await client.call("events.subscribe", { types: null });
   await resync();
@@ -183,6 +212,12 @@ function apply(env: EventEnvelope) {
     case "midi":
       app.set({ snapshot: { ...s, midi: ev.connections } });
       break;
+    case "seats": {
+      app.set({ snapshot: { ...s, seats: ev.state } });
+      // Our seat went away (deleted, or a project without it): ask again.
+      if (!mySeat(app.state)) app.set({ choosingSeat: true });
+      break;
+    }
     case "project":
       app.set({ snapshot: { ...s, project: ev.info } });
       break;

@@ -151,7 +151,9 @@ async function main() {
       preload: path.join(__dirname, "preload.cjs"),
     },
   });
-  const query = { daemon: url, lifecycle, ...(error ? { daemonError: error } : {}) };
+  // Seats are matched by the user's name, as the daemon's host seat is.
+  const user = process.env.FOURS_USER || os.userInfo().username;
+  const query = { daemon: url, lifecycle, user, ...(error ? { daemonError: error } : {}) };
   const devUrl = process.env.FOURS_UI_DEV_URL;
   if (devUrl) {
     win.loadURL(`${devUrl}?${new URLSearchParams(query)}`);

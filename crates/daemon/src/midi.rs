@@ -3,7 +3,7 @@
 //! no locks are taken inside midir callbacks.
 
 use anyhow::{Context, Result, anyhow};
-use fours_protocol::{DeviceKind, MidiConnection};
+use fours_protocol::{DeviceProfile, MidiConnection};
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use std::sync::mpsc::Sender;
 
@@ -11,7 +11,6 @@ const CLIENT: &str = "4S";
 
 pub struct MidiMessage {
     pub port: String,
-    pub kind: DeviceKind,
     pub data: Vec<u8>,
 }
 
@@ -95,17 +94,26 @@ impl Midi {
         self.conns.iter().any(|c| c.info.input == input)
     }
 
+    /// The input port a query names (exact, then case-insensitive
+    /// substring).
+    pub fn find_input(input_query: &str) -> Result<String> {
+        let (inputs, _) = list_ports();
+        find_port(&inputs, input_query)
+            .ok_or_else(|| anyhow!("no MIDI input matching '{input_query}' (inputs: {inputs:?})"))
+    }
+
+    /// Connect the input port `input_name` (as found by `find_input`) as
+    /// logical device `device`.
     pub fn connect(
         &mut self,
-        input_query: &str,
+        input_name: &str,
         output_query: Option<&str>,
-        kind: DeviceKind,
-        instrument: Option<String>,
+        device: &str,
+        profile: DeviceProfile,
         tx: Sender<MidiMessage>,
     ) -> Result<MidiConnection> {
-        let (inputs, outputs) = list_ports();
-        let input_name = find_port(&inputs, input_query)
-            .ok_or_else(|| anyhow!("no MIDI input matching '{input_query}' (inputs: {inputs:?})"))?;
+        let (_, outputs) = list_ports();
+        let input_name = input_name.to_string();
         if self.is_connected(&input_name) {
             return Err(anyhow!("'{input_name}' is already connected"));
         }
@@ -113,8 +121,7 @@ impl Midi {
             Some(q) => Some(
                 find_port(&outputs, q).ok_or_else(|| anyhow!("no MIDI output matching '{q}'"))?,
             ),
-            None if kind == DeviceKind::LividBlock => find_port(&outputs, &input_name)
-                .or_else(|| find_port(&outputs, input_query)),
+            None if profile == DeviceProfile::LividBlock => find_port(&outputs, &input_name),
             None => None,
         };
 
@@ -130,7 +137,7 @@ impl Midi {
                 &port,
                 "4S input",
                 move |_stamp, data, _| {
-                    let _ = tx.send(MidiMessage { port: port_name.clone(), kind, data: data.to_vec() });
+                    let _ = tx.send(MidiMessage { port: port_name.clone(), data: data.to_vec() });
                 },
                 (),
             )
@@ -149,16 +156,42 @@ impl Midi {
             None => None,
         };
 
-        let info = MidiConnection { input: input_name, output: output_name, kind, instrument };
+        let info = MidiConnection { input: input_name, output: output_name, device: device.to_string(), profile };
         self.conns.push(Conn { info: info.clone(), _input: input, output });
         Ok(info)
     }
 
-    pub fn disconnect(&mut self, input_query: &str) -> Result<()> {
-        let names: Vec<String> = self.conns.iter().map(|c| c.info.input.clone()).collect();
-        let name = find_port(&names, input_query).ok_or_else(|| anyhow!("'{input_query}' is not connected"))?;
+    /// Disconnect by port or logical name. Returns the port name.
+    pub fn disconnect(&mut self, input_query: &str) -> Result<String> {
+        let name = self.connected_port(input_query).ok_or_else(|| anyhow!("'{input_query}' is not connected"))?;
         self.conns.retain(|c| c.info.input != name);
-        Ok(())
+        Ok(name)
+    }
+
+    /// The connected port a query names: a logical device name, else a port
+    /// name (exact or substring).
+    pub fn connected_port(&self, query: &str) -> Option<String> {
+        if let Some(c) = self.conns.iter().find(|c| c.info.device == query) {
+            return Some(c.info.input.clone());
+        }
+        let names: Vec<String> = self.conns.iter().map(|c| c.info.input.clone()).collect();
+        find_port(&names, query)
+    }
+
+    pub fn connection(&self, port: &str) -> Option<&MidiConnection> {
+        self.conns.iter().find(|c| c.info.input == port).map(|c| &c.info)
+    }
+
+    pub fn by_device(&self, device: &str) -> Option<&MidiConnection> {
+        self.conns.iter().find(|c| c.info.device == device).map(|c| &c.info)
+    }
+
+    pub fn rename(&mut self, port: &str, name: &str) {
+        for c in &mut self.conns {
+            if c.info.input == port {
+                c.info.device = name.to_string();
+            }
+        }
     }
 
     /// Drop connections whose ports no longer exist. Returns true if any were removed.
@@ -168,28 +201,15 @@ impl Midi {
         before != self.conns.len()
     }
 
-    /// Forget an instrument a keyboard was set to play (it was removed); the
-    /// keyboard falls back to the first `tb303`. Returns true if any changed.
-    pub fn clear_instrument(&mut self, id: &str) -> bool {
-        let mut changed = false;
-        for c in &mut self.conns {
-            if c.info.instrument.as_deref() == Some(id) {
-                c.info.instrument = None;
-                changed = true;
-            }
-        }
-        changed
-    }
-
     /// The connected Livid Block, if any.
     pub fn block_name(&self) -> Option<String> {
-        self.conns.iter().find(|c| c.info.kind == DeviceKind::LividBlock).map(|c| c.info.input.clone())
+        self.conns.iter().find(|c| c.info.profile == DeviceProfile::LividBlock).map(|c| c.info.input.clone())
     }
 
     /// Send to every Livid Block output.
     pub fn send_block(&mut self, msg: &[u8]) {
         for c in &mut self.conns {
-            if c.info.kind == DeviceKind::LividBlock
+            if c.info.profile == DeviceProfile::LividBlock
                 && let Some(out) = &mut c.output
                 && let Err(e) = out.send(msg)
             {

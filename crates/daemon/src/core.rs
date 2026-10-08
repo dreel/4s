@@ -6,10 +6,15 @@
 //!
 //! State is a graph: instruments (each in an engine slot), mixer channels,
 //! and routes from instrument outputs to channels. The parameter registry is
-//! rebuilt from the graph whenever it changes.
+//! rebuilt from the graph whenever it changes. Seats and MIDI input routing
+//! live in `seats.rs`.
+
+mod seats;
 
 use crate::controller::{BlockInput, BlockMap, Controller, decode_block};
+use crate::hardware::{self, Hardware};
 use crate::midi::{Midi, MidiMessage, list_ports};
+use seats::{ClientState, Held, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
 use fours_engine::offline::{RenderInstrument, RenderPattern, RenderSpec};
 use fours_engine::params::{self, CHANNEL_PARAMS, NUM_GLOBALS};
@@ -96,11 +101,23 @@ pub struct Core {
     block_map: BlockMap,
     midi: Midi,
     midi_tx: Sender<MidiMessage>,
-    /// The note each instrument slot is holding (`voice.note_on`, or a MIDI
-    /// keyboard), and who holds it: a client connection (`conn:<id>`) or a
-    /// keyboard (`midi:<port>`). Only the holder's note-off for that note
-    /// releases it; a holder that disconnects releases its notes.
-    held_notes: HashMap<u8, (String, u8)>,
+    /// This machine's port -> logical device names.
+    hardware: Hardware,
+    seats: BTreeMap<String, SeatState>,
+    /// Connected clients by holder key (`conn:<id>`).
+    clients: HashMap<String, ClientState>,
+    /// Seat the host's own MIDI devices use (see `refresh_host_seat`).
+    host_seat: String,
+    /// The OS user running the daemon.
+    host_user: String,
+    seat_clock: u64,
+    /// Held notes and who holds them: a client connection (`conn:<id>`), a
+    /// device (`midi:<device>`), or a device fed through `midi.input`
+    /// (`input:conn:<id>:<device>`). Only the holder's note-off releases a
+    /// note; a holder that goes away releases its notes.
+    held: Vec<Held>,
+    /// Knob pickup state by `seat/device/control`.
+    pickups: HashMap<String, Pickup>,
     project: ProjectInfo,
     pub audio: AudioStatus,
     seq: u64,
@@ -116,8 +133,10 @@ impl Core {
         midi_tx: Sender<MidiMessage>,
         data_dir: PathBuf,
         audio: AudioStatus,
+        host_user: String,
     ) -> Self {
         let block_map = BlockMap::load_or_create(&data_dir.join("livid-block.json"));
+        let hardware = Hardware::load(&data_dir.join(hardware::FILE));
         let (events, _) = broadcast::channel(4096);
         let mut core = Self {
             params: Vec::new(),
@@ -135,7 +154,14 @@ impl Core {
             block_map,
             midi: Midi::default(),
             midi_tx,
-            held_notes: HashMap::new(),
+            hardware,
+            seats: BTreeMap::new(),
+            clients: HashMap::new(),
+            host_seat: String::new(),
+            host_user,
+            seat_clock: 0,
+            held: Vec::new(),
+            pickups: HashMap::new(),
             project: ProjectInfo { path: None, dirty: false },
             audio,
             seq: 0,
@@ -355,9 +381,6 @@ impl Core {
         }
         self.graph_changed(origin);
         self.push_instrument_params(&id);
-        if self.controller.target.is_none() && p.kind == InstrumentType::Tr808 {
-            self.controller.target = Some(id.clone());
-        }
         self.refresh_controller(origin, true);
         let inst = self.find_instrument(&id)?;
         Ok(self.instrument_info(inst))
@@ -416,17 +439,17 @@ impl Core {
                 }
             }
         }
-        if self.controller.target.as_deref() == Some(inst.id.as_str()) {
-            self.controller.target =
-                self.instruments.iter().find(|i| i.kind == InstrumentType::Tr808).map(|i| i.id.clone());
-        }
-        self.held_notes.remove(&inst.slot);
+        self.held.retain(|h| h.slot != inst.slot);
         self.graph_changed(origin);
-        self.refresh_controller(origin, true);
-        if self.midi.clear_instrument(&inst.id) {
-            let connections = self.midi.connections();
-            self.emit(origin, Event::Midi { connections });
+        // Seats focused on it fall back to the first instrument.
+        let mut refocused = false;
+        for s in self.seats.values_mut() {
+            if s.config.focus.as_deref() == Some(inst.id.as_str()) {
+                s.config.focus = None;
+                refocused = true;
+            }
         }
+        self.seats_changed(origin, refocused);
         Ok(self.graph())
     }
 
@@ -533,6 +556,7 @@ impl Core {
                     default_id: k.default_id().to_string(),
                     outputs: instrument::outputs(*k, k.default_id(), k.label()),
                     params: instrument::params(*k, k.default_id()),
+                    knob_pages: instrument::knob_pages(*k, k.default_id()),
                 })
                 .collect(),
         }
@@ -555,13 +579,35 @@ impl Core {
             self.midi.send_block(&msg);
         }
         if force_event || !diff.is_empty() {
-            let state = self.controller.state();
+            let state = self.controller_state();
             self.emit(origin, Event::Controller { state });
         }
     }
 
+    fn controller_state(&self) -> ControllerState {
+        let c = &self.controller;
+        let (pages, page) = self.seat_page(&self.host_seat);
+        ControllerState {
+            seat: self.host_seat.clone(),
+            focus: self.seat_focus(&self.host_seat),
+            knob_page: page.as_ref().map(|p| p.id.clone()),
+            knob_pages: pages.iter().map(|p| p.id.clone()).collect(),
+            knob_params: page.map(|p| p.params).unwrap_or_default(),
+            page: c.page,
+            follow: c.follow,
+            leds: c.leds.iter().map(|r| r.to_vec()).collect(),
+            device: c.device.clone(),
+        }
+    }
+
+    /// The drum pattern a seat's grid edits: its focus, if a drum machine.
+    fn drum_focus(&self, seat: &str) -> Option<String> {
+        let f = self.seat_focus(seat)?;
+        matches!(self.patterns.get(&f), Some(PatternState::Drums(_))).then_some(f)
+    }
+
     fn target_pattern(&self) -> Option<&[[u8; MAX_STEPS]; NUM_TRACKS]> {
-        match self.patterns.get(self.controller.target.as_deref()?)? {
+        match self.patterns.get(&self.drum_focus(&self.host_seat)?)? {
             PatternState::Drums(d) => Some(d),
             PatternState::Notes(_) => None,
         }
@@ -588,8 +634,9 @@ impl Core {
                 .iter()
                 .map(|i| InstrumentPattern { instrument: i.id.clone(), pattern: self.pattern_data(&i.id) })
                 .collect(),
-            controller: self.controller.state(),
+            controller: self.controller_state(),
             midi: self.midi.connections(),
+            seats: self.seats_state(),
             project: self.project.clone(),
             audio: self.audio.clone(),
         }
@@ -812,60 +859,40 @@ impl Core {
 
     // ---- held notes ----------------------------------------------------------
 
-    /// Start a held note on a note instrument (default: the first `tb303`).
-    /// A newer note takes over the voice (gliding, as legato on a 303).
+    /// Start a held note (like a key down) on an instrument (default: the
+    /// caller's seat focus). `holder` releases it with `note_off`.
     fn note_on(&mut self, id: Option<&str>, note: u8, velocity: f32, holder: &str) -> Result<(), RpcError> {
-        if !(NOTE_MIN..=NOTE_MAX).contains(&note) {
-            return Err(RpcError::invalid(format!("note must be {NOTE_MIN}..{NOTE_MAX}")));
+        if note > 127 {
+            return Err(RpcError::invalid("note must be 0..127"));
         }
-        let id = self.resolve(id, InstrumentType::Tb303)?;
-        let slot = self.slot(&id)?;
-        self.ensure_room(1)?;
-        self.held_notes.insert(slot, (holder.to_string(), note));
-        self.send(Command::NoteOn { slot, note, velocity: velocity.clamp(0.0, 1.0), gate: false });
-        Ok(())
-    }
-
-    /// Release a held note, if `holder` is holding exactly that note. With
-    /// no instrument given, it goes to whichever instrument the holder
-    /// started that note on (not re-resolved, so adding or removing a `tb303`
-    /// in between cannot leave it stuck).
-    fn note_off(&mut self, id: Option<&str>, note: u8, holder: &str) -> Result<(), RpcError> {
-        let held = (holder.to_string(), note);
-        let slot = match id {
-            Some(id) => {
-                let id = self.resolve(Some(id), InstrumentType::Tb303)?;
-                Some(self.slot(&id)?).filter(|s| self.held_notes.get(s) == Some(&held))
-            }
-            None => self.held_notes.iter().find(|(_, h)| **h == held).map(|(s, _)| *s),
+        let id = match id {
+            Some(id) => self.find_instrument(id)?.id.clone(),
+            None => self.default_instrument(holder)?,
         };
-        if let Some(slot) = slot {
-            // Never record a release the engine did not get.
-            self.ensure_room(1)?;
-            self.held_notes.remove(&slot);
-            self.send(Command::NoteOff { slot });
-        }
-        Ok(())
+        let slot = self.slot(&id)?;
+        self.hold_note(holder, note, slot, note, velocity)
     }
 
-    /// Release every note a client connection holds (it disconnected). The
-    /// release is sent even when the queue looks full: there is no caller to
-    /// report an error to, and a dropped note-off is logged by `send`.
-    pub fn release_held_by(&mut self, holder: &str) {
-        let slots: Vec<u8> = self.held_notes.iter().filter(|(_, (h, _))| h == holder).map(|(s, _)| *s).collect();
-        for slot in slots {
-            self.held_notes.remove(&slot);
-            self.send(Command::NoteOff { slot });
-        }
+    /// Release a held note, if `holder` is holding it (on `id` only, if
+    /// given). Without an instrument it goes to wherever the holder started
+    /// that note (not re-resolved, so changing focus in between cannot leave
+    /// it stuck).
+    fn note_off(&mut self, id: Option<&str>, note: u8, holder: &str) -> Result<(), RpcError> {
+        let slot = id.map(|id| self.slot(id)).transpose()?;
+        // Never record a release the engine did not get.
+        self.ensure_room(1)?;
+        self.release_note(holder, note, slot);
+        Ok(())
     }
 
     // ---- controller --------------------------------------------------------
 
-    fn controller_pad(&mut self, row: u32, col: u32, pressed: bool, origin: &str) -> Result<(), RpcError> {
+    /// A grid pad: toggles a step of the seat's drum focus.
+    fn controller_pad(&mut self, seat: &str, row: u32, col: u32, pressed: bool, origin: &str) -> Result<(), RpcError> {
         if row as usize >= NUM_TRACKS || col as usize >= crate::controller::GRID {
             return Err(RpcError::invalid("row and col must be 0..7"));
         }
-        let Some(target) = self.controller.target.clone() else { return Ok(()) };
+        let Some(target) = self.drum_focus(seat) else { return Ok(()) };
         if !pressed {
             return Ok(());
         }
@@ -880,31 +907,7 @@ impl Core {
         Ok(())
     }
 
-    fn controller_knob(&mut self, index: u32, value: f64, origin: &str) -> Result<(), RpcError> {
-        if index as usize >= NUM_TRACKS {
-            return Err(RpcError::invalid("knob index must be 0..7"));
-        }
-        let Some(target) = self.controller.target.clone() else { return Ok(()) };
-        let path = self.controller.knob_mode.param_path(&target, index as usize);
-        let id = self.param_id(&path)?;
-        let v = value.clamp(0.0, 1.0);
-        let scaled = match self.params[id].info.kind {
-            ParamKind::Continuous { min, max } => min + v * (max - min),
-            ParamKind::Integer { min, max } => min as f64 + v * (max - min) as f64,
-            ParamKind::Toggle => v,
-        };
-        self.set_param(&path, scaled, origin)?;
-        Ok(())
-    }
-
     fn controller_mode(&mut self, p: ControllerModeParams, origin: &str) -> Result<ControllerState, RpcError> {
-        if let Some(t) = &p.target {
-            let id = self.resolve(Some(t), InstrumentType::Tr808)?;
-            self.controller.target = Some(id);
-        }
-        if let Some(m) = p.knob_mode {
-            self.controller.knob_mode = m;
-        }
         if let Some(f) = p.follow {
             self.controller.follow = f;
         }
@@ -917,73 +920,38 @@ impl Core {
         }
         self.mark_dirty(origin);
         self.refresh_controller(origin, true);
-        Ok(self.controller.state())
+        Ok(self.controller_state())
     }
 
-    /// Handle a raw message from a connected MIDI device.
+    /// Handle a raw message from a connected MIDI device: it plays in the
+    /// host seat.
     pub fn handle_midi(&mut self, msg: MidiMessage) {
         let origin = format!("midi:{}", msg.port);
         self.emit(&origin, Event::MidiIn { port: msg.port.clone(), data: msg.data.clone() });
-        let d = &msg.data;
-        match msg.kind {
-            DeviceKind::LividBlock => match decode_block(&self.block_map, d) {
-                Some(BlockInput::Pad { row, col, pressed }) => {
-                    let _ = self.controller_pad(row as u32, col as u32, pressed, &origin);
-                }
-                Some(BlockInput::Knob { index, value }) => {
-                    let _ = self.controller_knob(index as u32, value, &origin);
-                }
-                None => {}
-            },
-            DeviceKind::GenericDrums => {
-                if d.len() >= 3
-                    && d[0] & 0xf0 == 0x90
-                    && d[2] > 0
-                    && let Some(v) = Voice::ALL.iter().find(|v| v.gm_note() == d[1])
-                    && let Some(target) = self.controller.target.clone()
-                    && let Some(slot) = self.slot_of(&target)
-                {
-                    self.send(Command::Trigger { slot, voice: v.index() as u8, velocity: d[2] as f32 / 127.0 });
-                }
-            }
-            DeviceKind::Keyboard => {
-                if d.len() < 3 {
-                    return;
-                }
-                let configured =
-                    self.midi.connections().into_iter().find(|c| c.input == msg.port).and_then(|c| c.instrument);
-                let (status, note, vel) = (d[0] & 0xf0, d[1], d[2]);
-                // The same path as `voice.note_on` / `voice.note_off`; the
-                // keyboard (`midi:<port>`) holds the note.
-                if status == 0x90 && vel > 0 {
-                    let _ = self.note_on(configured.as_deref(), note, vel as f32 / 127.0, &origin);
-                } else if status == 0x80 || status == 0x90 {
-                    let _ = self.note_off(configured.as_deref(), note, &origin);
-                }
-            }
-        }
+        let Some(c) = self.midi.connection(&msg.port) else { return };
+        let (device, profile) = (c.device.clone(), c.profile);
+        let seat = self.host_seat.clone();
+        self.device_input(&seat, &device, profile, &format!("midi:{device}"), &msg.data, &origin);
     }
 
     // ---- midi --------------------------------------------------------------
 
     fn midi_ports(&self) -> MidiPortsResult {
         let (inputs, outputs) = list_ports();
-        MidiPortsResult { inputs, outputs, connections: self.midi.connections() }
+        MidiPortsResult {
+            inputs,
+            outputs,
+            connections: self.midi.connections(),
+            devices: self.hardware.devices(),
+            seat: self.host_seat.clone(),
+            pinned_seat: self.hardware.pinned_seat().map(str::to_string),
+        }
     }
 
     fn midi_changed(&mut self, origin: &str) {
-        // Release notes held by keyboards that went away.
-        let holders: Vec<String> = self.midi.connections().into_iter().map(|c| format!("midi:{}", c.input)).collect();
-        let orphaned: Vec<u8> = self
-            .held_notes
-            .iter()
-            .filter(|(_, (h, _))| h.starts_with("midi:") && !holders.contains(h))
-            .map(|(slot, _)| *slot)
-            .collect();
-        for slot in orphaned {
-            self.held_notes.remove(&slot);
-            self.send(Command::NoteOff { slot });
-        }
+        // Release notes held by devices that went away.
+        let holders: Vec<String> = self.midi.connections().into_iter().map(|c| format!("midi:{}", c.device)).collect();
+        self.release_held_where(|h| h.starts_with("midi:") && !holders.iter().any(|x| x == h));
         self.controller.device = self.midi.block_name();
         let connections = self.midi.connections();
         self.emit(origin, Event::Midi { connections });
@@ -992,37 +960,104 @@ impl Core {
     }
 
     pub fn midi_connect(&mut self, p: MidiConnectParams, origin: &str) -> Result<MidiPortsResult, RpcError> {
-        if let Some(id) = &p.instrument {
-            if p.kind != DeviceKind::Keyboard {
-                return Err(RpcError::invalid("`instrument` only applies to --kind keyboard"));
-            }
-            self.resolve(Some(id), InstrumentType::Tb303)?;
+        let port = Midi::find_input(&p.input).map_err(|e| RpcError::failed(e.to_string()))?;
+        if self.midi.is_connected(&port) {
+            return Err(RpcError::failed(format!("'{port}' is already connected")));
+        }
+        let (name, profile) =
+            self.hardware.connected(&port, p.name.as_deref(), p.profile).map_err(RpcError::invalid)?;
+        if self.midi.by_device(&name).is_some() {
+            return Err(RpcError::invalid(format!("a connected device is already named '{name}'")));
         }
         self.midi
-            .connect(&p.input, p.output.as_deref(), p.kind, p.instrument.clone(), self.midi_tx.clone())
+            .connect(&port, p.output.as_deref(), &name, profile, self.midi_tx.clone())
             .map_err(|e| RpcError::failed(e.to_string()))?;
         self.midi_changed(origin);
         Ok(self.midi_ports())
     }
 
-    /// Hotplug: drop vanished ports and, if `auto`, connect any Livid Block
-    /// that appeared.
+    fn midi_disconnect(&mut self, input: &str, origin: &str) -> Result<MidiPortsResult, RpcError> {
+        let port = self.midi.disconnect(input).map_err(|e| RpcError::failed(e.to_string()))?;
+        self.hardware.disconnected(&port);
+        self.midi_changed(origin);
+        Ok(self.midi_ports())
+    }
+
+    fn midi_rename(&mut self, p: MidiRenameParams, origin: &str) -> Result<MidiPortsResult, RpcError> {
+        let port = self
+            .midi
+            .connected_port(&p.device)
+            .or_else(|| self.hardware.port_named(&p.device))
+            .or_else(|| self.hardware.get(&p.device).map(|_| p.device.clone()))
+            .ok_or_else(|| RpcError::invalid(format!("no device '{}' (connect it first)", p.device)))?;
+        if self.midi.by_device(&p.name).is_some_and(|c| c.input != port) {
+            return Err(RpcError::invalid(format!("a connected device is already named '{}'", p.name)));
+        }
+        self.hardware.rename(&port, &p.name).map_err(RpcError::invalid)?;
+        self.midi.rename(&port, &p.name);
+        self.midi_changed(origin);
+        Ok(self.midi_ports())
+    }
+
+    fn midi_set_seat(&mut self, seat: Option<String>, origin: &str) -> Result<MidiPortsResult, RpcError> {
+        if let Some(s) = &seat {
+            self.check_seat(s)?;
+        }
+        self.hardware.set_seat(seat);
+        self.seats_changed(origin, false);
+        Ok(self.midi_ports())
+    }
+
+    /// Raw input from a logical device, sent over RPC (a bridge, a script).
+    fn midi_input(&mut self, p: MidiInputParams, origin: &str, client: &str) -> Result<(), RpcError> {
+        validate_name("device", &p.device).map_err(RpcError::invalid)?;
+        if p.data.is_empty() || p.data[0] < 0x80 {
+            return Err(RpcError::invalid("data must be one MIDI message starting with a status byte"));
+        }
+        let seat = match p.seat {
+            Some(s) => {
+                self.check_seat(&s)?;
+                s
+            }
+            None => self.client_seat(client).unwrap_or_else(|| self.host_seat.clone()),
+        };
+        let profile = self.midi.by_device(&p.device).map(|c| c.profile).unwrap_or_default();
+        self.emit(origin, Event::MidiIn { port: p.device.clone(), data: p.data.clone() });
+        let holder = format!("input:{client}:{}", p.device);
+        self.device_input(&seat, &p.device, profile, &holder, &p.data, origin);
+        Ok(())
+    }
+
+    /// Hotplug: drop vanished ports and, if `auto`, connect a Livid Block
+    /// that appeared, and any port connected before.
     pub fn midi_autoconnect(&mut self, auto: bool) {
         let (inputs, _) = list_ports();
         let mut changed = self.midi.prune(&inputs);
         if changed {
             tracing::info!("MIDI device disconnected");
         }
-        if auto
-            && self.midi.block_name().is_none()
-            && let Some(name) = inputs.iter().find(|n| n.to_lowercase().contains("block"))
-        {
-            match self.midi.connect(name, None, DeviceKind::LividBlock, None, self.midi_tx.clone()) {
-                Ok(c) => {
-                    tracing::info!("auto-connected Livid Block: {} (output: {:?})", c.input, c.output);
-                    changed = true;
+        if auto {
+            let mut want: Vec<String> = self.hardware.auto_ports();
+            if self.midi.block_name().is_none()
+                && let Some(b) = inputs.iter().find(|n| hardware::looks_like_block(n))
+            {
+                want.push(b.clone());
+            }
+            for port in want {
+                if !inputs.contains(&port) || self.midi.is_connected(&port) {
+                    continue;
                 }
-                Err(e) => tracing::warn!("auto-connect {name} failed: {e}"),
+                let Ok((name, profile)) = self.hardware.connected(&port, None, None) else { continue };
+                if self.midi.by_device(&name).is_some() {
+                    continue;
+                }
+                match self.midi.connect(&port, None, &name, profile, self.midi_tx.clone()) {
+                    Ok(c) => {
+                        tracing::info!("auto-connected {} as {} ({:?}, output: {:?})", c.input, c.device, c.profile, c.output);
+                        changed = true;
+                    }
+                    Err(e) => tracing::warn!("auto-connect {port} failed: {e}"),
+                }
             }
         }
         if changed {
@@ -1128,11 +1163,15 @@ impl Core {
             routes: self.routes.clone(),
             params: self.params.iter().map(|p| (p.info.path.clone(), p.value)).collect(),
             patterns,
-            controller: ProjectController {
-                target: self.controller.target.clone(),
-                knob_mode: self.controller.knob_mode,
-                follow: self.controller.follow,
-            },
+            controller: ProjectController { follow: self.controller.follow },
+            // Seats with nothing set are left out; they come back by
+            // themselves for whoever uses the project.
+            seats: self
+                .seats
+                .iter()
+                .filter(|(_, s)| s.saved && s.config != SeatConfig::default())
+                .map(|(n, s)| (n.clone(), s.config.clone()))
+                .collect(),
         }
     }
 
@@ -1153,6 +1192,10 @@ impl Core {
         }
         for i in &file.instruments {
             check_name(Some(i.name.clone()))?;
+        }
+        for (name, seat) in &file.seats {
+            validate_name("seat", name).map_err(RpcError::invalid)?;
+            check_seat_config(seat).map_err(|e| RpcError::invalid(format!("seat '{name}': {}", e.message)))?;
         }
         let mut ns = std::collections::HashSet::new();
         for c in &file.channels {
@@ -1197,7 +1240,8 @@ impl Core {
             self.send(Command::SetChannelActive { ch: (c.n - 1) as u8, active: false });
         }
         self.slot_used = [false; MAX_INSTRUMENTS];
-        self.held_notes.clear();
+        self.held.clear();
+        self.pickups.clear();
         self.routes.clear();
         self.patterns.clear();
         self.params.clear();
@@ -1258,29 +1302,17 @@ impl Core {
             }
         }
 
-        let target = file.controller.target.clone().filter(|t| {
-            self.instruments.iter().any(|i| &i.id == t && i.kind == InstrumentType::Tr808)
-        });
-        self.controller.target = target.or_else(|| {
-            self.instruments.iter().find(|i| i.kind == InstrumentType::Tr808).map(|i| i.id.clone())
-        });
-        self.controller.knob_mode = file.controller.knob_mode;
         self.controller.follow = file.controller.follow;
         self.controller.page = 0;
-        // Keyboards set to play an instrument this project lacks fall back
-        // to the first tb303, as after removing it.
-        let mut midi_changed = false;
-        for c in self.midi.connections() {
-            if let Some(id) = c.instrument
-                && !self.instruments.iter().any(|i| i.id == id)
-            {
-                midi_changed |= self.midi.clear_instrument(&id);
-            }
+
+        // Seats: the project's, plus session-only seats someone sits in.
+        let occupied: Vec<String> = self.clients.values().filter_map(|c| c.seat.clone()).collect();
+        self.seats.retain(|n, s| !s.saved && occupied.contains(n) && !file.seats.contains_key(n));
+        for (name, config) in &file.seats {
+            self.seats.insert(name.clone(), SeatState { config: config.clone(), saved: true, learning: None });
         }
-        if midi_changed {
-            let connections = self.midi.connections();
-            self.emit(origin, Event::Midi { connections });
-        }
+        self.reseat_clients();
+        self.refresh_host_seat();
         self.emit(origin, Event::Reset);
         self.refresh_controller(origin, true);
         Ok(warnings)
@@ -1349,6 +1381,9 @@ impl Core {
     /// connection (`conn:<id>`) and holds the notes it starts.
     pub fn handle(&mut self, req: Request, origin: &str, client: &str) -> RpcResult {
         let drum = |c: &Self, id: &Option<String>| c.resolve(id.as_deref(), InstrumentType::Tr808);
+        if let Some(r) = self.handle_seat(&req, origin, client) {
+            return r;
+        }
         match req {
             Request::StateGet(_) => ok(self.snapshot()),
             Request::ParamList(p) => {
@@ -1421,22 +1456,31 @@ impl Core {
             }
             Request::VoiceTrigger(p) => {
                 let velocity = p.velocity.unwrap_or(1.0).clamp(0.0, 1.0);
-                match (p.voice, p.note) {
+                let (id, note) = match (p.voice, p.note) {
                     (Some(voice), None) => {
-                        let id = drum(self, &p.instrument)?;
-                        let slot = self.slot(&id)?;
-                        self.send(Command::Trigger { slot, voice: voice.index() as u8, velocity });
+                        // The focus if it is a drum machine, else the first one.
+                        let focus = self.client_seat(client).or(Some(self.host_seat.clone()));
+                        let id = match (&p.instrument, focus.and_then(|s| self.drum_focus(&s))) {
+                            (None, Some(f)) => f,
+                            _ => drum(self, &p.instrument)?,
+                        };
+                        (id, voice.gm_note())
                     }
                     (None, Some(note)) => {
-                        if !(NOTE_MIN..=NOTE_MAX).contains(&note) {
-                            return Err(RpcError::invalid(format!("note must be {NOTE_MIN}..{NOTE_MAX}")));
+                        if note > 127 {
+                            return Err(RpcError::invalid("note must be 0..127"));
                         }
-                        let id = self.resolve(p.instrument.as_deref(), InstrumentType::Tb303)?;
-                        let slot = self.slot(&id)?;
-                        self.send(Command::NoteOn { slot, note, velocity, gate: true });
+                        let id = match &p.instrument {
+                            Some(id) => self.find_instrument(id)?.id.clone(),
+                            None => self.default_instrument(client)?,
+                        };
+                        (id, note)
                     }
                     _ => return Err(RpcError::invalid("pass exactly one of `voice` (drums) or `note` (notes)")),
-                }
+                };
+                let slot = self.slot(&id)?;
+                self.ensure_room(1)?;
+                self.send(Command::NoteOn { slot, note, velocity, gate: true });
                 ok(Empty {})
             }
             Request::VoiceNoteOn(p) => {
@@ -1447,28 +1491,35 @@ impl Core {
                 self.note_off(p.instrument.as_deref(), p.note, client)?;
                 ok(Empty {})
             }
-            Request::ControllerGet(_) => ok(self.controller.state()),
+            Request::ControllerGet(_) => ok(self.controller_state()),
             Request::ControllerPress(p) => {
+                let seat = self.host_seat.clone();
                 match p.pressed {
-                    Some(pressed) => self.controller_pad(p.row, p.col, pressed, origin)?,
+                    Some(pressed) => self.controller_pad(&seat, p.row, p.col, pressed, origin)?,
                     None => {
-                        self.controller_pad(p.row, p.col, true, origin)?;
-                        self.controller_pad(p.row, p.col, false, origin)?;
+                        self.controller_pad(&seat, p.row, p.col, true, origin)?;
+                        self.controller_pad(&seat, p.row, p.col, false, origin)?;
                     }
                 }
-                ok(self.controller.state())
+                ok(self.controller_state())
             }
             Request::ControllerKnob(p) => {
-                self.controller_knob(p.index, p.value, origin)?;
-                ok(self.controller.state())
+                if p.index as usize >= crate::controller::GRID {
+                    return Err(RpcError::invalid("knob index must be 0..7"));
+                }
+                let seat = self.host_seat.clone();
+                self.page_knob(&seat, p.index as usize, p.value, None, origin)?;
+                ok(self.controller_state())
             }
             Request::ControllerSetMode(p) => ok(self.controller_mode(p, origin)?),
             Request::MidiPorts(_) => ok(self.midi_ports()),
             Request::MidiConnect(p) => ok(self.midi_connect(p, origin)?),
-            Request::MidiDisconnect(p) => {
-                self.midi.disconnect(&p.input).map_err(|e| RpcError::failed(e.to_string()))?;
-                self.midi_changed(origin);
-                ok(self.midi_ports())
+            Request::MidiDisconnect(p) => ok(self.midi_disconnect(&p.input, origin)?),
+            Request::MidiRename(p) => ok(self.midi_rename(p, origin)?),
+            Request::MidiSetSeat(p) => ok(self.midi_set_seat(p.seat, origin)?),
+            Request::MidiInput(p) => {
+                self.midi_input(p, origin, client)?;
+                ok(Empty {})
             }
             Request::ProjectNew(_) => ok(self.project_new(origin)?),
             Request::ProjectSave(p) => ok(self.project_save(p.path, origin)?),
@@ -1481,6 +1532,19 @@ impl Core {
             | Request::RenderOffline(_)
             | Request::DaemonInfo(_)
             | Request::DaemonShutdown(_) => Err(RpcError::failed("handled by connection")),
+            Request::SeatList(_)
+            | Request::SeatClaim(_)
+            | Request::SeatCreate(_)
+            | Request::SeatLeave(_)
+            | Request::SeatRemove(_)
+            | Request::SeatFocus(_)
+            | Request::SeatPage(_)
+            | Request::SeatBind(_)
+            | Request::SeatUnbind(_)
+            | Request::SeatMapCc(_)
+            | Request::SeatUnmapCc(_)
+            | Request::SeatLearnCc(_)
+            | Request::SeatFollowKnobs(_) => unreachable!("handled by handle_seat"),
         }
     }
 }
@@ -1503,7 +1567,8 @@ fn default_project() -> ProjectFile {
         routes: BTreeMap::from([("drums".to_string(), 1)]),
         params: BTreeMap::new(),
         patterns: BTreeMap::new(),
-        controller: ProjectController { target: Some("drums".into()), knob_mode: KnobMode::Volume, follow: true },
+        controller: ProjectController { follow: true },
+        seats: BTreeMap::new(),
     }
 }
 

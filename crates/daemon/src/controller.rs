@@ -1,13 +1,14 @@
-//! Livid Block controller logic: grid pads edit the target drum instrument's
-//! pattern, knobs set its params, LEDs mirror the pattern and playhead. This
-//! is pure state; the same logic serves the real device (via MIDI), the
-//! virtual controller (via RPC), and a future bridge daemon.
+//! Livid Block controller logic: grid pads edit the pattern of the host
+//! seat's focused instrument (when it is a drum machine), knobs control its
+//! knob page, LEDs mirror the pattern and playhead. This is pure state; the
+//! same logic serves the real device (via MIDI), the virtual controller (via
+//! RPC), and a future bridge daemon.
 //!
 //! Layout: 8 rows = 8 tracks, 8 columns = 8 steps of the current page.
-//! Knob N controls track N's parameter selected by the knob mode. With no
-//! target (no `tr808`), the grid is dark and input does nothing.
+//! Knob N controls parameter N of the knob page. Without a drum focus the
+//! grid is dark and pads do nothing.
 
-use fours_protocol::{ControllerState, KnobMode, MAX_STEPS, NUM_TRACKS, STEP_OFF};
+use fours_protocol::{MAX_STEPS, NUM_TRACKS, STEP_OFF};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -16,9 +17,6 @@ pub const GRID: usize = 8;
 pub type Leds = [[u8; GRID]; GRID];
 
 pub struct Controller {
-    /// Id of the drum instrument the controller drives.
-    pub target: Option<String>,
-    pub knob_mode: KnobMode,
     pub page: u32,
     pub follow: bool,
     pub leds: Leds,
@@ -28,8 +26,6 @@ pub struct Controller {
 impl Default for Controller {
     fn default() -> Self {
         Self {
-            target: None,
-            knob_mode: KnobMode::Volume,
             page: 0,
             follow: true,
             leds: [[0; GRID]; GRID],
@@ -39,21 +35,6 @@ impl Default for Controller {
 }
 
 impl Controller {
-    pub fn state(&self) -> ControllerState {
-        ControllerState {
-            target: self.target.clone(),
-            knob_mode: self.knob_mode,
-            knob_params: match &self.target {
-                Some(t) => (0..GRID).map(|i| self.knob_mode.param_path(t, i)).collect(),
-                None => Vec::new(),
-            },
-            page: self.page,
-            follow: self.follow,
-            leds: self.leds.iter().map(|r| r.to_vec()).collect(),
-            device: self.device.clone(),
-        }
-    }
-
     pub fn num_pages(length: u32) -> u32 {
         length.div_ceil(GRID as u32).max(1)
     }

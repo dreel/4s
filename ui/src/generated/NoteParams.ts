@@ -2,11 +2,12 @@
 
 export type NoteParams = { 
 /**
- * Note instrument id; defaults to the first `tb303`.
+ * Instrument id; defaults to the caller's seat focus (or the host
+ * seat's, for a client without a seat).
  */
 instrument: string | null, 
 /**
- * MIDI note (12..108).
+ * MIDI note (0..127; a drum machine plays the voice on that GM note).
  */
 note: number, 
 /**

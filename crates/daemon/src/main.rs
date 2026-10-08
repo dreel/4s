@@ -7,6 +7,7 @@
 mod audio;
 mod controller;
 mod core;
+mod hardware;
 mod midi;
 mod runtime;
 mod server;
@@ -49,6 +50,15 @@ struct Args {
     /// a crashed app never leaves an orphaned daemon behind).
     #[arg(long)]
     parent_pid: Option<u32>,
+}
+
+/// The person running the daemon: their host seat is matched by this name
+/// (RFC 0006). `FOURS_USER` overrides the OS user.
+fn host_user() -> String {
+    ["FOURS_USER", "USER", "USERNAME"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))
+        .unwrap_or_else(|| "me".into())
 }
 
 fn init_logging(log_file: Option<&PathBuf>) -> Result<()> {
@@ -138,7 +148,7 @@ fn run(args: Args) -> Result<()> {
     // Must precede any other MIDI use so hotplugged devices are seen.
     midi::start_device_watcher();
     let (midi_tx, midi_rx) = std::sync::mpsc::channel();
-    let core = Arc::new(Mutex::new(core::Core::new(commands, midi_tx, data_dir.clone(), audio_status)));
+    let core = Arc::new(Mutex::new(core::Core::new(commands, midi_tx, data_dir.clone(), audio_status, host_user())));
     tracing::info!("data dir: {}", data_dir.display());
 
     if let Some(p) = &args.project {

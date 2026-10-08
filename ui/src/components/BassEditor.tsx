@@ -4,6 +4,7 @@
 
 import type { NoteStep } from "../generated/NoteStep";
 import { act, client, setNote, setParam, useApp, useLive } from "../store";
+import { BlockMirror } from "./BlockMirror";
 import { Toggle } from "./controls";
 import { ParamKnob, pct, st } from "./ParamKnob";
 
@@ -32,6 +33,8 @@ export function BassEditor({ id }: { id: string }) {
   const playhead = useApp((s) => s.snapshot?.transport.step ?? null);
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
   const square = useApp((s) => (s.snapshot?.params[`${id}.waveform`] ?? 0) >= 0.5);
+  const focused = useApp((s) => s.snapshot?.controller.focus === id);
+  const blockSeat = useApp((s) => s.snapshot?.controller.seat ?? null);
   if (!pattern || pattern.kind !== "notes") return null;
   const steps = pattern.steps;
 
@@ -109,7 +112,18 @@ export function BassEditor({ id }: { id: string }) {
         >
           audition C2
         </button>
+        {!focused && (
+          <button
+            className="px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 bg-zinc-900 text-xs"
+            data-testid="make-target"
+            title="MIDI devices without bindings and the Block's knobs play the focused instrument"
+            onClick={() => void act(client.call("seat.focus", { seat: blockSeat, instrument: id }))}
+          >
+            focus (MIDI + Block knobs)
+          </button>
+        )}
       </section>
+      {focused && <BlockMirror />}
     </div>
   );
 }

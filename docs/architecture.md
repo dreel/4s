@@ -72,8 +72,9 @@ Implemented by RFC 0004 for instruments, channels, and routes:
   mixer channels, the master bus, MIDI devices. Effects are future work.
 - Edges: audio routing (instrument output -> channel -> master; an output is
   mono or stereo, an instrument has a main out and optionally direct outs)
-  and control mappings (controller input -> parameter; the Livid Block
-  targets one drum instrument).
+  and control mappings (MIDI device -> instrument through a seat's note
+  bindings, CC -> parameter through its CC maps; the Livid Block edits the
+  seat's focused instrument). See "MIDI input and seats" below.
 - Every parameter has a stable, human-readable path, e.g. `mixer.2.volume`,
   `drums.kick.decay`, `bass.cutoff`, `transport.tempo`. An instrument's id is
   the first segment of its paths. Paths are the shared vocabulary of the RPC
@@ -125,3 +126,28 @@ docs/
 ## Open decisions
 
 None currently.
+
+## MIDI input and seats
+
+RFC 0006 (phase 1). Every instrument takes the same input, note on/off
+(`Instrument::note_on`, `note_off`); the 808 maps GM drum notes to voices,
+the 303 keeps a note stack with last-note priority. MIDI is routed on the
+control side, in `crates/daemon/src/core/seats.rs`, in three layers:
+
+- **Hardware** (per machine, `<data-dir>/midi-devices.json`): physical port
+  -> logical device name (`keys`), profile (`generic` or `livid_block`),
+  and whether to auto-connect it.
+- **Seats** (in the project): one performer's focus instrument, knob page,
+  note bindings (`{device, channel, low, high, transpose, target}`), CC
+  maps, and knobs that follow the focus. A device with no bindings plays
+  the seat's focus.
+- **Runtime**: which client sits in which seat. A client joins the one seat
+  matching its user name; otherwise the UI asks (join, create, or ignore =
+  a session-only seat). The engine host's devices use the host seat: a
+  pinned seat (`midi.set_seat`), else the latest local client's seat, else
+  the one matching the OS user.
+
+Knobs pick up: a knob far from the parameter's value does nothing until it
+passes it. Bridges will forward raw input with `midi.input`; the engine
+resolves it, so bindings stay in one place.
+

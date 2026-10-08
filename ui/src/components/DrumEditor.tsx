@@ -120,7 +120,8 @@ export function DrumEditor({ id }: { id: string }) {
   const length = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   const playhead = useApp((s) => s.snapshot?.transport.step ?? null);
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
-  const isTarget = useApp((s) => s.snapshot?.controller.target === id);
+  const isTarget = useApp((s) => s.snapshot?.controller.focus === id);
+  const blockSeat = useApp((s) => s.snapshot?.controller.seat ?? null);
   if (!pattern || pattern.kind !== "drums") return null;
   return (
     <div className="flex flex-col gap-3" data-testid={`drum-editor-${id}`}>
@@ -140,9 +141,7 @@ export function DrumEditor({ id }: { id: string }) {
           <button
             className="px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 bg-zinc-900 text-xs"
             data-testid="make-target"
-            onClick={() =>
-              void act(client.call("controller.set_mode", { target: id, knob_mode: null, page: null, follow: null }))
-            }
+            onClick={() => void act(client.call("seat.focus", { seat: blockSeat, instrument: id }))}
           >
             control with Block
           </button>

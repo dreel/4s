@@ -5,6 +5,7 @@ import type { Graph } from "./Graph";
 import type { InstrumentPattern } from "./InstrumentPattern";
 import type { MidiConnection } from "./MidiConnection";
 import type { ProjectInfo } from "./ProjectInfo";
+import type { SeatsState } from "./SeatsState";
 import type { TransportState } from "./TransportState";
 
 /**
@@ -14,4 +15,4 @@ export type Snapshot = { seq: number, transport: TransportState, params: { [key 
 /**
  * One pattern per instrument, in instrument order.
  */
-patterns: Array<InstrumentPattern>, controller: ControllerState, midi: Array<MidiConnection>, project: ProjectInfo, audio: AudioStatus, };
+patterns: Array<InstrumentPattern>, controller: ControllerState, midi: Array<MidiConnection>, seats: SeatsState, project: ProjectInfo, audio: AudioStatus, };

@@ -1,6 +1,7 @@
 import { Console } from "./components/Console";
 import { Editor } from "./components/Editor";
 import { MidiPanel, ProjectPanel, RenderPanel } from "./components/Panels";
+import { SeatBadge, SeatChooser } from "./components/Seats";
 import { app, client, launch, useApp } from "./store";
 
 const LIFECYCLE_LABELS: Record<string, string> = {
@@ -27,6 +28,7 @@ function Header() {
       <div className="text-xs text-zinc-500" data-testid="lifecycle" data-lifecycle={launch.lifecycle}>
         {LIFECYCLE_LABELS[launch.lifecycle] ?? launch.lifecycle}
       </div>
+      {connection === "open" && <SeatBadge />}
       {audio && (
         <div className="text-xs text-zinc-500" data-testid="audio-status" title={audio.error ?? ""}>
           audio: {audio.backend}
@@ -55,6 +57,7 @@ export function App() {
         </div>
       ) : (
         <main className="flex flex-col gap-3 p-4 overflow-auto *:shrink-0">
+          <SeatChooser />
           <Console />
           <Editor />
           <div className="grid grid-cols-3 gap-3">

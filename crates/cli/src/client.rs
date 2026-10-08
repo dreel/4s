@@ -15,8 +15,25 @@ pub struct Client {
     events: VecDeque<EventEnvelope>,
 }
 
+/// Who is connecting and which seat to take (RFC 0006).
+#[derive(Debug, Clone, Default)]
+pub struct Seating {
+    pub user: Option<String>,
+    /// Join this seat.
+    pub seat: Option<String>,
+    /// Match a seat by user; false stays unseated.
+    pub auto: bool,
+}
+
+impl Seating {
+    /// No seat: for daemon management connections.
+    pub fn none() -> Seating {
+        Seating::default()
+    }
+}
+
 impl Client {
-    pub async fn connect(url: &str, token: Option<String>, name: &str) -> Result<Client> {
+    pub async fn connect(url: &str, token: Option<String>, name: &str, seating: &Seating) -> Result<Client> {
         let (ws, _) = tokio_tungstenite::connect_async(url)
             .await
             .with_context(|| format!("could not connect to 4sd at {url} (is it running?)"))?;
@@ -25,6 +42,9 @@ impl Client {
             client_name: name.into(),
             protocol_version: PROTOCOL_VERSION,
             token,
+            user: seating.user.clone(),
+            seat: seating.seat.clone(),
+            auto_seat: Some(seating.auto),
         }))
         .await?;
         Ok(c)

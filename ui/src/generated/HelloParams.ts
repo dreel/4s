@@ -8,4 +8,18 @@ client_name: string, protocol_version: number,
 /**
  * Required when the daemon was started with `--token`.
  */
-token: string | null, };
+token: string | null, 
+/**
+ * The person using this client. A seat with this name (any case) is
+ * joined automatically if it is the only match; in a project without
+ * seats, one is created for them.
+ */
+user: string | null, 
+/**
+ * Join this existing seat instead of matching by `user`.
+ */
+seat: string | null, 
+/**
+ * Match a seat by `user` (default true). False stays unseated.
+ */
+auto_seat: boolean | null, };

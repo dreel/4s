@@ -1,11 +1,12 @@
 // MIDI devices, project files, and offline render panels.
 
 import { useEffect, useState } from "react";
-import type { DeviceKind } from "../generated/DeviceKind";
+import type { DeviceProfile } from "../generated/DeviceProfile";
 import type { MidiPortsResult } from "../generated/MidiPortsResult";
 import type { RenderResult } from "../generated/RenderResult";
 import { canReveal, desktop, revealLabel } from "../desktop";
 import { act, app, client, useApp } from "../store";
+import { SeatPanel } from "./Seats";
 
 const panel = "flex flex-col gap-2 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 text-xs min-w-0";
 const btn = "px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 bg-zinc-900 disabled:opacity-40";
@@ -14,10 +15,9 @@ const input = "px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-zinc-20
 export function MidiPanel() {
   const connections = useApp((s) => s.snapshot?.midi ?? []);
   const connected = useApp((s) => s.connection === "open");
+  const hostSeat = useApp((s) => s.snapshot?.seats.host);
   const [ports, setPorts] = useState<MidiPortsResult | null>(null);
-  const [kind, setKind] = useState<DeviceKind>("livid_block");
-  const noteInstruments = useApp((s) => (s.snapshot?.graph.instruments ?? []).filter((i) => i.type === "tb303").map((i) => i.id).join(","));
-  const [plays, setPlays] = useState<string>("");
+  const [profile, setProfile] = useState<DeviceProfile | "">("");
   const refresh = async () => setPorts((await act(client.call("midi.ports", {}))) ?? null);
   useEffect(() => {
     if (connected) void refresh();
@@ -34,28 +34,12 @@ export function MidiPanel() {
       </div>
       <label className="flex items-center gap-2 text-zinc-400">
         connect as
-        <select className={input} value={kind} onChange={(e) => setKind(e.target.value as DeviceKind)} data-testid="midi-kind">
+        <select className={input} value={profile} onChange={(e) => setProfile(e.target.value as DeviceProfile | "")} data-testid="midi-profile">
+          <option value="">auto</option>
+          <option value="generic">notes + CCs</option>
           <option value="livid_block">Livid Block</option>
-          <option value="generic_drums">GM drum notes</option>
-          <option value="keyboard">Keyboard (plays a 303)</option>
         </select>
       </label>
-      {kind === "keyboard" && (
-        <label className="flex items-center gap-2 text-zinc-400">
-          plays
-          <select className={input} value={plays} onChange={(e) => setPlays(e.target.value)} data-testid="midi-keyboard-instrument">
-            <option value="">first tb303</option>
-            {noteInstruments
-              .split(",")
-              .filter(Boolean)
-              .map((id) => (
-                <option key={id} value={id}>
-                  {id}
-                </option>
-              ))}
-          </select>
-        </label>
-      )}
       <div className="flex flex-col gap-1">
         {(ports?.inputs ?? []).length === 0 && <div className="text-zinc-500">no MIDI inputs found</div>}
         {(ports?.inputs ?? []).map((name) => (
@@ -72,7 +56,7 @@ export function MidiPanel() {
                 className={btn}
                 data-testid={`midi-connect-${name}`}
                 onClick={() =>
-                  void act(client.call("midi.connect", { input: name, output: null, kind, instrument: kind === "keyboard" && plays ? plays : null }))
+                  void act(client.call("midi.connect", { input: name, output: null, name: null, profile: profile || null }))
                 }
               >
                 connect
@@ -84,13 +68,15 @@ export function MidiPanel() {
       {connections.length > 0 && (
         <div className="text-zinc-400">
           {connections.map((c) => (
-            <div key={c.input}>
-              {c.input} ({c.kind === "livid_block" ? "Block" : c.kind === "keyboard" ? "keyboard" : "drums"}){c.output ? ` -> ${c.output}` : ""}
-              {c.instrument ? ` plays ${c.instrument}` : ""}
+            <div key={c.input} data-testid={`midi-device-${c.device}`}>
+              {c.device} <span className="text-zinc-600">{c.input}</span> ({c.profile === "livid_block" ? "Block" : "notes + CCs"})
+              {c.output ? ` -> ${c.output}` : ""}
             </div>
           ))}
+          {hostSeat && <div className="text-zinc-500">devices here play in seat {hostSeat}</div>}
         </div>
       )}
+      <SeatPanel />
     </section>
   );
 }

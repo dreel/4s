@@ -5,7 +5,7 @@
 
 use crate::tb303::Tb303;
 use crate::tr808::Tr808;
-use fours_protocol::{InstrumentType, MAX_STEPS, NoteStep, OutputInfo, OutputWidth, ParamInfo};
+use fours_protocol::{InstrumentType, KnobPage, MAX_STEPS, NoteStep, OutputInfo, OutputWidth, ParamInfo};
 
 /// Most frames rendered per call. The engine splits larger blocks.
 pub const MAX_BLOCK: usize = 256;
@@ -41,18 +41,18 @@ pub trait Instrument: Send {
     /// The transport stopped.
     fn on_stop(&mut self) {}
 
-    /// Play a drum voice now. Returns false if this instrument has no voices.
-    fn trigger(&mut self, _voice: usize, _velocity: f32) -> bool {
-        false
-    }
+    /// Start a note: the one input every instrument takes (RFC 0006). With
+    /// `gate_samples`, it releases by itself after that long; otherwise it
+    /// holds until `note_off` for the same note. Returns what played, or
+    /// `None` if the note means nothing to this instrument (a drum machine
+    /// maps notes to voices).
+    fn note_on(&mut self, note: u8, velocity: f32, gate_samples: Option<f64>) -> Option<Hit>;
 
-    /// Start a note. With `gate_samples`, it releases by itself after that
-    /// long; otherwise it holds until `note_off`. Returns false if this
-    /// instrument does not play notes.
-    fn note_on(&mut self, _note: u8, _velocity: f32, _gate_samples: Option<f64>) -> bool {
-        false
-    }
-    fn note_off(&mut self) {}
+    /// Release a held note.
+    fn note_off(&mut self, _note: u8) {}
+
+    /// Release every held note.
+    fn all_notes_off(&mut self) {}
 
     /// Render `frames` (<= MAX_BLOCK) frames into the output buffers.
     fn render(&mut self, frames: usize);
@@ -77,6 +77,14 @@ pub fn params(kind: InstrumentType, id: &str) -> Vec<ParamInfo> {
     match kind {
         InstrumentType::Tr808 => Tr808::params(id),
         InstrumentType::Tb303 => Tb303::params(id),
+    }
+}
+
+/// Knob pages of an instance with id `id` (RFC 0006).
+pub fn knob_pages(kind: InstrumentType, id: &str) -> Vec<KnobPage> {
+    match kind {
+        InstrumentType::Tr808 => Tr808::knob_pages(id),
+        InstrumentType::Tb303 => Tb303::knob_pages(id),
     }
 }
 
