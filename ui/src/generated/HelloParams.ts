@@ -8,4 +8,9 @@ client_name: string, protocol_version: number,
 /**
  * Required when the daemon was started with `--token`.
  */
-token: string | null, };
+token: string | null, 
+/**
+ * Who is editing: owns this connection's undo history. Defaults to the
+ * daemon host's user, so local clients share one history.
+ */
+user: string | null, };

@@ -1,7 +1,8 @@
 import { Console } from "./components/Console";
 import { Editor } from "./components/Editor";
 import { MidiPanel, ProjectPanel, RenderPanel } from "./components/Panels";
-import { app, client, launch, useApp } from "./store";
+import { desktop } from "./desktop";
+import { app, client, launch, undo, useApp } from "./store";
 
 const LIFECYCLE_LABELS: Record<string, string> = {
   connected: "using running daemon",
@@ -9,6 +10,47 @@ const LIFECYCLE_LABELS: Record<string, string> = {
   "started-detached": "daemon started in background",
   external: "external daemon",
 };
+
+function HistoryButtons() {
+  const h = useApp((s) => s.history);
+  const btn = "px-2 py-0.5 rounded border border-zinc-700 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-30";
+  return (
+    <div className="flex gap-1" data-testid="history" data-undo={h.undoCount} data-redo={h.redoCount}>
+      <button className={btn} disabled={!h.undo} title={h.undo ? `undo ${h.undo}` : "nothing to undo"} data-testid="undo" onClick={() => void undo()}>
+        undo
+      </button>
+      <button className={btn} disabled={!h.redo} title={h.redo ? `redo ${h.redo}` : "nothing to redo"} data-testid="redo" onClick={() => void undo(true)}>
+        redo
+      </button>
+    </div>
+  );
+}
+
+function inTextField(): boolean {
+  const t = document.activeElement as HTMLElement | null;
+  return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+}
+
+/** Undo/redo shortcuts. In Electron they come from the app menu (Edit >
+ * Undo, Redo); in a plain browser, from Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z, and
+ * Ctrl+Y. A focused text field keeps its own undo. */
+export function installUndoKeys() {
+  if (desktop) {
+    desktop.onHistory((what) => {
+      if (inTextField()) document.execCommand(what);
+      else void undo(what === "redo");
+    });
+    return;
+  }
+  window.addEventListener("keydown", (e) => {
+    if (inTextField() || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key === "z" || key === "y") {
+      e.preventDefault();
+      void undo(key === "y" || e.shiftKey);
+    }
+  });
+}
 
 function Header() {
   const connection = useApp((s) => s.connection);
@@ -27,6 +69,7 @@ function Header() {
       <div className="text-xs text-zinc-500" data-testid="lifecycle" data-lifecycle={launch.lifecycle}>
         {LIFECYCLE_LABELS[launch.lifecycle] ?? launch.lifecycle}
       </div>
+      <HistoryButtons />
       {audio && (
         <div className="text-xs text-zinc-500" data-testid="audio-status" title={audio.error ?? ""}>
           audio: {audio.backend}

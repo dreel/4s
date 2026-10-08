@@ -48,7 +48,8 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop`), the instrument graph (`instrument.*`, `channel.*`,
 `route.set`), pattern edits (`pattern.*`, drum steps and note steps),
-auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`), projects
+auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
+undo and the journal (`history.*`, `journal.get`), projects
 (`project.*`), rendering (`render.offline`), status (`engine.status`), and the
 daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).
 
@@ -122,7 +123,12 @@ Implemented:
 - **Version handshake**: `session.hello` carries `protocol_version`; a
   mismatch is refused.
 - **Identity**: `hello` carries a client name; events carry `origin` (client
-  name, `midi:<port>`, or `engine`).
+  name, `midi:<port>`, or `engine`). `hello` may also carry a `user`, which
+  owns the connection's undo history (default: the engine host's user); see
+  [RFC 0006](rfcs/0006-journal-and-undo.md).
+- **Journal**: every request that could change state is journaled with its
+  user, origin, and changes (`journal.get`, `journal` events); MIDI input is
+  journaled as its equivalent RPC.
 - **Resync**: snapshot + sequence-numbered events, as above.
 - **Files**: projects and renders are engine-side paths; relative paths
   resolve under the daemon's data dir.

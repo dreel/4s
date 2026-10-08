@@ -82,6 +82,10 @@ pub struct HelloParams {
     /// Required when the daemon was started with `--token`.
     #[serde(default)]
     pub token: Option<String>,
+    /// Who is editing: owns this connection's undo history. Defaults to the
+    /// daemon host's user, so local clients share one history.
+    #[serde(default)]
+    pub user: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -219,6 +223,39 @@ pub struct RouteSetParams {
     /// current channel (if it had none, they stay and share the channel).
     #[serde(default)]
     pub swap: bool,
+}
+
+// ---- history and journal -------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct HistoryStepResult {
+    /// What was undone or redone; null if the stack was empty.
+    pub label: Option<String>,
+    /// Keys it changed.
+    pub changed: Vec<String>,
+    /// Keys left alone because another user changed them since.
+    pub skipped: Vec<String>,
+    pub history: HistoryInfo,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct JournalGetParams {
+    /// Only entries with a greater seq.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub since: Option<u64>,
+    /// At most this many (newest), default 100.
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// Only this user's entries.
+    #[serde(default)]
+    pub user: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct JournalGetResult {
+    /// Oldest first.
+    pub entries: Vec<JournalEntry>,
 }
 
 // ---- pattern -------------------------------------------------------------
@@ -516,6 +553,15 @@ api! {
     ChannelMove = "channel.move" (ChannelMoveParams) -> Graph;
     /// Route an instrument output to a channel, or unroute it.
     RouteSet = "route.set" (RouteSetParams) -> Graph;
+
+    /// Undo the caller's last change, leaving keys another user changed since.
+    HistoryUndo = "history.undo" (Empty) -> HistoryStepResult;
+    /// Redo the caller's last undo.
+    HistoryRedo = "history.redo" (Empty) -> HistoryStepResult;
+    /// The caller's undo and redo stacks.
+    HistoryGet = "history.get" (Empty) -> HistoryInfo;
+    /// Recent journal entries: every request that could change state.
+    JournalGet = "journal.get" (JournalGetParams) -> JournalGetResult;
 
     /// Read a drum pattern (one voice or all).
     PatternGet = "pattern.get" (PatternGetParams) -> PatternResult;
