@@ -41,6 +41,7 @@ and agents can drive and verify every part of it.
 - [Testing](docs/testing.md) -- e2e first; which unit tests are worth writing (RFC 0002)
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
+- [Akai MPK mini IV](docs/hardware/akai-mpk-mini-iv.md) -- device model, ports, default layout
 
 ## Build, run, verify
 

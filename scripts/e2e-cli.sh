@@ -229,6 +229,56 @@ check "unbind removes one binding" "bind 1: keys ch 10 all notes -> drums" s unb
 s unbind 1 >/dev/null
 s midi disconnect keys >/dev/null
 exec 8>&-
+# Device models (RFC 0007): an Akai MPK mini IV, as two virtual ports named
+# like the real one's. Its keys/pads come on the MIDI Port, its endless
+# knobs on the DAW Port (relative CCs 24-31).
+MPK="MPK mini IV MIDI Port e2e$$"; MPKD="MPK mini IV DAW Port e2e$$"
+mkfifo "$TMP/mpk.in" "$TMP/mpkd.in"
+target/debug/examples/virtual_block "$MPK" < "$TMP/mpk.in" > "$TMP/mpk.out" 2>&1 &
+exec 5> "$TMP/mpk.in"
+target/debug/examples/virtual_block "$MPKD" < "$TMP/mpkd.in" > "$TMP/mpkd.out" 2>&1 &
+exec 6> "$TMP/mpkd.in"
+for _ in $(seq 50); do grep -q ready "$TMP/mpk.out" && grep -q ready "$TMP/mpkd.out" && break; sleep 0.1; done
+for _ in $(seq 30); do s midi ports | grep -q "$MPKD" && break; sleep 0.1; done
+check "known models" "akai_mpk_mini_iv   Akai MPK mini IV" s midi models
+check "a model's port gets its name" "$MPK as mpk (Generic) model akai_mpk_mini_iv" s midi connect "$MPK"
+check "and its other port its own" "$MPKD as mpk_daw (Generic) model akai_mpk_mini_iv" s midi connect "$MPKD"
+check "with no bindings, the seat uses the model's default layout" "default layout: mpk (Akai MPK mini IV)" s seat
+"$BIN/4s" watch --type trigger --count 2 --json > "$TMP/mpk.json" &
+WATCH=$!; sleep 0.5
+echo "raw 90 30 64" >&5; echo "raw 80 30 00" >&5   # a key, channel 1
+echo "raw 99 25 64" >&5; echo "raw 89 25 00" >&5   # pad 2, channel 10
+echo "raw 99 25 64" >&6; echo "raw 89 25 00" >&6   # the DAW Port's copy of it
+wait $WATCH; sleep 0.3
+check "keys play the focus" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
+check "pads play the 808's voices in order" '"instrument":"drums","voice":"snare"' cat "$TMP/mpk.json"
+s set bass.cutoff 0.5 >/dev/null
+echo "raw B0 18 0A" >&6; sleep 0.3   # knob 1 turned up 10 steps
+check "an endless knob moves the focus's page parameter by steps" "bass.cutoff = 0.55" s get bass.cutoff
+echo "raw B0 18 7B" >&6; sleep 0.3   # 5 steps down
+check "and back down" "bass.cutoff = 0.525" s get bass.cutoff
+echo "raw B0 01 00" >&5; echo "raw B0 01 7F" >&5; sleep 0.3
+check "the mod control moves focus.cutoff" "bass.cutoff = 1" s get bass.cutoff
+s focus drums >/dev/null
+echo "raw B0 01 00" >&5; sleep 0.3
+check "focus.cutoff does nothing when the focus has none" "bass.cutoff = 1" s get bass.cutoff
+s focus bass >/dev/null
+BEFORE=$(s --json journal --limit 10000 | python3 -c "import json,sys;print(len(json.load(sys.stdin)['entries']))")
+for v in 50 60 70 40; do echo "raw E0 00 $v" >&5; done; sleep 0.3
+check "pitch bend plays without being journaled" "0 new entries" bash -c "echo \$(( \$($BIN/4s --json journal --limit 10000 | python3 -c \"import json,sys;print(len(json.load(sys.stdin)['entries']))\") - $BEFORE )) new entries"
+check "apply the layout to edit it" "bind 2: mpk ch 10 C2..G2 as C2,D2,D#2,F#2,A#2,A2,D3,G#3 -> @tr808" s midi layout mpk --apply
+check "the seat now has its own bindings" "knobs: mpk_daw cc 24 25 26 27 28 29 30 31 follow focus (relative)" s seat
+check "undo takes the applied layout back" "default layout: mpk_daw" bash -c "$BIN/4s undo >/dev/null && $BIN/4s seat"
+# Remap and @type work for any device.
+s bind pads --notes 60..61 --remap 36,38 --to @tr808 >/dev/null
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/remap.json" &
+WATCH=$!; sleep 0.5
+s midi send pads 90 3D 64 >/dev/null
+wait $WATCH
+check "remap: the second note plays the second voice of the first tr808" '"instrument":"drums","voice":"snare"' cat "$TMP/remap.json"
+s unbind 1 >/dev/null
+s midi disconnect mpk >/dev/null; s midi disconnect mpk_daw >/dev/null
+exec 5>&- 6>&-
 BASS_RMS=$(s --json render --bars 1 --out renders/b1.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
 s set mixer.2.mute on >/dev/null
 MUTED_RMS=$(s --json render --bars 1 --out renders/b2.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
@@ -433,7 +483,7 @@ s set bass.cutoff 0.25 >/dev/null
 # the seat matching its user, and the host's devices play in the host seat.
 check "the CLI joins the seat matching its user" "you: e2e" s seat
 check "it is this engine's devices' seat" "e2e: cli#" s seat
-check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 4, "user": "bob"}'
+check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 5, "user": "bob"}'
 check "and stays unseated" "you: (no seat)" s --user bob seat
 check "seat edits need a seat" "you have no seat" s --user bob focus drums
 check "create a seat for bob" "you: bob" s --user bob --new-seat seat

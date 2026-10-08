@@ -888,7 +888,13 @@ impl Core {
         let (device, profile) = (c.device.clone(), c.profile);
         // Only input that can do something is handled and journaled: notes
         // and CCs (a Block's pads and knobs). Clock, active sensing, sysex,
-        // pitch bend, and aftertouch would flood the journal.
+        // and aftertouch would flood the journal. Pitch bend is a gesture,
+        // not an edit: it plays at once and is not journaled.
+        if profile == DeviceProfile::Generic && msg.data.len() >= 3 && msg.data[0] & 0xf0 == 0xe0 {
+            let seat = self.host_seat.clone();
+            self.device_input(&seat, &device, profile, &format!("midi:{device}"), &msg.data, &origin);
+            return;
+        }
         let useful = match profile {
             DeviceProfile::LividBlock => decode_block(&self.block_map, &msg.data).is_some(),
             DeviceProfile::Generic => {
@@ -930,6 +936,9 @@ impl Core {
         self.controller.device = self.midi.block_name();
         let connections = self.midi.connections();
         self.emit(origin, Event::Midi { connections });
+        // Which devices use a default layout depends on what is connected.
+        let state = self.seats_state();
+        self.emit(origin, Event::Seats { state });
         self.push_all_leds();
         self.refresh_controller(origin, true);
     }
@@ -948,15 +957,14 @@ impl Core {
         {
             self.hardware.forget(&old);
         }
-        let (name, profile) =
-            self.hardware.resolve(&port, p.name.as_deref(), p.profile).map_err(RpcError::invalid)?;
-        if self.midi.by_device(&name).is_some() {
-            return Err(RpcError::invalid(format!("a connected device is already named '{name}'")));
+        let r = self.hardware.resolve(&port, p.name.as_deref(), p.profile).map_err(RpcError::invalid)?;
+        if self.midi.by_device(&r.name).is_some() {
+            return Err(RpcError::invalid(format!("a connected device is already named '{}'", r.name)));
         }
         self.midi
-            .connect(&port, p.output.as_deref(), &name, profile, self.midi_tx.clone())
+            .connect(&port, p.output.as_deref(), &r, self.midi_tx.clone())
             .map_err(|e| RpcError::failed(e.to_string()))?;
-        self.hardware.connected(&port, &name, profile);
+        self.hardware.connected(&port, &r);
         self.midi_changed(origin);
         Ok(self.midi_ports())
     }
@@ -1040,24 +1048,25 @@ impl Core {
         }
         if auto {
             let mut want: Vec<String> = self.hardware.auto_ports();
-            // A Block by name, unless it was disconnected by hand.
-            if self.midi.block_name().is_none()
-                && let Some(b) =
-                    inputs.iter().find(|n| hardware::looks_like_block(n) && !self.hardware.hand_disconnected(n))
-            {
-                want.push(b.clone());
-            }
+            // Ports of known models (a Block, an MPK mini IV, ...), unless
+            // disconnected by hand.
+            want.extend(
+                inputs
+                    .iter()
+                    .filter(|n| hardware::known_model_port(n) && !self.hardware.hand_disconnected(n))
+                    .cloned(),
+            );
             for port in want {
                 if !inputs.contains(&port) || self.midi.is_connected(&port) {
                     continue;
                 }
-                let Ok((name, profile)) = self.hardware.resolve(&port, None, None) else { continue };
-                if self.midi.by_device(&name).is_some() {
+                let Ok(r) = self.hardware.resolve(&port, None, None) else { continue };
+                if self.midi.by_device(&r.name).is_some() {
                     continue;
                 }
-                match self.midi.connect(&port, None, &name, profile, self.midi_tx.clone()) {
+                match self.midi.connect(&port, None, &r, self.midi_tx.clone()) {
                     Ok(c) => {
-                        self.hardware.connected(&port, &name, profile);
+                        self.hardware.connected(&port, &r);
                         tracing::info!("auto-connected {} as {} ({:?}, output: {:?})", c.input, c.device, c.profile, c.output);
                         changed = true;
                     }
@@ -1890,6 +1899,7 @@ impl Core {
                 self.midi_input(p, origin, client)?;
                 ok(Empty {})
             }
+            Request::MidiModels(_) => ok(MidiModelsResult { models: crate::models::all().to_vec() }),
             Request::ProjectNew(_) => ok(self.project_new(origin)?),
             Request::ProjectSave(p) => ok(self.project_save(p.path, origin)?),
             Request::ProjectLoad(p) => ok(self.project_load(&p.path, origin)?),
@@ -1916,7 +1926,8 @@ impl Core {
             | Request::SeatMapCc(_)
             | Request::SeatUnmapCc(_)
             | Request::SeatLearnCc(_)
-            | Request::SeatFollowKnobs(_) => unreachable!("handled by handle_seat"),
+            | Request::SeatFollowKnobs(_)
+            | Request::SeatApplyLayout(_) => unreachable!("handled by handle_seat"),
             Request::ClipGet(_)
             | Request::ClipSet(_)
             | Request::ClipAdd(_)
@@ -1936,7 +1947,7 @@ fn read_only(req: &Request) -> bool {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_) | EngineStatus(_)
-        | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) => true,
+        | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
         | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
         | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
@@ -1945,7 +1956,7 @@ fn read_only(req: &Request) -> bool {
         | ProjectSave(_) | ProjectLoad(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_) | SeatClaim(_)
         | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_) | SeatUnbind(_)
         | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) => false,
+        | ClipRemove(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) => false,
     }
 }
 
@@ -2007,6 +2018,12 @@ fn default_project() -> ProjectFile {
         controller: ProjectController { follow: true },
         seats: BTreeMap::new(),
     }
+}
+
+/// Check a device model's layout as a seat config (the models' test).
+#[cfg(test)]
+pub fn check_layout(c: &SeatConfig) -> Result<(), RpcError> {
+    check_seat_config(c)
 }
 
 /// Used by tests and the server for a JSON error body.

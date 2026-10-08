@@ -13,4 +13,13 @@ name: string, profile: DeviceProfile,
 /**
  * Connect automatically when the port appears.
  */
-auto_connect: boolean, };
+auto_connect: boolean, 
+/**
+ * Known device model (`midi.models`) this port belongs to.
+ */
+model: string | null, 
+/**
+ * The port's role in its model: the model's name for it (e.g.
+ * `mpk_daw`), which its default layout refers to.
+ */
+role: string | null, };

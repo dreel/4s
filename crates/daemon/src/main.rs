@@ -10,6 +10,7 @@ mod core;
 mod hardware;
 mod journal;
 mod midi;
+mod models;
 mod runtime;
 mod server;
 

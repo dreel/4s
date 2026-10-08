@@ -14,4 +14,9 @@ occupants: Array<string>,
  * Parameter that the next CC moved on this seat's devices will be
  * mapped to (`seat.learn_cc`).
  */
-learning: string | null, };
+learning: string | null, 
+/**
+ * Devices on this engine that play here with their model's default
+ * layout (no bindings of the seat's own), as `device (Model)`.
+ */
+defaults: Array<string>, };

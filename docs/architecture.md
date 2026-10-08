@@ -151,6 +151,14 @@ control side, in `crates/daemon/src/core/seats.rs`, in three layers:
   `seat claim`/`seat create`), else the one matching the OS user. A one-off
   `4s --seat bob ...` or `4s --user carol ...` does not move the devices.
 
+**Device models** (`crates/daemon/devices/*.json`) describe known
+controllers: which ports to use and what to call them, and a default layout
+that seats use until they bind the device themselves (`4s midi models`,
+`4s midi layout <device> [--apply]`). Bindings can `remap` notes and target
+`@<type>` (the first instrument of a type); CC maps can target
+`focus.<param>` and read endless encoders (`relative`). Pitch bend plays the
+focus and is not journaled.
+
 Knobs pick up: a knob far from the parameter's value does nothing until it
 passes it. Bridges will forward raw input with `midi.input`; the engine
 resolves it, so bindings stay in one place.

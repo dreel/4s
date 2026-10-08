@@ -1,0 +1,27 @@
+{
+  "id": "akai_mpk_mini_iv",
+  "label": "Akai MPK mini IV",
+  "match": "MPK mini IV",
+  "ports": {
+    "MIDI Port": "mpk",
+    "DAW Port": "mpk_daw",
+    "Plugin Port": "ignore",
+    "Software Control Port": "ignore",
+    "Din Port": "ignore"
+  },
+  "profile": "generic",
+  "layout": {
+    "bindings": [
+      { "device": "mpk", "channel": 1, "target": "focus" },
+      { "device": "mpk", "channel": 10, "low": 36, "high": 43, "remap": [36, 38, 39, 42, 46, 45, 50, 56], "target": "@tr808" },
+      { "device": "mpk", "channel": 10, "low": 44, "high": 51, "remap": [36, 38, 39, 42, 46, 45, 50, 56], "target": "@tr808" }
+    ],
+    "cc": [
+      { "device": "mpk", "channel": 1, "cc": 1, "param": "focus.cutoff" }
+    ],
+    "knobs": [
+      { "device": "mpk_daw", "channel": 1, "ccs": [24, 25, 26, 27, 28, 29, 30, 31], "mode": "relative" }
+    ],
+    "pitch_bend": "focus"
+  }
+}

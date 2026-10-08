@@ -1,0 +1,8 @@
+{
+  "id": "livid_block",
+  "label": "Livid Block",
+  "match": "block",
+  "ports": { "": "block" },
+  "profile": "livid_block",
+  "layout": {}
+}

@@ -554,6 +554,20 @@ pub struct MidiInputParams {
     pub seat: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct MidiModelsResult {
+    pub models: Vec<DeviceModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatApplyLayoutParams {
+    /// Default: the caller's seat.
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// A connected device of a known model.
+    pub device: String,
+}
+
 // ---- seats ---------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -822,6 +836,8 @@ api! {
     MidiSetSeat = "midi.set_seat" (MidiSetSeatParams) -> MidiPortsResult;
     /// Feed one raw MIDI message from a logical device (as a bridge does).
     MidiInput = "midi.input" (MidiInputParams) -> Empty;
+    /// Known device models, with their ports and default layouts.
+    MidiModels = "midi.models" (Empty) -> MidiModelsResult;
 
     /// Seats, who sits where, and the host seat.
     SeatList = "seat.list" (Empty) -> SeatListResult;
@@ -851,6 +867,8 @@ api! {
     SeatLearnCc = "seat.learn_cc" (SeatLearnCcParams) -> Seat;
     /// Make a device's CCs control the focused instrument's knob page.
     SeatFollowKnobs = "seat.follow_knobs" (SeatFollowKnobsParams) -> Seat;
+    /// Copy a device model's default layout into the seat, to edit it.
+    SeatApplyLayout = "seat.apply_layout" (SeatApplyLayoutParams) -> Seat;
 
     /// Reset to a fresh default project.
     ProjectNew = "project.new" (Empty) -> ProjectInfo;

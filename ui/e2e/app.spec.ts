@@ -330,6 +330,37 @@ test("seats: joined automatically, chooser to ignore, rejoin, and re-ask when th
   await expect(page.getByTestId("seat")).toHaveAttribute("data-seat", "pwother");
 });
 
+test("a known device model plays with its default layout until the seat edits it", async () => {
+  const { page, rpc } = h;
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const bin = path.join(root, "target", "debug", "examples", "virtual_block");
+  if (!existsSync(bin)) throw new Error("build it with: cargo build -p fours-daemon --example virtual_block");
+  const port = `MPK mini IV MIDI Port pw${process.pid}`;
+  const dev = spawn(bin, [port], { stdio: "pipe" });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let out = "";
+      dev.stdout!.on("data", (d) => {
+        out += d;
+        if (out.includes("ready")) resolve();
+      });
+      setTimeout(() => reject(new Error(`virtual_block not ready: ${out}`)), 10_000);
+    });
+    await expect
+      .poll(async () => (await rpc("midi.ports", {})).inputs.includes(port), { timeout: 20_000 })
+      .toBe(true);
+    await rpc("midi.connect", { input: port, output: null, name: null, profile: null });
+    await expect(page.getByTestId("midi-device-mpk")).toContainText("akai_mpk_mini_iv");
+    await expect(page.getByTestId("seat-default-mpk")).toContainText("Akai MPK mini IV");
+    await page.getByTestId("seat-apply-mpk").click();
+    await expect(page.getByTestId("seat-default-mpk")).toHaveCount(0);
+    await expect(page.getByTestId("binding-1")).toContainText("@tr808");
+    await rpc("midi.disconnect", { input: port });
+  } finally {
+    dev.kill();
+  }
+});
+
 test("clips: a note off the step grid shows as a note in the editor, and steps still edit the clip", async () => {
   const { page, rpc } = h;
   await page.getByTestId("step-kick-0").click();

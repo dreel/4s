@@ -16,4 +16,9 @@ focus: string | null,
  * Knob page id; the focused instrument's first page if absent or not
  * one of its pages.
  */
-knob_page: string | null, bindings: Array<NoteBinding>, cc: Array<CcMap>, knobs: Array<KnobFollow>, };
+knob_page: string | null, bindings: Array<NoteBinding>, cc: Array<CcMap>, knobs: Array<KnobFollow>, 
+/**
+ * Where pitch bend goes: `focus`, an instrument id, or `@<type>`.
+ * Default: the focus.
+ */
+pitch_bend: string | null, };

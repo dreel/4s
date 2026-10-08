@@ -24,13 +24,17 @@
           "device": {
             "type": "string"
           },
+          "mode": {
+            "$ref": "#/$defs/CcMode",
+            "default": "absolute"
+          },
           "param": {
-            "description": "Parameter path.",
+            "description": "Parameter path; `focus.<param>` follows the seat's focus (e.g.\n`focus.cutoff`; nothing when the focus has no such parameter).",
             "type": "string"
           },
           "pickup": {
             "default": true,
-            "description": "Only take over once the knob passes the current value.",
+            "description": "Only take over once the knob passes the current value (absolute).",
             "type": "boolean"
           }
         },
@@ -40,6 +44,21 @@
           "param"
         ],
         "type": "object"
+      },
+      "CcMode": {
+        "description": "How a CC's value moves a parameter.",
+        "oneOf": [
+          {
+            "const": "absolute",
+            "description": "0..127 is the parameter's range (a pot or fader).",
+            "type": "string"
+          },
+          {
+            "const": "relative",
+            "description": "Endless encoder: 1..63 turn up, 65..127 turn down (127 = -1).",
+            "type": "string"
+          }
+        ]
       },
       "Change": {
         "description": "One change to an addressable piece of project state, e.g.\n`param:mixer.2.volume`, `step:drums.kick.3`, `note:bass.5`,\n`instrument:bass`, `channel:2`, `channels:order`, `route:drums.kick`.\n`null` means absent (or, for params and steps, the default).",
@@ -891,6 +910,10 @@
           "device": {
             "type": "string"
           },
+          "mode": {
+            "$ref": "#/$defs/CcMode",
+            "default": "absolute"
+          },
           "pickup": {
             "default": true,
             "type": "boolean"
@@ -911,6 +934,14 @@
           "input": {
             "type": "string"
           },
+          "model": {
+            "default": null,
+            "description": "Known device model, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "output": {
             "type": [
               "string",
@@ -919,6 +950,14 @@
           },
           "profile": {
             "$ref": "#/$defs/DeviceProfile"
+          },
+          "role": {
+            "default": null,
+            "description": "The port's role in its model (see `MidiDevice::role`).",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -967,8 +1006,22 @@
               "null"
             ]
           },
+          "remap": {
+            "default": null,
+            "description": "Output note for input notes `low`, `low + 1`, ... (from 0 without\n`low`), e.g. pads to drum voices. Overrides `transpose`; a note past\nthe list plays nothing.",
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "target": {
-            "description": "An instrument id, or `focus` for the seat's focused instrument.",
+            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).",
             "type": "string"
           },
           "transpose": {
@@ -1061,6 +1114,14 @@
           "config": {
             "$ref": "#/$defs/SeatConfig"
           },
+          "defaults": {
+            "default": [],
+            "description": "Devices on this engine that play here with their model's default\nlayout (no bindings of the seat's own), as `device (Model)`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "learning": {
             "description": "Parameter that the next CC moved on this seat's devices will be\nmapped to (`seat.learn_cc`).",
             "type": [
@@ -1130,6 +1191,14 @@
               "$ref": "#/$defs/KnobFollow"
             },
             "type": "array"
+          },
+          "pitch_bend": {
+            "default": null,
+            "description": "Where pitch bend goes: `focus`, an instrument id, or `@<type>`.\nDefault: the focus.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -1216,13 +1285,17 @@
           "device": {
             "type": "string"
           },
+          "mode": {
+            "$ref": "#/$defs/CcMode",
+            "default": "absolute"
+          },
           "param": {
-            "description": "Parameter path.",
+            "description": "Parameter path; `focus.<param>` follows the seat's focus (e.g.\n`focus.cutoff`; nothing when the focus has no such parameter).",
             "type": "string"
           },
           "pickup": {
             "default": true,
-            "description": "Only take over once the knob passes the current value.",
+            "description": "Only take over once the knob passes the current value (absolute).",
             "type": "boolean"
           }
         },
@@ -1232,6 +1305,21 @@
           "param"
         ],
         "type": "object"
+      },
+      "CcMode": {
+        "description": "How a CC's value moves a parameter.",
+        "oneOf": [
+          {
+            "const": "absolute",
+            "description": "0..127 is the parameter's range (a pot or fader).",
+            "type": "string"
+          },
+          {
+            "const": "relative",
+            "description": "Endless encoder: 1..63 turn up, 65..127 turn down (127 = -1).",
+            "type": "string"
+          }
+        ]
       },
       "ChannelInfo": {
         "properties": {
@@ -1291,6 +1379,10 @@
           "device": {
             "type": "string"
           },
+          "mode": {
+            "$ref": "#/$defs/CcMode",
+            "default": "absolute"
+          },
           "pickup": {
             "default": true,
             "type": "boolean"
@@ -1341,8 +1433,22 @@
               "null"
             ]
           },
+          "remap": {
+            "default": null,
+            "description": "Output note for input notes `low`, `low + 1`, ... (from 0 without\n`low`), e.g. pads to drum voices. Overrides `transpose`; a note past\nthe list plays nothing.",
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "target": {
-            "description": "An instrument id, or `focus` for the seat's focused instrument.",
+            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).",
             "type": "string"
           },
           "transpose": {
@@ -1487,6 +1593,14 @@
               "$ref": "#/$defs/KnobFollow"
             },
             "type": "array"
+          },
+          "pitch_bend": {
+            "default": null,
+            "description": "Where pitch bend goes: `focus`, an instrument id, or `@<type>`.\nDefault: the focus.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -1570,7 +1684,7 @@
     "type": "object"
   },
   "project_format_version": 4,
-  "protocol_version": 4,
+  "protocol_version": 5,
   "request": {
     "$defs": {
       "CcMap": {
@@ -1595,13 +1709,17 @@
           "device": {
             "type": "string"
           },
+          "mode": {
+            "$ref": "#/$defs/CcMode",
+            "default": "absolute"
+          },
           "param": {
-            "description": "Parameter path.",
+            "description": "Parameter path; `focus.<param>` follows the seat's focus (e.g.\n`focus.cutoff`; nothing when the focus has no such parameter).",
             "type": "string"
           },
           "pickup": {
             "default": true,
-            "description": "Only take over once the knob passes the current value.",
+            "description": "Only take over once the knob passes the current value (absolute).",
             "type": "boolean"
           }
         },
@@ -1611,6 +1729,21 @@
           "param"
         ],
         "type": "object"
+      },
+      "CcMode": {
+        "description": "How a CC's value moves a parameter.",
+        "oneOf": [
+          {
+            "const": "absolute",
+            "description": "0..127 is the parameter's range (a pot or fader).",
+            "type": "string"
+          },
+          {
+            "const": "relative",
+            "description": "Endless encoder: 1..63 turn up, 65..127 turn down (127 = -1).",
+            "type": "string"
+          }
+        ]
       },
       "ChannelAddParams": {
         "properties": {
@@ -2053,6 +2186,10 @@
           "device": {
             "type": "string"
           },
+          "mode": {
+            "$ref": "#/$defs/CcMode",
+            "default": "absolute"
+          },
           "pickup": {
             "default": true,
             "type": "boolean"
@@ -2235,8 +2372,22 @@
               "null"
             ]
           },
+          "remap": {
+            "default": null,
+            "description": "Output note for input notes `low`, `low + 1`, ... (from 0 without\n`low`), e.g. pads to drum voices. Overrides `transpose`; a note past\nthe list plays nothing.",
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "target": {
-            "description": "An instrument id, or `focus` for the seat's focused instrument.",
+            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).",
             "type": "string"
           },
           "transpose": {
@@ -2608,6 +2759,26 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "SeatApplyLayoutParams": {
+        "properties": {
+          "device": {
+            "description": "A connected device of a known model.",
+            "type": "string"
+          },
+          "seat": {
+            "default": null,
+            "description": "Default: the caller's seat.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "device"
         ],
         "type": "object"
       },
@@ -3802,6 +3973,23 @@
         "type": "object"
       },
       {
+        "description": "Known device models, with their ports and default layouts.",
+        "properties": {
+          "method": {
+            "const": "midi.models",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Seats, who sits where, and the host seat.",
         "properties": {
           "method": {
@@ -4023,6 +4211,23 @@
         "type": "object"
       },
       {
+        "description": "Copy a device model's default layout into the seat, to edit it.",
+        "properties": {
+          "method": {
+            "const": "seat.apply_layout",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SeatApplyLayoutParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Reset to a fresh default project.",
         "properties": {
           "method": {
@@ -4225,13 +4430,17 @@
           "device": {
             "type": "string"
           },
+          "mode": {
+            "$ref": "#/$defs/CcMode",
+            "default": "absolute"
+          },
           "param": {
-            "description": "Parameter path.",
+            "description": "Parameter path; `focus.<param>` follows the seat's focus (e.g.\n`focus.cutoff`; nothing when the focus has no such parameter).",
             "type": "string"
           },
           "pickup": {
             "default": true,
-            "description": "Only take over once the knob passes the current value.",
+            "description": "Only take over once the knob passes the current value (absolute).",
             "type": "boolean"
           }
         },
@@ -4241,6 +4450,21 @@
           "param"
         ],
         "type": "object"
+      },
+      "CcMode": {
+        "description": "How a CC's value moves a parameter.",
+        "oneOf": [
+          {
+            "const": "absolute",
+            "description": "0..127 is the parameter's range (a pot or fader).",
+            "type": "string"
+          },
+          {
+            "const": "relative",
+            "description": "Endless encoder: 1..63 turn up, 65..127 turn down (127 = -1).",
+            "type": "string"
+          }
+        ]
       },
       "ChannelInfo": {
         "properties": {
@@ -4533,6 +4757,10 @@
           "device": {
             "type": "string"
           },
+          "mode": {
+            "$ref": "#/$defs/CcMode",
+            "default": "absolute"
+          },
           "pickup": {
             "default": true,
             "type": "boolean"
@@ -4553,6 +4781,14 @@
           "input": {
             "type": "string"
           },
+          "model": {
+            "default": null,
+            "description": "Known device model, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "output": {
             "type": [
               "string",
@@ -4561,6 +4797,14 @@
           },
           "profile": {
             "$ref": "#/$defs/DeviceProfile"
+          },
+          "role": {
+            "default": null,
+            "description": "The port's role in its model (see `MidiDevice::role`).",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -4609,8 +4853,22 @@
               "null"
             ]
           },
+          "remap": {
+            "default": null,
+            "description": "Output note for input notes `low`, `low + 1`, ... (from 0 without\n`low`), e.g. pads to drum voices. Overrides `transpose`; a note past\nthe list plays nothing.",
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "target": {
-            "description": "An instrument id, or `focus` for the seat's focused instrument.",
+            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).",
             "type": "string"
           },
           "transpose": {
@@ -4747,6 +5005,14 @@
           "config": {
             "$ref": "#/$defs/SeatConfig"
           },
+          "defaults": {
+            "default": [],
+            "description": "Devices on this engine that play here with their model's default\nlayout (no bindings of the seat's own), as `device (Model)`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "learning": {
             "description": "Parameter that the next CC moved on this seat's devices will be\nmapped to (`seat.learn_cc`).",
             "type": [
@@ -4816,6 +5082,14 @@
               "$ref": "#/$defs/KnobFollow"
             },
             "type": "array"
+          },
+          "pitch_bend": {
+            "default": null,
+            "description": "Where pitch bend goes: `focus`, an instrument id, or `@<type>`.\nDefault: the focus.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"

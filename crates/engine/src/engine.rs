@@ -51,6 +51,7 @@ pub enum Command {
     /// A note; with `gate` it releases after half a step at the current tempo.
     NoteOn { slot: u8, note: u8, velocity: f32, gate: bool },
     NoteOff { slot: u8, note: u8 },
+    PitchBend { slot: u8, semitones: f32 },
     Play,
     Stop,
 }
@@ -69,6 +70,7 @@ impl std::fmt::Debug for Command {
             Command::SetClipLength { slot, length } => write!(f, "SetClipLength({slot}, {length:?})"),
             Command::NoteOn { slot, note, .. } => write!(f, "NoteOn({slot}, {note})"),
             Command::NoteOff { slot, note } => write!(f, "NoteOff({slot}, {note})"),
+            Command::PitchBend { slot, semitones } => write!(f, "PitchBend({slot}, {semitones})"),
             Command::Play => write!(f, "Play"),
             Command::Stop => write!(f, "Stop"),
         }
@@ -337,6 +339,11 @@ impl Engine {
             Command::NoteOff { slot, note } => {
                 if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
                     s.instrument.note_off(note);
+                }
+            }
+            Command::PitchBend { slot, semitones } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.pitch_bend(semitones);
                 }
             }
             Command::Play => {
