@@ -240,13 +240,6 @@ impl Instrument for Tb303 {
         }
     }
 
-    fn all_notes_off(&mut self) {
-        self.num_keys = 0;
-        if self.held_by_key {
-            self.held_by_key = false;
-            self.release();
-        }
-    }
 
     fn render(&mut self, frames: usize) {
         let frames = frames.min(MAX_BLOCK);

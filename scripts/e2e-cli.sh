@@ -189,6 +189,15 @@ wait $WATCH
 check "channel 10 plays the drum voice" '"instrument":"drums","voice":"snare"' cat "$TMP/gm.json"
 check "the split plays the bass transposed" '"instrument":"bass","voice":null,"note":48' cat "$TMP/gm.json"
 check "nothing else played" "2 triggers" bash -c "echo \$(wc -l < '$TMP/gm.json' | tr -d ' ') triggers"
+# Bindings name the logical device: renamed, the port has no bindings in
+# this seat, so it plays the focus (the bass).
+check "rename a device" "$KDEV as keyz (Generic)" s midi rename keys keyz
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/renamed.json" &
+WATCH=$!; sleep 0.5
+echo "raw 99 26 64" >&8; echo "raw 89 26 00" >&8
+wait $WATCH
+check "a renamed device no longer uses the old name's bindings" '"instrument":"bass","voice":null,"note":38' cat "$TMP/renamed.json"
+s midi rename keyz keys >/dev/null
 check "unbind removes one binding" "bind 1: keys ch 10 all notes -> drums" s unbind 2
 s unbind 1 >/dev/null
 s midi disconnect keys >/dev/null
@@ -370,6 +379,31 @@ check "an empty session-only seat goes away" "no carol" bash -c "$BIN/4s seat | 
 check "pin this machine's devices to bob's seat" "devices play in seat: bob (pinned)" s midi seat bob
 check "the Block follows bob's focus" "focus: drums" s controller
 check "unpin" "devices play in seat: e2e" s midi seat
+# CC maps: a device's CC sets a parameter over its range, picking up.
+check "map a CC" "cc: knobs any ch cc 21 -> bass.cutoff" s cc map knobs 21 bass.cutoff
+s midi send knobs B0 15 7F >/dev/null
+check "a CC far from the value does not jump it" "bass.cutoff = 0.25" s get bass.cutoff
+s midi send knobs B0 15 00 >/dev/null; s midi send knobs B0 15 7F >/dev/null
+check "passing the value takes over" "bass.cutoff = 1" s get bass.cutoff
+s cc unmap knobs 21 >/dev/null
+s midi send knobs B0 15 00 >/dev/null
+check "an unmapped CC does nothing" "bass.cutoff = 1" s get bass.cutoff
+check "learn a CC" "learning a CC for bass.resonance" s cc learn bass.resonance
+s midi send knobs B2 16 40 >/dev/null   # CC 22 on channel 3
+check "the next CC moved is mapped, on its channel" "cc: knobs ch 3 cc 22 -> bass.resonance" s seat
+s midi send knobs B0 16 7F >/dev/null
+check "the same CC on another channel is not mapped" "bass.resonance = 0.5" s get bass.resonance
+s cc unmap knobs 22 >/dev/null
+# Following knobs control the focused instrument's knob page.
+check "knobs follow the focus" "knobs: knobs cc 1 2 follow focus" s knobs follow knobs 1 2
+s midi send knobs B0 02 00 >/dev/null; s midi send knobs B0 02 7F >/dev/null
+check "knob 2 on the bass's main page is resonance" "bass.resonance = 1" s get bass.resonance
+s focus drums >/dev/null; s knobs page decay >/dev/null
+s midi send knobs B0 02 7F >/dev/null; s midi send knobs B0 02 00 >/dev/null
+check "after a focus change the same knob drives the new focus" "drums.snare.decay = 0" s get drums.snare.decay
+s set drums.snare.decay 0.4 >/dev/null; s focus bass >/dev/null
+check "stop following" "focus: bass" s knobs follow knobs
+s set bass.cutoff 0.25 >/dev/null; s set bass.resonance 0.5 >/dev/null
 s --seat bob bind keys --notes C1..B2 --to bass >/dev/null
 check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e

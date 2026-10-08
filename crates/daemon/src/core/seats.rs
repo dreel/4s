@@ -276,14 +276,16 @@ impl Core {
         local: bool,
         origin: &str,
     ) -> Result<(Option<String>, bool), RpcError> {
-        if let Some(s) = &seat {
-            self.check_seat(s)?;
-        }
         let user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
         self.clients.insert(
             client.to_string(),
             ClientState { label: label.to_string(), user: user.clone(), seat: None, local, auto, seated_at: 0 },
         );
+        // Registered first, so a bad seat leaves a client that can still
+        // choose one.
+        if let Some(s) = &seat {
+            self.check_seat(s)?;
+        }
         let chosen = seat.or_else(|| if auto { self.auto_seat(user.as_deref()) } else { None });
         self.sit(client, chosen.clone());
         self.seats_changed(origin, false);
@@ -402,9 +404,9 @@ impl Core {
         Ok(self.seat_edited(&name, origin))
     }
 
-    /// Seat RPCs. `None` if `req` is not one of them.
-    pub(super) fn handle_seat(&mut self, req: &Request, origin: &str, client: &str) -> Option<RpcResult> {
-        Some(match req.clone() {
+    /// Seat RPCs. Any other request is handed back.
+    pub(super) fn handle_seat(&mut self, req: Request, origin: &str, client: &str) -> Result<RpcResult, Request> {
+        Ok(match req {
             Request::SeatList(_) => ok(self.seat_list(client)),
             Request::SeatClaim(p) => self.seat_claim(client, &p.name, origin).and_then(ok),
             Request::SeatCreate(p) => self.seat_create(client, p, origin).and_then(ok),
@@ -412,7 +414,7 @@ impl Core {
             Request::SeatRemove(p) => self.seat_remove(client, &p.name, origin).and_then(ok),
             Request::SeatFocus(p) => {
                 if let Err(e) = self.find_instrument(&p.instrument) {
-                    return Some(Err(e));
+                    return Ok(Err(e));
                 }
                 self.edit_seat(p.seat.as_deref(), client, origin, |s| {
                     s.config.focus = Some(p.instrument);
@@ -423,12 +425,12 @@ impl Core {
             Request::SeatPage(p) => {
                 let name = match self.seat_for(p.seat.as_deref(), client) {
                     Ok(n) => n,
-                    Err(e) => return Some(Err(e)),
+                    Err(e) => return Ok(Err(e)),
                 };
                 let (pages, _) = self.seat_page(&name);
                 if !pages.iter().any(|x| x.id == p.page) {
                     let ids: Vec<&str> = pages.iter().map(|x| x.id.as_str()).collect();
-                    return Some(Err(RpcError::invalid(format!(
+                    return Ok(Err(RpcError::invalid(format!(
                         "no knob page '{}' on the focused instrument (pages: {})",
                         p.page,
                         ids.join(", ")
@@ -461,7 +463,7 @@ impl Core {
                 .and_then(ok),
             Request::SeatMapCc(p) => {
                 if let Err(e) = self.param_id(&p.map.param) {
-                    return Some(Err(e));
+                    return Ok(Err(e));
                 }
                 self.edit_seat(p.seat.as_deref(), client, origin, |s| {
                     let m = p.map;
@@ -483,7 +485,7 @@ impl Core {
                 if let Some(path) = &p.param
                     && let Err(e) = self.param_id(path)
                 {
-                    return Some(Err(e));
+                    return Ok(Err(e));
                 }
                 self.edit_seat(p.seat.as_deref(), client, origin, |s| {
                     s.learning = p.param;
@@ -501,7 +503,7 @@ impl Core {
                     Ok(())
                 })
                 .and_then(ok),
-            _ => return None,
+            other => return Err(other),
         })
     }
 
@@ -510,8 +512,18 @@ impl Core {
     /// Start a held note for `holder`. `key` is what the holder will
     /// release it by (the input note).
     pub(super) fn hold_note(&mut self, holder: &str, key: u8, slot: u8, note: u8, velocity: f32) -> Result<(), RpcError> {
-        self.ensure_room(1)?;
-        self.held.retain(|h| !(h.holder == holder && h.key == key && h.slot == slot));
+        self.ensure_room(2)?;
+        // A re-pressed key replaces what it held; release the old note if
+        // it was another one (the binding's transpose changed).
+        let mut replaced = Vec::new();
+        self.held.retain(|h| {
+            let same = h.holder == holder && h.key == key && h.slot == slot;
+            if same && h.note != note {
+                replaced.push((h.slot, h.note));
+            }
+            !same
+        });
+        self.send_note_offs(replaced);
         self.held.push(Held { holder: holder.to_string(), key, slot, note });
         self.send(Command::NoteOn { slot, note, velocity: velocity.clamp(0.0, 1.0), gate: false });
         Ok(())

@@ -965,13 +965,14 @@ impl Core {
             return Err(RpcError::failed(format!("'{port}' is already connected")));
         }
         let (name, profile) =
-            self.hardware.connected(&port, p.name.as_deref(), p.profile).map_err(RpcError::invalid)?;
+            self.hardware.resolve(&port, p.name.as_deref(), p.profile).map_err(RpcError::invalid)?;
         if self.midi.by_device(&name).is_some() {
             return Err(RpcError::invalid(format!("a connected device is already named '{name}'")));
         }
         self.midi
             .connect(&port, p.output.as_deref(), &name, profile, self.midi_tx.clone())
             .map_err(|e| RpcError::failed(e.to_string()))?;
+        self.hardware.connected(&port, &name, profile);
         self.midi_changed(origin);
         Ok(self.midi_ports())
     }
@@ -1038,8 +1039,10 @@ impl Core {
         }
         if auto {
             let mut want: Vec<String> = self.hardware.auto_ports();
+            // A Block by name, unless it was disconnected by hand.
             if self.midi.block_name().is_none()
-                && let Some(b) = inputs.iter().find(|n| hardware::looks_like_block(n))
+                && let Some(b) =
+                    inputs.iter().find(|n| hardware::looks_like_block(n) && !self.hardware.hand_disconnected(n))
             {
                 want.push(b.clone());
             }
@@ -1047,12 +1050,13 @@ impl Core {
                 if !inputs.contains(&port) || self.midi.is_connected(&port) {
                     continue;
                 }
-                let Ok((name, profile)) = self.hardware.connected(&port, None, None) else { continue };
+                let Ok((name, profile)) = self.hardware.resolve(&port, None, None) else { continue };
                 if self.midi.by_device(&name).is_some() {
                     continue;
                 }
                 match self.midi.connect(&port, None, &name, profile, self.midi_tx.clone()) {
                     Ok(c) => {
+                        self.hardware.connected(&port, &name, profile);
                         tracing::info!("auto-connected {} as {} ({:?}, output: {:?})", c.input, c.device, c.profile, c.output);
                         changed = true;
                     }
@@ -1381,9 +1385,10 @@ impl Core {
     /// connection (`conn:<id>`) and holds the notes it starts.
     pub fn handle(&mut self, req: Request, origin: &str, client: &str) -> RpcResult {
         let drum = |c: &Self, id: &Option<String>| c.resolve(id.as_deref(), InstrumentType::Tr808);
-        if let Some(r) = self.handle_seat(&req, origin, client) {
-            return r;
-        }
+        let req = match self.handle_seat(req, origin, client) {
+            Ok(r) => return r,
+            Err(req) => req,
+        };
         match req {
             Request::StateGet(_) => ok(self.snapshot()),
             Request::ParamList(p) => {

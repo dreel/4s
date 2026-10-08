@@ -51,9 +51,6 @@ pub trait Instrument: Send {
     /// Release a held note.
     fn note_off(&mut self, _note: u8) {}
 
-    /// Release every held note.
-    fn all_notes_off(&mut self) {}
-
     /// Render `frames` (<= MAX_BLOCK) frames into the output buffers.
     fn render(&mut self, frames: usize);
 

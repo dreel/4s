@@ -97,10 +97,10 @@ impl Hardware {
         (2..).map(|n| format!("{base}{n}")).find(|n| !self.name_taken(n, port)).unwrap()
     }
 
-    /// Record a connection: the given name/profile, else the saved ones,
-    /// else defaults. Returns the entry's name and profile.
-    pub fn connected(
-        &mut self,
+    /// The name and profile a connection of `port` gets: the given ones,
+    /// else the saved ones, else defaults. Changes nothing.
+    pub fn resolve(
+        &self,
         port: &str,
         name: Option<&str>,
         profile: Option<DeviceProfile>,
@@ -113,22 +113,22 @@ impl Hardware {
         }
         let default_profile =
             if looks_like_block(port) { DeviceProfile::LividBlock } else { DeviceProfile::Generic };
-        let fresh = self.fresh_name(port);
-        let e = self.file.devices.entry(port.to_string()).or_insert(Entry {
-            name: fresh,
-            profile: default_profile,
-            auto_connect: true,
-        });
-        if let Some(n) = name {
-            e.name = n.to_string();
-        }
-        if let Some(p) = profile {
-            e.profile = p;
-        }
-        e.auto_connect = true;
-        let r = (e.name.clone(), e.profile);
+        let saved = self.file.devices.get(port);
+        let name = name.map(str::to_string).or(saved.map(|e| e.name.clone())).unwrap_or_else(|| self.fresh_name(port));
+        let profile = profile.or(saved.map(|e| e.profile)).unwrap_or(default_profile);
+        Ok((name, profile))
+    }
+
+    /// Record a successful connection (as `resolve` named it), to be
+    /// reconnected automatically when the port comes back.
+    pub fn connected(&mut self, port: &str, name: &str, profile: DeviceProfile) {
+        self.file.devices.insert(port.to_string(), Entry { name: name.to_string(), profile, auto_connect: true });
         self.save();
-        Ok(r)
+    }
+
+    /// The user disconnected this port by hand.
+    pub fn hand_disconnected(&self, port: &str) -> bool {
+        self.file.devices.get(port).is_some_and(|e| !e.auto_connect)
     }
 
     /// The user disconnected this port: do not connect it automatically.
