@@ -111,6 +111,7 @@ pub struct BlockMap {
     /// MIDI channel, 0-based.
     pub channel: u8,
     /// Note number for each pad, `grid_notes[row][col]`, row 0 at the top.
+    /// The Block numbers its pads down each column: note `col * 8 + row`.
     pub grid_notes: [[u8; GRID]; GRID],
     /// CC number for each knob, left to right.
     pub knob_ccs: [u8; GRID],
@@ -121,10 +122,16 @@ pub struct BlockMap {
 
 impl Default for BlockMap {
     fn default() -> Self {
+        Self::with_notes(|r, c| c * GRID + r)
+    }
+}
+
+impl BlockMap {
+    fn with_notes(note: impl Fn(usize, usize) -> usize) -> Self {
         let mut grid_notes = [[0u8; GRID]; GRID];
         for (r, row) in grid_notes.iter_mut().enumerate() {
-            for (c, note) in row.iter_mut().enumerate() {
-                *note = (r * GRID + c) as u8;
+            for (c, n) in row.iter_mut().enumerate() {
+                *n = note(r, c) as u8;
             }
         }
         Self {
@@ -135,12 +142,22 @@ impl Default for BlockMap {
             led_off_velocity: 0,
         }
     }
-}
 
-impl BlockMap {
+    /// The first default (`row * 8 + col`), which had the grid transposed on
+    /// the device. A saved map still equal to it was never edited by hand.
+    fn transposed_default() -> Self {
+        Self::with_notes(|r, c| r * GRID + c)
+    }
+
     pub fn load_or_create(path: &Path) -> BlockMap {
         match std::fs::read_to_string(path) {
-            Ok(s) => match serde_json::from_str(&s) {
+            Ok(s) => match serde_json::from_str::<BlockMap>(&s) {
+                Ok(m) if m == Self::transposed_default() => {
+                    tracing::info!("{}: updating the transposed default grid map", path.display());
+                    let m = BlockMap::default();
+                    let _ = std::fs::write(path, serde_json::to_string_pretty(&m).unwrap() + "\n");
+                    m
+                }
                 Ok(m) => m,
                 Err(e) => {
                     tracing::warn!("invalid {}: {e}; using defaults", path.display());
@@ -224,5 +241,25 @@ mod tests {
         assert_eq!(leds[1][1], 1, "page 2 shows step 10 in column 2");
         let leds = c.compute_leds(Some(&pattern), 12, None);
         assert_eq!(leds[0][5], 0, "steps past length are dark");
+    }
+
+    #[test]
+    fn grid_notes_run_down_columns_and_the_old_default_is_migrated() {
+        let m = BlockMap::default();
+        assert_eq!(m.pad_for_note(1), Some((1, 0)), "note 1 is the second pad down the first column");
+        assert_eq!(m.led_message(0, 2, 1), [0x90, 16, 127], "step 3 of row 1 is note 16");
+
+        let dir = std::env::temp_dir().join(format!("4s-blockmap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("livid-block.json");
+        std::fs::write(&path, serde_json::to_string(&BlockMap::transposed_default()).unwrap()).unwrap();
+        assert_eq!(BlockMap::load_or_create(&path), m);
+        assert_eq!(serde_json::from_str::<BlockMap>(&std::fs::read_to_string(&path).unwrap()).unwrap(), m);
+
+        let mut custom = BlockMap::transposed_default();
+        custom.channel = 3;
+        std::fs::write(&path, serde_json::to_string(&custom).unwrap()).unwrap();
+        assert_eq!(BlockMap::load_or_create(&path), custom, "a hand-edited map is kept");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -87,7 +87,7 @@ echo "knob 2 0" >&7; sleep 0.5
 check "volume knob moves the voice level in the 808" "drums.clap.level = 0" s get drums.clap.level
 s set drums.clap.level 0.8 >/dev/null
 s controller mode --knobs decay >/dev/null
-check "device receives LED updates" "recv 90 02 7F" cat "$TMP/vdev.out"
+check "device receives LED updates (row 1, step 3 = note 16: notes run down columns)" "recv 90 10 7F" cat "$TMP/vdev.out"
 exec 7>&-; sleep 3
 check "unplugged device pruned" "(none)" s midi ports
 s pattern set kick "X---x---X---x---" >/dev/null   # restore for later checks

@@ -1,7 +1,8 @@
 # Livid Block
 
-Status: v1 implemented. The MIDI note/CC map is a **default guess that has not
-been verified on the device yet** -- see "Calibrating" below.
+Status: v1 implemented. The grid note layout (column-major) was corrected
+after testing on the device: the first guess (row-major) showed the grid
+transposed. The knob CCs are still unverified -- see "Calibrating" below.
 
 ## Hardware
 
@@ -66,8 +67,10 @@ Stored in `<data-dir>/livid-block.json` (default `~/.4s/livid-block.json`),
 written with defaults on first run:
 
 - `channel`: 0 (MIDI channel 1)
-- `grid_notes[row][col]`: note `row * 8 + col` (0-63, row-major from the top
-  left)
+- `grid_notes[row][col]`: note `col * 8 + row` (0-63, down each column from
+  the top left: the first column is notes 0-7)
+- A map file still holding the first, transposed default (`row * 8 + col`) is
+  rewritten with this one when `4sd` starts; an edited map is left alone.
 - `knob_ccs`: CC 1-8, left to right
 - LEDs: note-on to the pad's note, velocity 127 = on, 0 = off
 
