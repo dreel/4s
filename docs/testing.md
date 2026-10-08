@@ -20,8 +20,10 @@ matches the interface:
 Always use an isolated data dir and a random port (`FOURS_DATA_DIR`,
 `--listen 127.0.0.1:0`), so tests never touch a daemon someone is running.
 The Electron tests launch the app with `FOURS_UI_BACKGROUND=1`: its window
-opens behind yours without taking focus (no Dock icon on macOS, no
-background throttling), so `scripts/gates.sh` can run while you work.
+is never shown (it still renders, with no background throttling, so
+screenshots work) and on macOS it has no Dock icon and never activates, so
+`scripts/gates.sh` can run while you work. (`showInactive` is not enough:
+macOS still raises the window above other apps.)
 
 Mute and solo are a good example of the default. They are checked by
 rendering with a track muted and asserting the hit disappears from the

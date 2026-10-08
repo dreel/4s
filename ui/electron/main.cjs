@@ -21,8 +21,9 @@ const path = require("node:path");
 
 const DEFAULT_URL = "ws://127.0.0.1:4440";
 const DATA_DIR = process.env.FOURS_DATA_DIR || path.join(os.homedir(), ".4s");
-// FOURS_UI_BACKGROUND=1 (set by the e2e harness): open without taking focus,
-// so test runs do not pull the window in front of whatever you are doing.
+// FOURS_UI_BACKGROUND=1 (set by the e2e harness): the window is never shown
+// (macOS raises even an inactive window above other apps), so test runs do
+// not pull anything in front of whatever you are doing.
 const BACKGROUND = process.env.FOURS_UI_BACKGROUND === "1";
 
 /** @type {import("node:child_process").ChildProcess | null} */
@@ -185,13 +186,12 @@ async function main() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
-      // An unfocused window must keep timers and animation frames running
-      // (playhead, meters).
+      // A hidden window must keep timers and animation frames running
+      // (playhead, meters) and still paint (screenshots).
       backgroundThrottling: !BACKGROUND,
+      paintWhenInitiallyHidden: true,
     },
   });
-  // Shown, but behind the window you are using.
-  if (BACKGROUND) win.once("ready-to-show", () => win.showInactive());
   const query = { daemon: url, lifecycle, ...(error ? { daemonError: error } : {}) };
   const devUrl = process.env.FOURS_UI_DEV_URL;
   if (devUrl) {
