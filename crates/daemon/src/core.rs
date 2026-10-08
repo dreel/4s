@@ -880,7 +880,8 @@ impl Core {
     fn note_off(&mut self, id: Option<&str>, note: u8, holder: &str) -> Result<(), RpcError> {
         let slot = id.map(|id| self.slot(id)).transpose()?;
         // Never record a release the engine did not get.
-        self.ensure_room(1)?;
+        let releases = self.held.iter().filter(|h| h.holder == holder && h.key == note).count();
+        self.ensure_room(releases.max(1))?;
         self.release_note(holder, note, slot);
         Ok(())
     }
@@ -1012,8 +1013,10 @@ impl Core {
     /// Raw input from a logical device, sent over RPC (a bridge, a script).
     fn midi_input(&mut self, p: MidiInputParams, origin: &str, client: &str) -> Result<(), RpcError> {
         validate_name("device", &p.device).map_err(RpcError::invalid)?;
-        if p.data.is_empty() || p.data[0] < 0x80 {
-            return Err(RpcError::invalid("data must be one MIDI message starting with a status byte"));
+        if p.data.is_empty() || p.data[0] < 0x80 || p.data[1..].iter().any(|b| *b >= 0x80) {
+            return Err(RpcError::invalid(
+                "data must be one MIDI message: a status byte (0x80..0xFF), then data bytes (0..0x7F)",
+            ));
         }
         let seat = match p.seat {
             Some(s) => {

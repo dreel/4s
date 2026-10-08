@@ -398,7 +398,8 @@ enum SeatCmd {
     },
     /// Leave your seat.
     Leave,
-    /// Delete a seat.
+    /// Delete a seat. In a project with no other saved seats, the host
+    /// user's seat comes straight back: this machine's devices need one.
     Rm { name: String },
 }
 

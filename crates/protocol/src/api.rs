@@ -453,7 +453,8 @@ pub struct MidiInputParams {
     pub device: String,
     /// Raw MIDI bytes of one message, e.g. `[144, 60, 100]`.
     pub data: Vec<u8>,
-    /// Seat to apply; default: the caller's, else the host seat.
+    /// Seat to apply; default: the caller's, else the host seat. A Livid
+    /// Block only edits the host seat (its LEDs show that one).
     #[serde(default)]
     pub seat: Option<String>,
 }
@@ -709,7 +710,8 @@ api! {
     SeatCreate = "seat.create" (SeatCreateParams) -> SeatListResult;
     /// Leave your seat.
     SeatLeave = "seat.leave" (Empty) -> SeatListResult;
-    /// Delete a seat; its occupants become unseated.
+    /// Delete a seat; its occupants become unseated. In a project with no
+    /// other saved seats, the host user's seat is recreated at once.
     SeatRemove = "seat.remove" (SeatNameParams) -> SeatListResult;
     /// Focus an instrument: `focus` bindings, the Block, and following
     /// knobs play it.

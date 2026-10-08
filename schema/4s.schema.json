@@ -1666,7 +1666,7 @@
           },
           "seat": {
             "default": null,
-            "description": "Seat to apply; default: the caller's, else the host seat.",
+            "description": "Seat to apply; default: the caller's, else the host seat. A Livid\nBlock only edits the host seat (its LEDs show that one).",
             "type": [
               "string",
               "null"
@@ -3174,7 +3174,7 @@
         "type": "object"
       },
       {
-        "description": "Delete a seat; its occupants become unseated.",
+        "description": "Delete a seat; its occupants become unseated. In a project with no\nother saved seats, the host user's seat is recreated at once.",
         "properties": {
           "method": {
             "const": "seat.remove",

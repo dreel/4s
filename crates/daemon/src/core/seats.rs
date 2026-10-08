@@ -183,6 +183,8 @@ impl Core {
         if !self.seats.contains_key(base) {
             return base.to_string();
         }
+        // Leave room for the number within the 32-character limit.
+        let base = &base[..base.len().min(28)];
         (2..).map(|n| format!("{base}{n}")).find(|n| !self.seats.contains_key(n)).unwrap()
     }
 
@@ -595,6 +597,10 @@ impl Core {
         d: &[u8],
         origin: &str,
     ) {
+        // A Block's LEDs show the host seat, so it only edits that seat.
+        if profile == DeviceProfile::LividBlock && seat != self.host_seat {
+            return;
+        }
         if profile == DeviceProfile::LividBlock {
             match decode_block(&self.block_map, d) {
                 Some(BlockInput::Pad { row, col, pressed }) => {
@@ -608,7 +614,7 @@ impl Core {
             }
             return;
         }
-        if d.len() < 3 {
+        if d.len() < 3 || d[1] >= 0x80 || d[2] >= 0x80 {
             return;
         }
         let (status, channel, a, b) = (d[0] & 0xf0, (d[0] & 0x0f) + 1, d[1], d[2]);

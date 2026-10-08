@@ -175,6 +175,27 @@ print('released' if levels and max(levels) > 0.01 and levels[-1] < 1e-4 else f'l
 # keys play the bass an octave down. Once a device has bindings, notes no
 # binding matches do nothing.
 check "reconnecting keeps the saved name" "$KDEV as keys (Generic)" s midi connect "$KDEV"
+# Last-note priority on the 303: releasing the sounding key falls back to
+# the key still held (the note keeps sounding); releasing that one ends it.
+"$BIN/4s" watch --type meters --json > "$TMP/legato1.json" &
+WATCH=$!; sleep 0.2
+echo "raw 90 24 64" >&8; sleep 0.2; echo "raw 90 2B 64" >&8; sleep 0.2
+echo "raw 80 2B 00" >&8; sleep 0.6
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+"$BIN/4s" watch --type meters --json > "$TMP/legato2.json" &
+WATCH=$!; sleep 0.2
+echo "raw 80 24 00" >&8; sleep 0.8
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "releasing the top key keeps the lower one sounding" "still sounding" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/legato1.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('still sounding' if levels and levels[-1] > 0.01 else f'levels {levels}')"
+check "releasing the last key ends the note" "released" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/legato2.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('released' if levels and levels[-1] < 1e-4 else f'levels {levels}')"
 check "bind channel 10 to the drums" "bind 1: keys ch 10 all notes -> drums" s bind keys --channel 10 --to drums
 check "bind a split with transpose" "bind 2: keys any ch C3..C8 -12 st -> bass" s bind keys --notes C3..C8 --transpose -12 --to bass
 "$BIN/4s" watch --type trigger --count 2 --json > "$TMP/gm.json" &
@@ -379,6 +400,7 @@ check "an empty session-only seat goes away" "no carol" bash -c "$BIN/4s seat | 
 check "pin this machine's devices to bob's seat" "devices play in seat: bob (pinned)" s midi seat bob
 check "the Block follows bob's focus" "focus: drums" s controller
 check "unpin" "devices play in seat: e2e" s midi seat
+check "midi.input rejects data bytes of 0x80 and up" "data bytes (0..0x7F)" s midi send knobs B0 C8 40
 # CC maps: a device's CC sets a parameter over its range, picking up.
 check "map a CC" "cc: knobs any ch cc 21 -> bass.cutoff" s cc map knobs 21 bass.cutoff
 s midi send knobs B0 15 7F >/dev/null

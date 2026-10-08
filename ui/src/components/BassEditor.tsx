@@ -3,7 +3,7 @@
 // `pattern.set_note`; the daemon's `notes_changed` event confirms them.
 
 import type { NoteStep } from "../generated/NoteStep";
-import { act, client, setNote, setParam, useApp, useLive } from "../store";
+import { act, client, mySeat, setNote, setParam, useApp, useLive } from "../store";
 import { BlockMirror } from "./BlockMirror";
 import { Toggle } from "./controls";
 import { ParamKnob, pct, st } from "./ParamKnob";
@@ -33,8 +33,10 @@ export function BassEditor({ id }: { id: string }) {
   const playhead = useApp((s) => s.snapshot?.transport.step ?? null);
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
   const square = useApp((s) => (s.snapshot?.params[`${id}.waveform`] ?? 0) >= 0.5);
+  // The Block (and this engine's devices) follow the host seat; a remote
+  // UI focuses its own seat.
   const focused = useApp((s) => s.snapshot?.controller.focus === id);
-  const blockSeat = useApp((s) => s.snapshot?.controller.seat ?? null);
+  const mine = useApp((s) => mySeat(s)?.name ?? null);
   if (!pattern || pattern.kind !== "notes") return null;
   const steps = pattern.steps;
 
@@ -116,10 +118,10 @@ export function BassEditor({ id }: { id: string }) {
           <button
             className="px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 bg-zinc-900 text-xs"
             data-testid="make-target"
-            title="MIDI devices without bindings and the Block's knobs play the focused instrument"
-            onClick={() => void act(client.call("seat.focus", { seat: blockSeat, instrument: id }))}
+            title="Focus it for your seat: your MIDI devices without bindings play it (and the Block's knobs, if this engine's devices are in your seat)"
+            onClick={() => void act(client.call("seat.focus", { seat: mine, instrument: id }))}
           >
-            focus (MIDI + Block knobs)
+            focus for my seat
           </button>
         )}
       </section>

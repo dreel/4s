@@ -10,6 +10,7 @@ device: string,
  */
 data: Array<number>, 
 /**
- * Seat to apply; default: the caller's, else the host seat.
+ * Seat to apply; default: the caller's, else the host seat. A Livid
+ * Block only edits the host seat (its LEDs show that one).
  */
 seat: string | null, };

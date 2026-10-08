@@ -116,7 +116,8 @@ feedback, like the Livid Block (the reference). For one:
    changes go out.
 5. Auto-connect, if appropriate: `midi_autoconnect` connects ports named
    like a Block, and every port connected before (`midi-devices.json`);
-   default your profile by port name in `Hardware::connected`.
+   default your profile by port name in `Hardware::resolve` (as
+   `looks_like_block` does).
 6. Expose it in `4s midi connect --profile ...` and the UI's MIDI panel (the
    profile list).
 7. Document the mapping in `docs/hardware/<device>.md`, following

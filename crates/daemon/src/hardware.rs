@@ -90,10 +90,12 @@ impl Hardware {
     /// A name for a port seen for the first time: from its port name,
     /// numbered if another port already has it.
     fn fresh_name(&self, port: &str) -> String {
-        let base = slug(port);
+        let mut base = slug(port);
         if !self.name_taken(&base, port) {
             return base;
         }
+        // Leave room for the number within the 32-character limit.
+        base.truncate(28);
         (2..).map(|n| format!("{base}{n}")).find(|n| !self.name_taken(n, port)).unwrap()
     }
 
