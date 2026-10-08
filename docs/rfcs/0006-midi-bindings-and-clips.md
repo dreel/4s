@@ -50,8 +50,9 @@ Every instrument accepts:
 ```
 note_on(note: u8, velocity: f32)
 note_off(note: u8)
-all_notes_off()
 ```
+
+(`all_notes_off` was dropped in phase 1: nothing needed it.)
 
 (Pitch bend and per-note expression can follow; not in scope.)
 
@@ -154,8 +155,8 @@ bindings and of a surface like the Block. It replaces
 - The CLI never prompts: `--seat <name>`, `--new-seat`, or
   `--no-seat`; without them it auto-joins on a unique match and
   otherwise stays unseated (`4s seat claim` later).
-- In solo use with a fresh project there is one `default` seat and the
-  local client joins it.
+- In solo use with a fresh project, the host user's seat is created and
+  the local client joins it (see "Implementation notes").
 
 A bridge claims seats for its local clients. Two clients can share a
 seat. A seat in the project with no one in it does nothing.
@@ -199,7 +200,7 @@ A device (or a range of its CCs) can be set to **follow focus**: its
 knobs control the current page of the seat's focused instrument, so
 selecting the bass turns them into bass knobs. Fixed CC maps sit beside
 this for knobs pinned to one parameter. `KnobMode` becomes the page
-(`controller.set_mode --knob-mode` -> `knobs.page`), and pages show up in
+(`controller.set_mode --knob-mode` -> `seat.page`), and pages show up in
 `instrument.types` so the UI and CLI can list them.
 
 **Pots and pickup.** Phase 1 supports absolute knobs (0-127). Pickup is on
@@ -291,7 +292,7 @@ transport.record { arm: bool, track?: id, mode: overdub|replace,
 
 `DeviceKind::{generic_drums, keyboard}` and `MidiConnection.instrument`
 are removed; `midi.connect` keeps opening ports. `controller.set_mode
---target` becomes `instrument.focus`.
+--target` becomes `seat.focus`.
 
 ## Impact on the principles
 
@@ -330,8 +331,9 @@ are removed; `midi.connect` keeps opening ports. `controller.set_mode
 ## Migration and compatibility
 
 - `PROJECT_FORMAT_VERSION` 2 -> 3 with a migration: drum step strings and
-  note strings become clip events (as defined above); `controller.target`
-  becomes the `default` seat's focus; `seats` added. v2 projects load and
+  note strings become clip events (as defined above, phase 2);
+  `controller.target` and `knob_mode` are dropped (phase 1: seats start
+  focused on the first instrument); `seats` added. v2 projects load and
   render identically.
 - `PROTOCOL_VERSION` 2 -> 3: `DeviceKind` variants, `MidiConnection`,
   `ControllerState.target`, `PatternData` (gains clips) change.
@@ -394,8 +396,9 @@ differ from the sections above, these win):
   shows a chooser (join, create, ignore). After a project load, clients
   whose seat is gone are seated again by the same rule.
 - **Host seat** (the engine host's own devices): pinned with
-  `midi.set_seat`, else the seat of the latest local (loopback) client to
-  take one, else the seat matching the daemon's OS user (`FOURS_USER`
+  `midi.set_seat`, else the seat of the latest local (loopback) client of
+  the daemon's own user that was not told a seat (`--seat`), or that chose
+  one itself (`seat.claim`/`seat.create`), else the seat matching the daemon's OS user (`FOURS_USER`
   overrides it), else a new seat for that user in a project without seats,
   else a session-only `local` seat. Session-only seats nobody sits in are
   dropped.

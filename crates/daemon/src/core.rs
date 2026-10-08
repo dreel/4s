@@ -1004,8 +1004,16 @@ impl Core {
         if self.midi.by_device(&p.name).is_some_and(|c| c.input != port) {
             return Err(RpcError::invalid(format!("a connected device is already named '{}'", p.name)));
         }
+        let old = self.midi.connection(&port).map(|c| c.device.clone());
         self.hardware.rename(&port, &p.name).map_err(RpcError::invalid)?;
         self.midi.rename(&port, &p.name);
+        // Notes the device holds keep sounding under its new name.
+        if let Some(old) = old {
+            let (from, to) = (format!("midi:{old}"), format!("midi:{}", p.name));
+            for h in self.held.iter_mut().filter(|h| h.holder == from) {
+                h.holder = to.clone();
+            }
+        }
         self.midi_changed(origin);
         Ok(self.midi_ports())
     }

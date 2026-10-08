@@ -29,6 +29,11 @@ pub(super) struct ClientState {
     pub auto: bool,
     /// When it took its seat (the latest local one decides the host seat).
     pub seated_at: u64,
+    /// Its seat decides the host seat: a local client of the host's own
+    /// user that was not told which seat to take, or one that chose a seat
+    /// itself. A one-off `4s --seat bob ...` or `--user carol` does not move
+    /// this machine's devices.
+    pub drives_host: bool,
 }
 
 /// A note held by someone: `key` is the input note, `note` what it played
@@ -59,6 +64,11 @@ pub(super) fn check_seat_config(c: &SeatConfig) -> Result<(), RpcError> {
         channel(b.channel)?;
         if b.low.is_some_and(|n| n > 127) || b.high.is_some_and(|n| n > 127) {
             return Err(RpcError::invalid("notes must be 0..127"));
+        }
+        if let (Some(l), Some(h)) = (b.low, b.high)
+            && l > h
+        {
+            return Err(RpcError::invalid(format!("note range {l}..{h} is backwards")));
         }
         if b.target != "focus" {
             validate_instrument_id(&b.target).map_err(RpcError::invalid)?;
@@ -206,7 +216,7 @@ impl Core {
         let local = self
             .clients
             .values()
-            .filter(|c| c.local && c.seat.is_some())
+            .filter(|c| c.local && c.drives_host && c.seat.is_some())
             .max_by_key(|c| c.seated_at)
             .and_then(|c| c.seat.clone());
         let name = if let Some(p) = self.hardware.pinned_seat().map(str::to_string) {
@@ -248,12 +258,6 @@ impl Core {
         self.refresh_controller(origin, true);
     }
 
-    fn seat_edited(&mut self, seat: &str, origin: &str) -> Seat {
-        let saved = self.seats.get(seat).is_some_and(|s| s.saved);
-        self.seats_changed(origin, saved);
-        self.seat_info(seat)
-    }
-
     fn sit(&mut self, client: &str, seat: Option<String>) {
         self.seat_clock += 1;
         let at = self.seat_clock;
@@ -279,9 +283,11 @@ impl Core {
         origin: &str,
     ) -> Result<(Option<String>, bool), RpcError> {
         let user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+        let host_user = user.as_deref().is_some_and(|u| slug(u) == slug(&self.host_user));
+        let drives_host = local && seat.is_none() && host_user;
         self.clients.insert(
             client.to_string(),
-            ClientState { label: label.to_string(), user: user.clone(), seat: None, local, auto, seated_at: 0 },
+            ClientState { label: label.to_string(), user: user.clone(), seat: None, local, auto, seated_at: 0, drives_host },
         );
         // Registered first, so a bad seat leaves a client that can still
         // choose one.
@@ -341,9 +347,8 @@ impl Core {
 
     fn seat_claim(&mut self, client: &str, name: &str, origin: &str) -> Result<SeatListResult, RpcError> {
         self.check_seat(name)?;
-        if !self.clients.contains_key(client) {
-            return Err(RpcError::invalid("say session.hello first"));
-        }
+        let Some(c) = self.clients.get_mut(client) else { return Err(RpcError::invalid("say session.hello first")) };
+        c.drives_host = c.local;
         self.sit(client, Some(name.to_string()));
         self.seats_changed(origin, false);
         Ok(self.seat_list(client))
@@ -363,8 +368,12 @@ impl Core {
         };
         let saved = p.saved.unwrap_or(true);
         self.new_seat(&name, saved);
+        if let Some(c) = self.clients.get_mut(client) {
+            c.drives_host = c.local;
+        }
         self.sit(client, Some(name));
-        self.seats_changed(origin, saved);
+        // An empty seat is not saved, so the project is not modified yet.
+        self.seats_changed(origin, false);
         Ok(self.seat_list(client))
     }
 
@@ -402,8 +411,11 @@ impl Core {
         let mut edited = SeatState { config: s.config.clone(), saved: s.saved, learning: s.learning.clone() };
         f(&mut edited)?;
         check_seat_config(&edited.config)?;
+        // Only what is saved (a saved seat's config) modifies the project.
+        let dirty = edited.saved && edited.config != s.config;
         *self.seats.get_mut(&name).expect("checked") = edited;
-        Ok(self.seat_edited(&name, origin))
+        self.seats_changed(origin, dirty);
+        Ok(self.seat_info(&name))
     }
 
     /// Seat RPCs. Any other request is handed back.
@@ -514,18 +526,10 @@ impl Core {
     /// Start a held note for `holder`. `key` is what the holder will
     /// release it by (the input note).
     pub(super) fn hold_note(&mut self, holder: &str, key: u8, slot: u8, note: u8, velocity: f32) -> Result<(), RpcError> {
-        self.ensure_room(2)?;
-        // A re-pressed key replaces what it held; release the old note if
-        // it was another one (the binding's transpose changed).
-        let mut replaced = Vec::new();
-        self.held.retain(|h| {
-            let same = h.holder == holder && h.key == key && h.slot == slot;
-            if same && h.note != note {
-                replaced.push((h.slot, h.note));
-            }
-            !same
-        });
-        self.send_note_offs(replaced);
+        self.ensure_room(1)?;
+        // One entry per played note: a key layered onto one instrument by
+        // two bindings holds both notes, and its note-off releases both.
+        self.held.retain(|h| !(h.holder == holder && h.key == key && h.slot == slot && h.note == note));
         self.held.push(Held { holder: holder.to_string(), key, slot, note });
         self.send(Command::NoteOn { slot, note, velocity: velocity.clamp(0.0, 1.0), gate: false });
         Ok(())
