@@ -7,7 +7,8 @@ export type InstrumentAddParams = { type: InstrumentType,
  */
 id: string | null, name: string | null, 
 /**
- * Route the main output to this existing channel instead of a new one.
+ * Route the main output to this existing channel. By default it goes to
+ * the first empty channel in display order, or a new one if none is empty.
  */
 channel: number | null, 
 /**

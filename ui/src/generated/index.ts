@@ -3,6 +3,7 @@ export * from "./AudioStatus";
 export * from "./ChannelAddParams";
 export * from "./ChannelInfo";
 export * from "./ChannelLevel";
+export * from "./ChannelMoveParams";
 export * from "./ChannelRemoveParams";
 export * from "./ChannelRenameParams";
 export * from "./ControllerModeParams";

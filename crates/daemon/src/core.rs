@@ -332,6 +332,8 @@ impl Core {
                 return Err(RpcError::invalid(format!("no channel {n}")));
             }
             Some(n)
+        } else if let Some(n) = self.first_empty_channel() {
+            Some(n)
         } else {
             if self.channels.len() >= MAX_CHANNELS {
                 return Err(RpcError::invalid(format!("at most {MAX_CHANNELS} channels")));
@@ -430,6 +432,11 @@ impl Core {
         Ok(self.graph())
     }
 
+    /// The first channel, in display order, that nothing is routed to.
+    fn first_empty_channel(&self) -> Option<u32> {
+        self.channels.iter().map(|c| c.n).find(|n| !self.routes.values().any(|r| r == n))
+    }
+
     /// Lowest free channel number, activated in the engine at defaults.
     fn add_channel_unchecked(&mut self, name: &str) -> u32 {
         let n = (1..=MAX_CHANNELS as u32).find(|n| !self.channels.iter().any(|c| c.n == *n)).unwrap();
@@ -517,8 +524,37 @@ impl Core {
         if let Some(n) = p.channel {
             self.check_channel(n)?;
         }
-        self.ensure_room(2)?;
+        // With `swap`, whatever else feeds the target channel takes this
+        // source's old place. If it had none, they stay and share the channel,
+        // so nothing goes silent.
+        let old = self.routes.get(&p.source).copied();
+        let displaced: Vec<(String, usize)> = match p.channel {
+            Some(n) if p.swap && old.is_some() => self
+                .routes
+                .iter()
+                .filter(|(s, c)| **c == n && **s != p.source)
+                .filter_map(|(s, _)| self.find_source(s))
+                .collect(),
+            _ => Vec::new(),
+        };
+        self.ensure_room(2 * (1 + displaced.len()))?;
+        for (did, doutput) in &displaced {
+            self.set_route_unchecked(did, *doutput, old);
+        }
         self.set_route_unchecked(&id, output, p.channel);
+        self.graph_changed(origin);
+        Ok(self.graph())
+    }
+
+    pub fn channel_move(&mut self, p: ChannelMoveParams, origin: &str) -> Result<Graph, RpcError> {
+        self.check_channel(p.n)?;
+        let len = self.channels.len() as u32;
+        if p.position < 1 || p.position > len {
+            return Err(RpcError::invalid(format!("position must be 1..={len}")));
+        }
+        let from = self.channels.iter().position(|c| c.n == p.n).unwrap();
+        let c = self.channels.remove(from);
+        self.channels.insert(p.position as usize - 1, c);
         self.graph_changed(origin);
         Ok(self.graph())
     }
@@ -1375,6 +1411,7 @@ impl Core {
             Request::ChannelAdd(p) => ok(self.channel_add(p.name, origin)?),
             Request::ChannelRemove(p) => ok(self.channel_remove(p.n, origin)?),
             Request::ChannelRename(p) => ok(self.channel_rename(p.n, p.name, origin)?),
+            Request::ChannelMove(p) => ok(self.channel_move(p, origin)?),
             Request::RouteSet(p) => ok(self.route_set(p, origin)?),
             Request::PatternGet(p) => {
                 let id = drum(self, &p.instrument)?;

@@ -2,6 +2,7 @@
 import type { AudioStatus } from "./AudioStatus";
 import type { ChannelAddParams } from "./ChannelAddParams";
 import type { ChannelInfo } from "./ChannelInfo";
+import type { ChannelMoveParams } from "./ChannelMoveParams";
 import type { ChannelRemoveParams } from "./ChannelRemoveParams";
 import type { ChannelRenameParams } from "./ChannelRenameParams";
 import type { ControllerModeParams } from "./ControllerModeParams";
@@ -69,6 +70,7 @@ export interface Methods {
   "channel.add": { params: ChannelAddParams; result: ChannelInfo };
   "channel.remove": { params: ChannelRemoveParams; result: Graph };
   "channel.rename": { params: ChannelRenameParams; result: ChannelInfo };
+  "channel.move": { params: ChannelMoveParams; result: Graph };
   "route.set": { params: RouteSetParams; result: Graph };
   "pattern.get": { params: PatternGetParams; result: PatternResult };
   "pattern.set": { params: PatternSetParams; result: TrackPattern };
@@ -117,6 +119,7 @@ export const METHODS: MethodName[] = [
   "channel.add",
   "channel.remove",
   "channel.rename",
+  "channel.move",
   "route.set",
   "pattern.get",
   "pattern.set",
