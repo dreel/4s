@@ -1021,7 +1021,7 @@
             ]
           },
           "target": {
-            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).",
+            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).\nAlternatives separated by `|` are tried in order: `@tb303|focus`.",
             "type": "string"
           },
           "transpose": {
@@ -1448,7 +1448,7 @@
             ]
           },
           "target": {
-            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).",
+            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).\nAlternatives separated by `|` are tried in order: `@tb303|focus`.",
             "type": "string"
           },
           "transpose": {
@@ -2387,7 +2387,7 @@
             ]
           },
           "target": {
-            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).",
+            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).\nAlternatives separated by `|` are tried in order: `@tb303|focus`.",
             "type": "string"
           },
           "transpose": {
@@ -4868,7 +4868,7 @@
             ]
           },
           "target": {
-            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).",
+            "description": "An instrument id, `focus` for the seat's focused instrument, or\n`@<type>` for the first instrument of a type (`@tr808`).\nAlternatives separated by `|` are tried in order: `@tb303|focus`.",
             "type": "string"
           },
           "transpose": {

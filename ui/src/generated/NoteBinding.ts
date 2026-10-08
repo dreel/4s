@@ -29,5 +29,6 @@ remap: Array<number> | null,
 /**
  * An instrument id, `focus` for the seat's focused instrument, or
  * `@<type>` for the first instrument of a type (`@tr808`).
+ * Alternatives separated by `|` are tried in order: `@tb303|focus`.
  */
 target: string, };
