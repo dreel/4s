@@ -1,19 +1,22 @@
 # Engine
 
-Status: v2 (RFC 0004). Instruments added and removed at runtime (a TR-808-style
-drum machine and a TB-303-style bass synth), a shared 64-step sequencer with
-swing, and a multi-channel stereo mixer. Code: `crates/engine`.
+Status: v3 (RFC 0004, RFC 0007). Instruments added and removed at runtime (a
+TR-808-style drum machine and a TB-303-style bass synth), each played by a
+clip of timed note events on a shared tick clock with swing, and a
+multi-channel stereo mixer. Code: `crates/engine`.
 
 ## Structure
 
 - `Engine` (`engine.rs`) owns a fixed table of instrument slots
   (`MAX_INSTRUMENTS` = 16), a fixed pool of mixer channels (`MAX_CHANNELS` =
-  32), the routes between them, the step clock, and the global parameters.
+  32), the routes between them, one clip per slot, the tick clock, and the
+  global parameters.
   `render()` and `apply()` are real-time safe: no allocation, frees, locks,
   or I/O.
 - `Instrument` (`instrument.rs`) is the trait every instrument type
-  implements: outputs (each mono or stereo), parameters, patterns,
-  `on_step`, `trigger`/`note_on`/`note_off`, and block `render` into
+  implements: outputs (each mono or stereo), parameters,
+  `note_on`/`note_off` (its only input; a drum machine maps GM notes to
+  voices), and block `render` into
   preallocated output buffers (at most `MAX_BLOCK` = 256 frames per call).
   `instrument::make`, `params`, and `outputs` describe each type.
 - `RtEngine` (`rt.rs`) wraps the engine for the audio thread. The control side
@@ -98,16 +101,14 @@ resonant ladder lowpass (24 dB/oct, tanh stages), and a VCA.
   notes always use the shortest decay, as on the 303).
 - Accented notes play louder and add an accent sweep to the filter. The
   sweep comes from a smoothed "capacitor", so consecutive accents build up.
-- A note gates for half a step. A step with **slide** holds the gate into
-  the next step, and that note glides in (~60 ms) without retriggering the
-  envelopes.
-- Played from a MIDI keyboard (or `voice.note_on`, or `4s key C2 --for 1`), a note
-  holds until its key is released (a played note's velocity only selects
-  accent, at 0.95 and up, as on the 303). Overlapping keys glide; releasing
-  the sounding key glides back to the last key still held (last-note
-  priority);
-  while held, the sequencer's rest steps and stopping the transport do not
-  cut it (a sequenced note on a later step takes over).
+- A note sounds until its note-off: from its clip (a step's note is half a
+  step long), a MIDI key, `voice.note_on`, or `4s key C2 --for 1`. Velocity
+  only selects accent, at 0.95 (121) and up, as on the 303.
+- A note that starts while another is held glides in (~60 ms) without
+  retriggering the envelopes: a **slide** step is a note held one tick past
+  the next step's start. Releasing the sounding note glides back to the last
+  one still held (last-note priority). The clip's notes and keys share this
+  stack; stopping the transport releases only the clip's notes.
 - Output: one mono main.
 
 Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
@@ -117,12 +118,26 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 
 ## Sequencer
 
-- One shared clock for every instrument. Steps are 16th notes. Pattern memory
-  is 64 steps; the active length is `sequencer.length` (1-64).
+- One shared clock: 96 ticks per quarter note (`PPQ`), 24 per 16th step
+  (`TICKS_PER_STEP`). The playhead counts steps of `sequencer.length`
+  (1-64).
 - Swing (`transport.swing` 0..1) delays every second 16th: each pair keeps its
-  length and the first note takes 50%..75% of it.
-- Steps fire sample-accurately inside audio blocks; each instrument plays its
-  own pattern on each step.
+  length and the first note takes 50%..75% of it. Ticks inside a step are
+  spaced evenly.
+- Each instrument slot has a **clip** (RFC 0007): up to `MAX_EVENTS` = 1024
+  events `{tick, len, note, velocity}`, looping at its own length or, by
+  default, at `sequencer.length` steps (clips of different lengths make
+  polymeters). On every tick the engine releases the notes that end there,
+  then starts the events that begin there, sample-accurately inside audio
+  blocks.
+- Clip storage is preallocated per slot; the daemon edits it with
+  `ClearClip`, `AddEvent`, `RemoveEvent`, and `SetClipLength` commands, so
+  nothing is allocated or freed on the audio thread.
+- Step patterns are views over clips (`crates/protocol/src/clip.rs`): a
+  drum step is an event on the step's first tick at the voice's GM note,
+  velocity 89 (on, 0.7) or 127 (accent), one step long; a 303 step is an
+  event half a step long, and a slide holds one tick past the next step, so
+  the next note starts while it is held and glides.
 
 ## Parameters
 

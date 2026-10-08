@@ -6,6 +6,7 @@
 //!   to its params and result types,
 //! - `export_ts()`: exports all param/result types with ts-rs.
 
+use crate::clip::*;
 use crate::types::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -317,6 +318,54 @@ pub struct NoteSetParams {
     /// 0-based step index.
     pub step: u32,
     pub note: NoteStep,
+}
+
+// ---- clips (RFC 0007) -----------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipGetParams {
+    /// Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipEventsParams {
+    /// Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    pub events: Vec<ClipEvent>,
+}
+
+/// An event's identity in a clip.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct EventKey {
+    pub tick: u32,
+    pub note: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipRemoveParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    pub events: Vec<EventKey>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipLengthParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Ticks (1..`MAX_CLIP_TICKS`); omit to follow `sequencer.length`.
+    #[serde(default)]
+    pub length: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipQuantizeParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).
+    pub grid: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -726,6 +775,21 @@ api! {
     PatternSetNotes = "pattern.set_notes" (NotesSetParams) -> NotesResult;
     /// Set one step of a note pattern.
     PatternSetNote = "pattern.set_note" (NoteSetParams) -> NotesResult;
+
+    /// An instrument's clip: timed note events (RFC 0007).
+    ClipGet = "clip.get" (ClipGetParams) -> Clip;
+    /// Replace a clip's events.
+    ClipSet = "clip.set" (ClipEventsParams) -> Clip;
+    /// Add events (replacing any at the same tick and note).
+    ClipAdd = "clip.add" (ClipEventsParams) -> Clip;
+    /// Remove events by tick and note.
+    ClipRemove = "clip.remove" (ClipRemoveParams) -> Clip;
+    /// Set a clip's own length, or follow `sequencer.length`.
+    ClipLength = "clip.length" (ClipLengthParams) -> Clip;
+    /// Remove every event.
+    ClipClear = "clip.clear" (ClipGetParams) -> Clip;
+    /// Move every event to the nearest grid line.
+    ClipQuantize = "clip.quantize" (ClipQuantizeParams) -> Clip;
 
     /// Play a drum voice or a note immediately (audition).
     VoiceTrigger = "voice.trigger" (TriggerParams) -> Empty;

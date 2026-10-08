@@ -1,6 +1,6 @@
 # RFC 0007: MIDI bindings, seats, clips, and recording
 
-- Status: accepted (phase 1 implemented; see "Implementation notes")
+- Status: accepted (phases 1 and 2 implemented; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-07
 - Discussion: the PR that introduces this RFC. Merging it with
@@ -424,4 +424,41 @@ differ from the sections above, these win):
   RFC took 0006 first.
 - **Not built yet**: the bridge itself, so the remote input delay exists
   only as the design above.
+
+## Implementation notes (phase 2)
+
+Clips on a tick clock, as designed in section 3, with these details (where
+they differ from the sections above, these win):
+
+- **Clock**: 96 PPQ, 24 ticks per step. The engine fires every tick (notes
+  ending there are released first, then events starting there play), so
+  timing is sample-accurate to the tick. Swing is applied per step pair as
+  before, counted from the pattern's first step.
+- **No clip boxes**: each slot's clip is a `Vec` preallocated to
+  `MAX_EVENTS` (1024) in `Engine::new`, edited by `ClearClip`, `AddEvent`,
+  `RemoveEvent`, and `SetClipLength` commands, so nothing is allocated or
+  freed on the audio thread (`no_alloc` fills a clip to capacity). The
+  command ring grew from 4096 to 32768 commands, so loading a project with
+  every clip full fits in one go.
+- **Step views** (`crates/protocol/src/clip.rs`): drum step = event on the
+  step's first tick at the voice's GM note, one step long, velocity 89 (the
+  0.7 steps always played at) or 127 (accent; 120 and up reads as accent);
+  303 step = half a step long, slide = 25 ticks (one tick past the next
+  step). Renders of existing patterns are unchanged (the e2e level and
+  onset checks still pass). `pattern.*` edits replace only the view's
+  events, so notes off the grid survive step edits.
+- **Events**: every clip edit emits `clip_changed`, plus the step view's
+  `step_changed` / `pattern_changed` / `notes_changed` so editors that only
+  know steps keep working. The UI notes how many events are off the grid
+  and a clip's own length.
+- **Undo keys**: `event:<inst>.<tick>.<note>` and `clip:<inst>` replace
+  `step:` and `note:` (RFC 0006 amendment).
+- **Project format v4**: an instrument's clip is saved as a step pattern
+  when that says exactly the same thing (and the clip follows
+  `sequencer.length`), else under `clips` as `tick:note:len:vel` tokens.
+- **RPC/CLI**: `clip.get/set/add/remove/length/clear/quantize`, `4s clip
+  show/set/add/rm/length/clear/quantize`; the default instrument is the
+  caller's seat focus. Protocol version 4.
+- **Not in phase 2**: a piano-roll editor in the UI (the CLI and RPC edit
+  any event; the step editors edit the grid).
 

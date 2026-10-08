@@ -191,21 +191,23 @@ a second drum machine) is an Extension.
 
 1. **Protocol.** Add a variant to `InstrumentType` in
    `crates/protocol/src/types.rs` (`id`, `default_id`, `label`, `parse`).
-   If it needs a new kind of pattern, add a `PatternData` variant and a
-   `ProjectPattern` form; otherwise reuse drum steps or note steps.
-   Regenerate bindings.
+   It is sequenced by its clip (notes), so it needs no pattern code; add a
+   `PatternData` step view only if a step editor helps (drum steps and note
+   steps exist). Regenerate bindings.
 2. **Engine.** Write a type implementing `Instrument`
    (`crates/engine/src/instrument.rs`) in its own file, following
-   `tb303.rs` (one mono voice, note pattern) or `tr808.rs` (several voices,
-   a main mix plus direct outs):
+   `tb303.rs` (one mono voice with a note stack) or `tr808.rs` (several
+   voices on GM notes, a main mix plus direct outs):
+   - play what `note_on`/`note_off` say: the sequencer, MIDI, and auditions
+     all use them;
    - allocate everything in `new` (output buffers of `MAX_BLOCK * 2`); never
-     allocate in `render`, `on_step`, or the setters;
+     allocate in `render`, the notes, or the setters;
    - declare `params(id)` and outputs (each mono or stereo; main first);
    - keep peaks at or below 1.0.
    Add it to `instrument::make`, `params`, and `outputs`.
-3. **Daemon.** Patterns are stored per instance in `Core` (`PatternState`).
-   A type that reuses drum or note patterns works with the existing
-   `pattern.*` methods; `Core::resolve` picks the default instance by type.
+3. **Daemon.** Every instance has a clip (`crates/daemon/src/core/clips.rs`),
+   edited with `clip.*` and, through the step views, `pattern.*`;
+   `Core::resolve` picks the default instance by type.
 4. **CLI.** Usually nothing: `4s instrument add <type>` and the pattern
    commands cover it. Extend `InstrumentType::parse` aliases if helpful.
 5. **UI.** Add an editor component (like `BassEditor.tsx`) and show it from
@@ -215,7 +217,7 @@ Validate:
 - An engine test that the instrument sounds, stays at or below 1.0, and
   decays; `crates/engine/tests/no_alloc.rs` must still pass with it added
   to the command list.
-- CLI e2e: add it, program a pattern, and check `4s render` triggers and
+- CLI e2e: add it, program a clip (`4s clip set`), and check `4s render` triggers and
   onsets; remove it and check its params are gone.
 - A Playwright test for its editor, and a look at the screenshots.
 - Document it in [engine.md](engine.md) (synthesis, parameters, outputs).

@@ -60,4 +60,4 @@ decisions (before implementation).
 | [0004](0004-instruments-and-mixer.md) | Instruments and the channel mixer | implemented |
 | [0005](0005-build-phase.md) | Build phase: suspend the RFC gate, lighten the review bar | implemented |
 | [0006](0006-journal-and-undo.md) | Journal and per-user undo | implemented (part A) |
-| [0007](0007-midi-bindings-and-clips.md) | MIDI bindings, seats, clips, and recording | accepted (phase 1 implemented) |
+| [0007](0007-midi-bindings-and-clips.md) | MIDI bindings, seats, clips, and recording | accepted (phases 1-2 implemented) |

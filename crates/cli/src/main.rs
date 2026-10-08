@@ -192,6 +192,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ControllerCmd>,
     },
+    /// Show or edit an instrument's clip: timed note events (RFC 0007).
+    /// Ticks: 96 per quarter note, 24 per step. `4s clip` shows your focus.
+    Clip {
+        #[command(subcommand)]
+        cmd: Option<ClipCmd>,
+    },
     /// Seats: each performer's focus, bindings, and CC maps (RFC 0007).
     /// `4s seat` lists them.
     Seat {
@@ -424,6 +430,45 @@ enum ProfileArg {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+enum ClipCmd {
+    /// Show a clip (default: your focus).
+    Show { instrument: Option<String> },
+    /// Replace a clip's events: `tick:note[:len[:vel]]` tokens, e.g.
+    /// `4s clip set bass "0:C2:12 24:D#2:25:127 36:G1"`.
+    Set {
+        instrument: String,
+        #[arg(allow_hyphen_values = true)]
+        events: String,
+    },
+    /// Add a note (replacing one at the same tick and note), e.g.
+    /// `4s clip add bass 36 C3 --len 6`.
+    Add {
+        instrument: String,
+        tick: u32,
+        note: String,
+        /// Ticks (default: one step, 24).
+        #[arg(long)]
+        len: Option<u32>,
+        /// 1..127 (default 89; 120 and up is accented).
+        #[arg(long)]
+        vel: Option<u8>,
+    },
+    /// Remove the note at a tick.
+    Rm { instrument: String, tick: u32, note: String },
+    /// Set a clip's length in steps (`auto` follows sequencer.length), e.g.
+    /// `4s clip length bass 12` for a 12-step loop against a 16-step beat.
+    Length { instrument: String, steps: String },
+    /// Remove every note.
+    Clear { instrument: String },
+    /// Snap notes to a grid: 1/4, 1/8, 1/16 (default), 1/32, or ticks.
+    Quantize {
+        instrument: String,
+        #[arg(default_value = "1/16")]
+        grid: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
 enum SeatCmd {
     /// List seats, who sits where, and their bindings.
     List,
@@ -551,6 +596,26 @@ fn note_range(s: &str) -> Result<(u8, u8)> {
         bail!("note range {s} is backwards");
     }
     Ok((lo, hi))
+}
+
+/// A note by name (`C2`) or number (`36`).
+fn note_arg(s: &str) -> Result<u8> {
+    match s.parse::<u8>() {
+        Ok(n) if n <= 127 => Ok(n),
+        _ => parse_note(s).map_err(|e| anyhow!(e)),
+    }
+}
+
+/// `1/16` (or `16`) as a grid in ticks, or `<n>t` ticks.
+fn grid_ticks(s: &str) -> Result<u32> {
+    if let Some(t) = s.strip_suffix('t') {
+        return t.parse().map_err(|_| anyhow!("invalid grid '{s}'"));
+    }
+    let d: u32 = s.trim_start_matches("1/").parse().map_err(|_| anyhow!("grid is 1/4, 1/8, 1/16, 1/32, or <n>t"))?;
+    if d == 0 || (PPQ * 4) % d != 0 {
+        bail!("grid 1/{d} is not a whole number of ticks");
+    }
+    Ok(PPQ * 4 / d)
 }
 
 fn hex_bytes(bytes: &[String]) -> Result<Vec<u8>> {
@@ -768,6 +833,37 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 follow,
             })],
         },
+        Cmd::Clip { cmd } => vec![match cmd.clone().unwrap_or(ClipCmd::Show { instrument: None }) {
+            ClipCmd::Show { instrument } => Request::ClipGet(ClipGetParams { instrument }),
+            ClipCmd::Set { instrument, events } => Request::ClipSet(ClipEventsParams {
+                instrument: Some(instrument),
+                events: parse_events(&events).map_err(|e| anyhow!(e))?,
+            }),
+            ClipCmd::Add { instrument, tick, note, len, vel } => Request::ClipAdd(ClipEventsParams {
+                instrument: Some(instrument),
+                events: vec![ClipEvent {
+                    tick,
+                    note: note_arg(&note)?,
+                    len: len.unwrap_or(TICKS_PER_STEP),
+                    velocity: vel.unwrap_or(VEL_ON),
+                }],
+            }),
+            ClipCmd::Rm { instrument, tick, note } => Request::ClipRemove(ClipRemoveParams {
+                instrument: Some(instrument),
+                events: vec![EventKey { tick, note: note_arg(&note)? }],
+            }),
+            ClipCmd::Length { instrument, steps } => Request::ClipLength(ClipLengthParams {
+                instrument: Some(instrument),
+                length: match steps.as_str() {
+                    "auto" => None,
+                    n => Some(n.parse::<u32>().map_err(|_| anyhow!("length is a number of steps or `auto`"))? * TICKS_PER_STEP),
+                },
+            }),
+            ClipCmd::Clear { instrument } => Request::ClipClear(ClipGetParams { instrument: Some(instrument) }),
+            ClipCmd::Quantize { instrument, grid } => {
+                Request::ClipQuantize(ClipQuantizeParams { instrument: Some(instrument), grid: grid_ticks(&grid)? })
+            }
+        }],
         Cmd::Seat { cmd } => vec![match cmd.clone().unwrap_or(SeatCmd::List) {
             SeatCmd::List => Request::SeatList(e),
             SeatCmd::Claim { name } => Request::SeatClaim(SeatNameParams { name }),
@@ -988,6 +1084,22 @@ fn print_status_lines(s: &Snapshot) {
         s.project.path.as_deref().unwrap_or("(unsaved)"),
         if s.project.dirty { " *modified*" } else { "" }
     );
+}
+
+fn print_clip(c: &Clip) {
+    let length = match c.length {
+        Some(l) if l % TICKS_PER_STEP == 0 => format!("{} steps", l / TICKS_PER_STEP),
+        Some(l) => format!("{l} ticks"),
+        None => "sequencer.length".into(),
+    };
+    println!("{}: {} notes, length {length}", c.instrument, c.events.len());
+    for e in &c.events {
+        let (step, sub) = (e.tick / TICKS_PER_STEP + 1, e.tick % TICKS_PER_STEP);
+        let at = if sub == 0 { format!("step {step}") } else { format!("step {step} +{sub}") };
+        let name = if (NOTE_MIN..=NOTE_MAX).contains(&e.note) { note_name(e.note) } else { e.note.to_string() };
+        println!("  {:>5}  {at:<12} {name:<4} len {:<3} vel {}", e.tick, e.len, e.velocity);
+    }
+    println!("  {}", format_events(&c.events));
 }
 
 fn fmt_note_range(b: &NoteBinding) -> String {
@@ -1302,6 +1414,7 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             println!("devices play in seat: {}{pinned}", r.seat);
         }
         Cmd::Controller { .. } => print_leds(&serde_json::from_value(last)?),
+        Cmd::Clip { .. } => print_clip(&serde_json::from_value(last)?),
         Cmd::Seat { .. } => {
             let r: SeatListResult = serde_json::from_value(last)?;
             if r.seats.is_empty() {
@@ -1687,6 +1800,8 @@ mod tests {
             "focus bass", "bind keys --notes C1..B2 --to bass", "unbind 1", "cc map knobs 21 bass.cutoff",
             "cc unmap knobs 21", "cc learn bass.cutoff", "knobs page decay", "knobs follow knobs 21 22",
             "daemon status", "daemon stop", "undo", "redo", "history", "journal",
+            "clip", "clip show bass", "clip set bass 0:C2:12", "clip add bass 36 C3 --len 6", "clip rm bass 36 C3",
+            "clip length bass 12", "clip clear bass", "clip quantize bass 1/8",
         ];
         let mut covered: BTreeSet<&str> = commands.iter().flat_map(|c| methods_for(c)).collect();
         covered.insert("session.hello"); // sent by every command on connect

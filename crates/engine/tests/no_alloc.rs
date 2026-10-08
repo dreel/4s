@@ -4,7 +4,7 @@
 
 use fours_engine::instrument::{self, MAX_BLOCK};
 use fours_engine::{Command, Engine, ParamTarget, RtEngine};
-use fours_protocol::{InstrumentType, MAX_STEPS, NoteStep, STEP_ON};
+use fours_protocol::{ClipEvent, InstrumentType, MAX_EVENTS, NoteStep, STEP_ON, Voice, drum_event, note_event};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -55,12 +55,16 @@ fn process_never_allocates() {
     let sr = 48000;
     let (mut rt, mut link) = RtEngine::new(Engine::new(sr));
     let mut out = vec![0.0f32; MAX_BLOCK * 4 * 2];
-    let mut steps = [0u8; MAX_STEPS];
-    steps[0] = STEP_ON;
-    steps[2] = STEP_ON;
-    let mut notes = [NoteStep::default(); MAX_STEPS];
-    notes[0] = NoteStep { note: Some(36), accent: true, slide: true };
-    notes[1] = NoteStep { note: Some(43), accent: false, slide: false };
+    let kicks: Vec<ClipEvent> = [0, 2].iter().filter_map(|s| drum_event(Voice::Kick, *s, STEP_ON)).collect();
+    // A slide: the first note overlaps the second.
+    let bass: Vec<ClipEvent> = [
+        NoteStep { note: Some(36), accent: true, slide: true },
+        NoteStep { note: Some(43), accent: false, slide: false },
+    ]
+    .iter()
+    .enumerate()
+    .filter_map(|(i, s)| note_event(i, s))
+    .collect();
 
     for round in 0..3u8 {
         // Built on the control side (allocations here are fine).
@@ -72,8 +76,14 @@ fn process_never_allocates() {
             Command::SetRoute { slot: 0, output: 0, channel: Some(0) },
             Command::SetRoute { slot: 0, output: 1, channel: Some(1) },
             Command::SetRoute { slot: 1, output: 0, channel: Some(1) },
-            Command::SetDrumTrack { slot: 0, track: 0, steps },
-            Command::SetNotes { slot: 1, steps: notes },
+            Command::ClearClip { slot: 0 },
+            Command::AddEvent { slot: 0, event: kicks[0] },
+            Command::AddEvent { slot: 0, event: kicks[1] },
+            Command::AddEvent { slot: 1, event: bass[0] },
+            Command::AddEvent { slot: 1, event: bass[1] },
+            Command::RemoveEvent { slot: 0, tick: kicks[1].tick, note: kicks[1].note },
+            Command::AddEvent { slot: 0, event: kicks[1] },
+            Command::SetClipLength { slot: 1, length: Some(48) },
             Command::SetParam { target: ParamTarget::Channel { ch: 1, index: 1 }, value: -0.5 },
             Command::SetParam { target: ParamTarget::Instrument { slot: 1, index: 2 }, value: 0.7 },
             Command::NoteOn { slot: 0, note: 42, velocity: 1.0, gate: false },
@@ -93,6 +103,14 @@ fn process_never_allocates() {
             }
         });
         assert_eq!(n, 0, "round {round}: {n} heap operations while playing");
+
+        // Filling a clip to capacity stays in its preallocated storage.
+        for tick in 0..MAX_EVENTS as u32 {
+            let event = ClipEvent { tick, len: 1, note: 38, velocity: 100 };
+            assert!(link.commands.push(Command::AddEvent { slot: 0, event }).is_ok());
+        }
+        let n = counted(|| rt.process(&mut out, 2));
+        assert_eq!(n, 0, "round {round}: {n} heap operations filling a clip");
 
         for c in [
             Command::Stop,

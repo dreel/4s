@@ -10,6 +10,9 @@ use rtrb::{Consumer, Producer, RingBuffer};
 /// `Core`), so the audio thread's push always has room.
 pub const RETURN_CAPACITY: usize = 4 * fours_protocol::MAX_INSTRUMENTS;
 
+/// Capacity of the command ring.
+pub const COMMAND_CAPACITY: usize = 2 * fours_protocol::MAX_INSTRUMENTS * fours_protocol::MAX_EVENTS;
+
 pub struct RtEngine {
     engine: Engine,
     commands: Consumer<Command>,
@@ -27,7 +30,9 @@ pub struct EngineLink {
 
 impl RtEngine {
     pub fn new(engine: Engine) -> (RtEngine, EngineLink) {
-        let (cp, cc) = RingBuffer::new(4096);
+        // Room for a whole project load: every instrument's full clip
+        // (`MAX_INSTRUMENTS * MAX_EVENTS` events) plus its parameters.
+        let (cp, cc) = RingBuffer::new(COMMAND_CAPACITY);
         let (fp, fc) = RingBuffer::new(8192);
         let (rp, rc) = RingBuffer::new(RETURN_CAPACITY);
         (

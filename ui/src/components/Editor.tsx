@@ -7,6 +7,27 @@ import type { InstrumentInfo } from "../generated/InstrumentInfo";
 import { act, client, select, useApp, useSelected } from "../store";
 import { BassEditor } from "./BassEditor";
 import { DrumEditor } from "./DrumEditor";
+import { GM_NOTES } from "./voices";
+
+/** Ticks per step (a 16th), as in the protocol's `TICKS_PER_STEP`. */
+const TICKS_PER_STEP = 24;
+
+/** What the step editor cannot show of a clip (RFC 0007): notes between
+ * steps or outside the drum voices, and a loop length of its own. */
+function ClipNote({ id, drums }: { id: string; drums: boolean }) {
+  const clip = useApp((s) => s.snapshot?.clips.find((c) => c.instrument === id));
+  if (!clip) return null;
+  const hidden = clip.events.filter((e) => e.tick % TICKS_PER_STEP !== 0 || (drums && !GM_NOTES.includes(e.note))).length;
+  const loop = clip.length === null ? null : clip.length / TICKS_PER_STEP;
+  if (!hidden && loop === null) return null;
+  return (
+    <div className="text-xs text-amber-400" data-testid={`clip-note-${id}`} title={`see them with: 4s clip show ${id}`}>
+      {hidden ? `${hidden} note${hidden === 1 ? "" : "s"} off the step grid (not shown here)` : ""}
+      {hidden && loop !== null ? " - " : ""}
+      {loop !== null ? `loops every ${loop} steps` : ""}
+    </div>
+  );
+}
 
 function Tab({ instrument, selected }: { instrument: InstrumentInfo; selected: boolean }) {
   const [armed, setArmed] = useState(false);
@@ -86,6 +107,7 @@ export function Editor() {
         {current && <OutputSelect instrument={current} />}
       </div>
       {!current && <div className="text-xs text-zinc-500">No instruments. Add one from the console.</div>}
+      {current && <ClipNote id={current.id} drums={current.type === "tr808"} />}
       {current?.type === "tr808" && <DrumEditor id={current.id} />}
       {current?.type === "tb303" && <BassEditor id={current.id} />}
     </section>

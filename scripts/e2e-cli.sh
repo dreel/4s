@@ -80,7 +80,7 @@ echo "pad 0 2" >&7
 echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
 sleep 0.5
 check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
-check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","seat":"e2e"} -> step:drums.kick.2' s journal
+check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","seat":"e2e"} -> event:drums.48.36' s journal
 check "undo takes back a device pad press (the host user's)" "kick        ---- ---- ---- ----" bash -c "$BIN/4s undo >/dev/null && $BIN/4s pattern show kick"
 check "redo" "kick        --x- ---- ---- ----" bash -c "$BIN/4s redo >/dev/null && $BIN/4s pattern show kick"
 # Knob 2 (CC 2) on the decay page -> snare decay. Knobs pick up: one far
@@ -430,7 +430,7 @@ s set bass.cutoff 0.25 >/dev/null
 # the seat matching its user, and the host's devices play in the host seat.
 check "the CLI joins the seat matching its user" "you: e2e" s seat
 check "it is this engine's devices' seat" "e2e: cli#" s seat
-check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 3, "user": "bob"}'
+check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 4, "user": "bob"}'
 check "and stays unseated" "you: (no seat)" s --user bob seat
 check "seat edits need a seat" "you have no seat" s --user bob focus drums
 check "create a seat for bob" "you: bob" s --user bob --new-seat seat
@@ -492,6 +492,33 @@ check "load restores notes" "bass: C2 - G1! C3~" s notes bass
 check "load restores instrument params" "bass.cutoff = 0.25" s get bass.cutoff
 check "load restores seats and their bindings" "bind 1: keys any ch C1..B2 -> bass" bash -c "$BIN/4s seat | grep -A3 '^bob'"
 check "and focus" "focus: bass" bash -c "$BIN/4s seat | grep -A1 '^e2e'"
+# Clips (RFC 0007 phase 2): sequences are timed note events; step patterns
+# are views over them.
+s instrument add tb303 --id seq --no-channel >/dev/null
+s notes seq "C2 - D#2~ G1" >/dev/null
+check "a note pattern is a clip: half-step notes, a slide overlaps the next" "0:C2:12:89 48:D#2:25:89 72:G1:12:89" s clip show seq
+check "add a note between steps" "36:C3:6:100" s clip add seq 36 C3 --len 6 --vel 100
+check "the step view leaves it out" "seq: C2 - D#2~ G1" s notes seq
+check "it plays at its tick (step 2 + half a step at 120 bpm)" "C3 at 0.1875" python3 -c "
+import json, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--bars', '1', '--out', 'renders/clip.wav']))
+t = [x['time'] for x in r['triggers'] if x['instrument'] == 'seq' and x['note'] == 48]
+print(f'C3 at {t[0]:.4f}' if len(t) == 1 else t)"
+check "a clip loops at its own length: 3 steps against 16 (3 notes x 6 loops, cut by the bar)" "16 notes" python3 -c "
+import json, subprocess
+subprocess.check_output(['$BIN/4s', 'clip', 'length', 'seq', '3'])
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--bars', '1', '--out', 'renders/poly.wav']))
+print(len([x for x in r['triggers'] if x['instrument'] == 'seq']), 'notes')"
+check "an off-grid clip saves as events and loads back" "36:C3:6:100" bash -c "$BIN/4s project save clips >/dev/null && grep -q '\"clips\"' '$FOURS_DATA_DIR/projects/clips.4s/project.json' && $BIN/4s project new >/dev/null && $BIN/4s project load clips >/dev/null && $BIN/4s clip show seq"
+check "its own length too" "length 3 steps" s clip show seq
+s clip length seq auto >/dev/null
+check "quantize moves it to the nearest 16th" "48:C3:6:100" s clip quantize seq 1/16
+check "undo takes back the quantize" "36:C3:6:100" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq"
+check "clip edits are journaled per event" "event:seq.36.48" s journal --limit 3
+check "remove a note" "0:C2:12:89 48:D#2:25:89 72:G1:12:89" bash -c "$BIN/4s clip rm seq 36 C3 >/dev/null && $BIN/4s clip show seq | tail -1"
+check "clip set replaces the events" "seq: 1 notes" s clip set seq "0:60:96:127"
+check "clear" "seq: 0 notes" s clip clear seq
+s instrument rm seq >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
 check "daemon logs" "listening on ws://" s daemon logs

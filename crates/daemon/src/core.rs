@@ -9,15 +9,17 @@
 //! rebuilt from the graph whenever it changes. Seats and MIDI input routing
 //! live in `seats.rs`.
 
+mod clips;
 mod seats;
 
 use crate::controller::{BlockInput, BlockMap, Controller, decode_block};
 use crate::hardware::{self, Hardware};
 use crate::journal::{self, Doc, History, Journal};
 use crate::midi::{Midi, MidiMessage, list_ports};
+use clips::ClipState;
 use seats::{ClientState, Held, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
-use fours_engine::offline::{RenderInstrument, RenderPattern, RenderSpec};
+use fours_engine::offline::{RenderInstrument, RenderSpec};
 use fours_engine::params::{self, CHANNEL_PARAMS, NUM_GLOBALS};
 use fours_engine::{Command, Feedback, ParamTarget, RETURN_CAPACITY};
 use fours_protocol::*;
@@ -65,20 +67,6 @@ struct InstrumentState {
     outputs: Vec<OutputInfo>,
 }
 
-enum PatternState {
-    Drums(Box<[[u8; MAX_STEPS]; NUM_TRACKS]>),
-    Notes(Box<[NoteStep; MAX_STEPS]>),
-}
-
-impl PatternState {
-    fn new(kind: InstrumentType) -> Self {
-        match kind {
-            InstrumentType::Tr808 => PatternState::Drums(Box::new([[STEP_OFF; MAX_STEPS]; NUM_TRACKS])),
-            InstrumentType::Tb303 => PatternState::Notes(Box::new([NoteStep::default(); MAX_STEPS])),
-        }
-    }
-}
-
 struct ParamEntry {
     info: ParamInfo,
     target: ParamTarget,
@@ -91,7 +79,8 @@ pub struct Core {
     instruments: Vec<InstrumentState>,
     channels: Vec<ChannelInfo>,
     routes: BTreeMap<String, u32>,
-    patterns: HashMap<String, PatternState>,
+    /// Each instrument's clip (RFC 0007).
+    clips: HashMap<String, ClipState>,
     slot_used: [bool; MAX_INSTRUMENTS],
     /// Removed instruments not yet handed back by the audio thread.
     in_flight: usize,
@@ -149,7 +138,7 @@ impl Core {
             instruments: Vec::new(),
             channels: Vec::new(),
             routes: BTreeMap::new(),
-            patterns: HashMap::new(),
+            clips: HashMap::new(),
             slot_used: [false; MAX_INSTRUMENTS],
             in_flight: 0,
             sample_rate: audio.sample_rate,
@@ -406,7 +395,7 @@ impl Core {
             slot,
             outputs: instrument::outputs(kind, id, name),
         });
-        self.patterns.insert(id.to_string(), PatternState::new(kind));
+        self.clips.insert(id.to_string(), ClipState::new(kind));
     }
 
     /// Send every parameter of an instrument to the engine.
@@ -458,7 +447,7 @@ impl Core {
         self.send(Command::RemoveInstrument { slot: inst.slot });
         self.slot_used[inst.slot as usize] = false;
         self.in_flight += 1;
-        self.patterns.remove(&inst.id);
+        self.clips.remove(&inst.id);
         let fed: Vec<u32> = inst.outputs.iter().filter_map(|o| self.routes.remove(&o.source)).collect();
         self.held.retain(|h| h.slot != inst.slot);
         let mut refocused = false;
@@ -627,7 +616,7 @@ impl Core {
             self.controller.page = pages - 1;
         }
         let pattern = self.target_pattern();
-        let leds = self.controller.compute_leds(pattern, self.length(), self.playhead);
+        let leds = self.controller.compute_leds(pattern.as_ref(), self.length(), self.playhead);
         let diff = self.controller.set_leds(leds);
         for (r, c, v) in &diff {
             let msg = self.block_map.led_message(*r, *c, *v);
@@ -658,14 +647,11 @@ impl Core {
     /// The drum pattern a seat's grid edits: its focus, if a drum machine.
     fn drum_focus(&self, seat: &str) -> Option<String> {
         let f = self.seat_focus(seat)?;
-        matches!(self.patterns.get(&f), Some(PatternState::Drums(_))).then_some(f)
+        self.is_drums(&f).then_some(f)
     }
 
-    fn target_pattern(&self) -> Option<&[[u8; MAX_STEPS]; NUM_TRACKS]> {
-        match self.patterns.get(&self.drum_focus(&self.host_seat)?)? {
-            PatternState::Drums(d) => Some(d),
-            PatternState::Notes(_) => None,
-        }
+    fn target_pattern(&self) -> Option<[[u8; MAX_STEPS]; NUM_TRACKS]> {
+        Some(self.drums(&self.drum_focus(&self.host_seat)?))
     }
 
     /// Re-send every LED (after a device connects).
@@ -689,6 +675,7 @@ impl Core {
                 .iter()
                 .map(|i| InstrumentPattern { instrument: i.id.clone(), pattern: self.pattern_data(&i.id) })
                 .collect(),
+            clips: self.instruments.iter().map(|i| self.clip(&i.id)).collect(),
             controller: self.controller_state(),
             midi: self.midi.connections(),
             seats: self.seats_state(),
@@ -697,25 +684,12 @@ impl Core {
         }
     }
 
+    /// The step view of an instrument's clip.
     fn pattern_data(&self, id: &str) -> PatternData {
-        match self.patterns.get(id) {
-            Some(PatternState::Drums(_)) => PatternData::Drums { tracks: self.track_patterns(id, None) },
-            Some(PatternState::Notes(n)) => PatternData::Notes { steps: n.to_vec() },
-            None => PatternData::Notes { steps: Vec::new() },
-        }
-    }
-
-    fn drums(&self, id: &str) -> &[[u8; MAX_STEPS]; NUM_TRACKS] {
-        match self.patterns.get(id) {
-            Some(PatternState::Drums(d)) => d,
-            _ => panic!("drum pattern for '{id}'"),
-        }
-    }
-
-    fn drums_mut(&mut self, id: &str) -> &mut [[u8; MAX_STEPS]; NUM_TRACKS] {
-        match self.patterns.get_mut(id) {
-            Some(PatternState::Drums(d)) => d,
-            _ => panic!("drum pattern for '{id}'"),
+        if self.is_drums(id) {
+            PatternData::Drums { tracks: self.track_patterns(id, None) }
+        } else {
+            PatternData::Notes { steps: self.note_view(id).to_vec() }
         }
     }
 
@@ -766,11 +740,15 @@ impl Core {
                     .map(|p| p.value as f32)
                     .collect();
                 let routes = i.outputs.iter().map(|o| self.routes.get(&o.source).map(|n| (n - 1) as u8)).collect();
-                let pattern = match &self.patterns[&i.id] {
-                    PatternState::Drums(d) => RenderPattern::Drums(**d),
-                    PatternState::Notes(n) => RenderPattern::Notes(**n),
-                };
-                RenderInstrument { id: i.id.clone(), kind: i.kind, params, routes, pattern }
+                let c = &self.clips[&i.id];
+                RenderInstrument {
+                    id: i.id.clone(),
+                    kind: i.kind,
+                    params,
+                    routes,
+                    clip_length: c.length,
+                    events: c.events.clone(),
+                }
             })
             .collect();
         RenderSpec { globals, channels, instruments }
@@ -801,93 +779,6 @@ impl Core {
             }
         }
         Ok(ParamValue { path: path.to_string(), value })
-    }
-
-    // ---- pattern -----------------------------------------------------------
-
-    fn check_step(step: u32) -> Result<(), RpcError> {
-        if step as usize >= MAX_STEPS {
-            return Err(RpcError::invalid(format!("step must be 0..{}", MAX_STEPS - 1)));
-        }
-        Ok(())
-    }
-
-    pub fn set_step(
-        &mut self,
-        id: &str,
-        voice: Voice,
-        step: u32,
-        level: u8,
-        origin: &str,
-    ) -> Result<StepResult, RpcError> {
-        Self::check_step(step)?;
-        if level > STEP_ACCENT {
-            return Err(RpcError::invalid("level must be 0 (off), 1 (on), or 2 (accent)"));
-        }
-        let t = voice.index();
-        if self.drums(id)[t][step as usize] != level {
-            self.drums_mut(id)[t][step as usize] = level;
-            let slot = self.slot(id)?;
-            self.send(Command::SetDrumStep { slot, track: t as u8, step: step as u8, level });
-            self.emit(origin, Event::StepChanged { instrument: id.to_string(), voice, step, level });
-            self.mark_dirty(origin);
-            self.refresh_controller(origin, false);
-        }
-        Ok(StepResult { instrument: id.to_string(), voice, step, level })
-    }
-
-    fn set_track(&mut self, id: &str, voice: Voice, steps: &[u8], origin: &str) -> Result<TrackPattern, RpcError> {
-        if steps.len() > MAX_STEPS {
-            return Err(RpcError::invalid(format!("at most {MAX_STEPS} steps")));
-        }
-        if steps.iter().any(|s| *s > STEP_ACCENT) {
-            return Err(RpcError::invalid("step levels must be 0, 1, or 2"));
-        }
-        let mut full = [STEP_OFF; MAX_STEPS];
-        full[..steps.len()].copy_from_slice(steps);
-        let t = voice.index();
-        if self.drums(id)[t] != full {
-            self.drums_mut(id)[t] = full;
-            let slot = self.slot(id)?;
-            self.send(Command::SetDrumTrack { slot, track: t as u8, steps: full });
-            self.emit(origin, Event::PatternChanged { instrument: id.to_string(), voice, steps: full.to_vec() });
-            self.mark_dirty(origin);
-            self.refresh_controller(origin, false);
-        }
-        Ok(TrackPattern { voice, steps: full.to_vec() })
-    }
-
-    fn notes_result(&self, id: &str) -> NotesResult {
-        let steps = match self.patterns.get(id) {
-            Some(PatternState::Notes(n)) => n.to_vec(),
-            _ => Vec::new(),
-        };
-        NotesResult { instrument: id.to_string(), length: self.length(), steps }
-    }
-
-    fn set_notes(&mut self, id: &str, steps: &[NoteStep], origin: &str) -> Result<NotesResult, RpcError> {
-        if steps.len() > MAX_STEPS {
-            return Err(RpcError::invalid(format!("at most {MAX_STEPS} steps")));
-        }
-        if let Some(bad) = steps.iter().filter_map(|s| s.note).find(|n| !(NOTE_MIN..=NOTE_MAX).contains(n)) {
-            return Err(RpcError::invalid(format!("note {bad} out of range ({NOTE_MIN}..{NOTE_MAX})")));
-        }
-        let mut full = [NoteStep::default(); MAX_STEPS];
-        full[..steps.len()].copy_from_slice(steps);
-        let slot = self.slot(id)?;
-        let changed = match self.patterns.get_mut(id) {
-            Some(PatternState::Notes(n)) if **n != full => {
-                **n = full;
-                true
-            }
-            _ => false,
-        };
-        if changed {
-            self.send(Command::SetNotes { slot, steps: full });
-            self.emit(origin, Event::NotesChanged { instrument: id.to_string(), steps: full.to_vec() });
-            self.mark_dirty(origin);
-        }
-        Ok(self.notes_result(id))
     }
 
     // ---- transport ---------------------------------------------------------
@@ -1226,25 +1117,16 @@ impl Core {
 
     fn to_project_file(&self) -> ProjectFile {
         let length = self.length() as usize;
-        let mut patterns = BTreeMap::new();
+        let (mut patterns, mut clips) = (BTreeMap::new(), BTreeMap::new());
         for i in &self.instruments {
-            match &self.patterns[&i.id] {
-                PatternState::Drums(d) => {
-                    let tracks: BTreeMap<Voice, String> = Voice::ALL
-                        .iter()
-                        .filter(|v| d[v.index()].iter().any(|s| *s != STEP_OFF))
-                        .map(|v| (*v, steps_for_file(&d[v.index()], length)))
-                        .collect();
-                    if !tracks.is_empty() {
-                        patterns.insert(i.id.clone(), ProjectPattern::Drums(tracks));
-                    }
+            match clips::project_entry(&self.clips[&i.id], length) {
+                (Some(p), _) => {
+                    patterns.insert(i.id.clone(), p);
                 }
-                PatternState::Notes(n) => {
-                    if let Some(last) = n.iter().rposition(|s| s.note.is_some()) {
-                        let end = if last < length { length } else { (last + 1).div_ceil(16) * 16 };
-                        patterns.insert(i.id.clone(), ProjectPattern::Notes(format_notes(&n[..], end)));
-                    }
+                (_, Some(c)) => {
+                    clips.insert(i.id.clone(), c);
                 }
+                _ => {}
             }
         }
         ProjectFile {
@@ -1258,6 +1140,7 @@ impl Core {
             routes: self.routes.clone(),
             params: self.params.iter().map(|p| (p.info.path.clone(), p.value)).collect(),
             patterns,
+            clips,
             controller: ProjectController { follow: self.controller.follow },
             // Seats with nothing set are left out; they come back by
             // themselves for whoever uses the project.
@@ -1310,10 +1193,17 @@ impl Core {
         // routes, and globals.
         let instrument_params: usize =
             file.instruments.iter().map(|i| instrument::params(i.kind, &i.id).len()).sum();
+        let events: usize = file
+            .instruments
+            .iter()
+            .filter_map(|i| clips::from_project(i.kind, file.patterns.get(&i.id), file.clips.get(&i.id)).ok())
+            .map(|(_, e)| e.len())
+            .sum();
         let needed = self.instruments.len()
             + self.channels.len()
             + file.channels.len() * (1 + CHANNEL_PARAMS)
-            + file.instruments.len() * (1 + NUM_TRACKS)
+            + file.instruments.len() * 2
+            + events
             + instrument_params
             + file.routes.len()
             + NUM_GLOBALS;
@@ -1338,7 +1228,7 @@ impl Core {
         self.held.clear();
         self.pickups.clear();
         self.routes.clear();
-        self.patterns.clear();
+        self.clips.clear();
         self.params.clear();
 
         // Build.
@@ -1367,33 +1257,27 @@ impl Core {
         for c in cmds {
             self.send(c);
         }
-        for (id, pattern) in &file.patterns {
-            let slot = self.slot_of(id).unwrap_or_default();
-            match (self.patterns.get_mut(id), pattern) {
-                (Some(PatternState::Drums(d)), ProjectPattern::Drums(tracks)) => {
-                    let mut cmds = Vec::new();
-                    for (voice, s) in tracks {
-                        match parse_steps(s) {
-                            Ok(steps) => {
-                                d[voice.index()][..steps.len()].copy_from_slice(&steps);
-                                cmds.push(Command::SetDrumTrack { slot, track: voice.index() as u8, steps: d[voice.index()] });
-                            }
-                            Err(e) => warnings.push(format!("{id}.{}: {e}", voice.id())),
-                        }
+        for id in file.patterns.keys().chain(file.clips.keys()) {
+            if !self.clips.contains_key(id) {
+                warnings.push(format!("ignored the sequence of '{id}' (no such instrument)"));
+            }
+        }
+        for i in &file.instruments {
+            let (pattern, clip) = (file.patterns.get(&i.id), file.clips.get(&i.id));
+            match clips::from_project(i.kind, pattern, clip) {
+                Ok((length, events)) => {
+                    let slot = self.slot_of(&i.id).unwrap_or_default();
+                    for e in &events {
+                        self.send(Command::AddEvent { slot, event: *e });
                     }
-                    for c in cmds {
-                        self.send(c);
+                    if length.is_some() {
+                        self.send(Command::SetClipLength { slot, length });
                     }
+                    let c = self.clips.get_mut(&i.id).expect("just added");
+                    c.events = events;
+                    c.length = length;
                 }
-                (Some(PatternState::Notes(n)), ProjectPattern::Notes(s)) => match parse_notes(s) {
-                    Ok(steps) => {
-                        n.copy_from_slice(&steps);
-                        let steps = **n;
-                        self.send(Command::SetNotes { slot, steps });
-                    }
-                    Err(e) => warnings.push(format!("{id}: {e}")),
-                },
-                _ => warnings.push(format!("ignored pattern for '{id}' (no matching instrument)")),
+                Err(e) => warnings.push(format!("{}: {e}", i.id)),
             }
         }
 
@@ -1488,23 +1372,7 @@ impl Core {
         for i in &self.instruments {
             d.insert(format!("instrument:{}", i.id), json!({ "type": i.kind.id(), "name": i.name }));
         }
-        for (id, pattern) in &self.patterns {
-            match pattern {
-                PatternState::Drums(tracks) => {
-                    for (t, steps) in tracks.iter().enumerate() {
-                        let voice = Voice::from_index(t).map(|v| v.id()).unwrap_or_default();
-                        for (i, level) in steps.iter().enumerate().filter(|(_, l)| **l != STEP_OFF) {
-                            d.insert(format!("step:{id}.{voice}.{i}"), json!(level));
-                        }
-                    }
-                }
-                PatternState::Notes(steps) => {
-                    for (i, step) in steps.iter().enumerate().filter(|(_, s)| **s != NoteStep::default()) {
-                        d.insert(format!("note:{id}.{i}"), json!(step));
-                    }
-                }
-            }
-        }
+        self.clip_doc(&mut d);
         for c in &self.channels {
             d.insert(format!("channel:{}", c.n), json!(c.name));
         }
@@ -1607,8 +1475,9 @@ impl Core {
         let mut order: Option<Vec<u32>> = None;
         let mut routes: Vec<(String, Option<u32>)> = Vec::new();
         let mut params: Vec<(String, Option<f64>)> = Vec::new();
-        let mut tracks: BTreeMap<(String, Voice), Vec<(usize, u8)>> = BTreeMap::new();
-        let mut notes: BTreeMap<String, Vec<(usize, NoteStep)>> = BTreeMap::new();
+        // Per instrument: (tick, note, Some((len, velocity)) or None to remove).
+        let mut events: BTreeMap<String, Vec<(u32, u8, Option<(u32, u8)>)>> = BTreeMap::new();
+        let mut lengths: Vec<(String, Option<u32>)> = Vec::new();
         let mut seats: Vec<(String, SeatConfig)> = Vec::new();
         let mut skipped = Vec::new();
         for (key, v) in sets {
@@ -1627,26 +1496,27 @@ impl Core {
                 "channels" => serde_json::from_value(v.clone()).ok().map(|o| order = Some(o)),
                 "route" => Some(routes.push((rest.to_string(), v.as_u64().map(|n| n as u32)))),
                 "param" => Some(params.push((rest.to_string(), v.as_f64()))),
-                "step" => {
+                "event" => {
+                    // `<id>.<tick>.<note>`; ids have no dots.
                     let mut parts = rest.splitn(3, '.');
-                    match (parts.next(), parts.next().and_then(Voice::parse), parts.next().and_then(|i| i.parse().ok())) {
-                        (Some(id), Some(voice), Some(i)) if i < MAX_STEPS => {
-                            let level = v.as_u64().unwrap_or(STEP_OFF as u64) as u8;
-                            Some(tracks.entry((id.to_string(), voice)).or_default().push((i, level)))
+                    match (parts.next(), parts.next().and_then(|t| t.parse().ok()), parts.next().and_then(|n| n.parse().ok())) {
+                        (Some(id), Some(tick), Some(note)) => {
+                            let val = match v {
+                                Value::Null => None,
+                                v => Some((
+                                    v.get("len").and_then(Value::as_u64).unwrap_or(TICKS_PER_STEP as u64) as u32,
+                                    v.get("velocity").and_then(Value::as_u64).unwrap_or(VEL_ON as u64) as u8,
+                                )),
+                            };
+                            Some(events.entry(id.to_string()).or_default().push((tick, note, val)))
                         }
                         _ => None,
                     }
                 }
+                "clip" => Some(lengths.push((rest.to_string(), v.as_u64().map(|l| l as u32)))),
                 "seat" => match v {
                     Value::Null => Some(seats.push((rest.to_string(), SeatConfig::default()))),
                     v => serde_json::from_value(v.clone()).ok().map(|c| seats.push((rest.to_string(), c))),
-                },
-                "note" => match rest.split_once('.').map(|(id, i)| (id, i.parse::<usize>())) {
-                    Some((id, Ok(i))) if i < MAX_STEPS => {
-                        let step = serde_json::from_value(v.clone()).unwrap_or_default();
-                        Some(notes.entry(id.to_string()).or_default().push((i, step)))
-                    }
-                    _ => None,
                 },
                 _ => None,
             };
@@ -1664,8 +1534,8 @@ impl Core {
         let owned = |key: &str| removing.iter().any(|id| key == id || key.starts_with(&format!("{id}.")));
         routes.retain(|(s, _)| !owned(s));
         params.retain(|(p, _)| !owned(p));
-        tracks.retain(|(id, _), _| !owned(id));
-        notes.retain(|id, _| !owned(id));
+        events.retain(|id, _| !owned(id));
+        lengths.retain(|(id, _)| !owned(id));
         let adding: Vec<&(String, Option<(InstrumentType, String)>)> = instruments
             .iter()
             .filter(|(id, v)| v.is_some() && !self.instruments.iter().any(|i| &i.id == id))
@@ -1690,8 +1560,8 @@ impl Core {
                 + channels.len()
                 + routes.len()
                 + params.len()
-                + tracks.len()
-                + notes.len(),
+                + events.values().map(Vec::len).sum::<usize>()
+                + lengths.len(),
         )?;
 
         let mut graph = false;
@@ -1759,32 +1629,7 @@ impl Core {
                 None => skipped.push(format!("param:{path}")),
             }
         }
-        for ((id, voice), steps) in tracks {
-            if !matches!(self.patterns.get(&id), Some(PatternState::Drums(_))) {
-                skipped.extend(steps.iter().map(|(i, _)| format!("step:{id}.{}.{i}", voice.id())));
-                continue;
-            }
-            let mut full = self.drums(&id)[voice.index()];
-            for (i, level) in steps {
-                full[i] = level;
-            }
-            if self.set_track(&id, voice, &full, origin).is_err() {
-                skipped.push(format!("step:{id}.{}", voice.id()));
-            }
-        }
-        for (id, steps) in notes {
-            let Some(PatternState::Notes(current)) = self.patterns.get(&id) else {
-                skipped.extend(steps.iter().map(|(i, _)| format!("note:{id}.{i}")));
-                continue;
-            };
-            let mut full = **current;
-            for (i, step) in steps {
-                full[i] = step;
-            }
-            if self.set_notes(&id, &full, origin).is_err() {
-                skipped.push(format!("note:{id}"));
-            }
-        }
+        skipped.extend(self.apply_clip_sets(events, lengths, origin));
         if !seats.is_empty() {
             for (name, config) in seats {
                 let seat = self.seats.entry(name).or_insert(SeatState {
@@ -1881,6 +1726,10 @@ impl Core {
     fn dispatch(&mut self, req: Request, origin: &str, client: &str) -> RpcResult {
         let drum = |c: &Self, id: &Option<String>| c.resolve(id.as_deref(), InstrumentType::Tr808);
         let req = match self.handle_seat(req, origin, client) {
+            Ok(r) => return r,
+            Err(req) => req,
+        };
+        let req = match self.handle_clip(req, origin, client) {
             Ok(r) => return r,
             Err(req) => req,
         };
@@ -2049,6 +1898,13 @@ impl Core {
             | Request::SeatUnmapCc(_)
             | Request::SeatLearnCc(_)
             | Request::SeatFollowKnobs(_) => unreachable!("handled by handle_seat"),
+            Request::ClipGet(_)
+            | Request::ClipSet(_)
+            | Request::ClipAdd(_)
+            | Request::ClipRemove(_)
+            | Request::ClipLength(_)
+            | Request::ClipClear(_)
+            | Request::ClipQuantize(_) => unreachable!("handled by handle_clip"),
         }
     }
 }
@@ -2061,7 +1917,7 @@ fn read_only(req: &Request) -> bool {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_) | EngineStatus(_)
-        | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) => true,
+        | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
         | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
         | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
@@ -2069,7 +1925,8 @@ fn read_only(req: &Request) -> bool {
         | ControllerKnob(_) | ControllerSetMode(_) | MidiConnect(_) | MidiDisconnect(_) | ProjectNew(_)
         | ProjectSave(_) | ProjectLoad(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_) | SeatClaim(_)
         | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_) | SeatUnbind(_)
-        | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) => false,
+        | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
+        | ClipRemove(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) => false,
     }
 }
 
@@ -2127,6 +1984,7 @@ fn default_project() -> ProjectFile {
         routes: BTreeMap::from([("drums".to_string(), 1)]),
         params: BTreeMap::new(),
         patterns: BTreeMap::new(),
+        clips: BTreeMap::new(),
         controller: ProjectController { follow: true },
         seats: BTreeMap::new(),
     }

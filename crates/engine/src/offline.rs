@@ -4,15 +4,8 @@
 use crate::engine::{Command, Engine, Feedback, ParamTarget};
 use crate::instrument;
 use crate::params::{NUM_GLOBALS, TEMPO};
-use fours_protocol::{InstrumentType, MAX_STEPS, NUM_TRACKS, NoteStep, RenderTrigger, Voice};
+use fours_protocol::{ClipEvent, InstrumentType, RenderTrigger, Voice};
 use std::path::Path;
-
-/// An instrument's pattern, in engine form.
-#[derive(Clone, Debug)]
-pub enum RenderPattern {
-    Drums([[u8; MAX_STEPS]; NUM_TRACKS]),
-    Notes([NoteStep; MAX_STEPS]),
-}
 
 #[derive(Clone, Debug)]
 pub struct RenderInstrument {
@@ -22,7 +15,10 @@ pub struct RenderInstrument {
     pub params: Vec<f32>,
     /// Channel index (0-based) per output, main first.
     pub routes: Vec<Option<u8>>,
-    pub pattern: RenderPattern,
+    /// Its clip: length in ticks (`None` follows `sequencer.length`) and
+    /// events.
+    pub clip_length: Option<u32>,
+    pub events: Vec<ClipEvent>,
 }
 
 /// Everything needed to render the current project, copied out of the
@@ -61,15 +57,9 @@ impl RenderSpec {
             for (o, ch) in inst.routes.iter().enumerate() {
                 let _ = e.apply(Command::SetRoute { slot, output: o as u8, channel: *ch }, &mut fb);
             }
-            match &inst.pattern {
-                RenderPattern::Drums(tracks) => {
-                    for (t, steps) in tracks.iter().enumerate() {
-                        let _ = e.apply(Command::SetDrumTrack { slot, track: t as u8, steps: *steps }, &mut fb);
-                    }
-                }
-                RenderPattern::Notes(steps) => {
-                    let _ = e.apply(Command::SetNotes { slot, steps: *steps }, &mut fb);
-                }
+            let _ = e.apply(Command::SetClipLength { slot, length: inst.clip_length }, &mut fb);
+            for event in &inst.events {
+                let _ = e.apply(Command::AddEvent { slot, event: *event }, &mut fb);
             }
         }
         e.snap();
@@ -210,9 +200,15 @@ mod tests {
     use super::*;
     use crate::params::{channel_defaults, global_defaults};
     use crate::tr808::{DECAY, VOICE_PARAMS};
-    use fours_protocol::{STEP_ACCENT, STEP_OFF, STEP_ON};
+    use fours_protocol::{MAX_STEPS, NUM_TRACKS, STEP_ACCENT, STEP_OFF, STEP_ON, drum_event};
 
+    /// A `tr808` on channel index 0 playing a drum grid (as clip events).
     fn drums_spec(pattern: [[u8; MAX_STEPS]; NUM_TRACKS]) -> RenderSpec {
+        let events = Voice::ALL
+            .iter()
+            .flat_map(|v| (0..MAX_STEPS).filter_map(move |s| drum_event(*v, s, pattern[v.index()][s])))
+            .collect::<Vec<_>>();
+        let events = fours_protocol::normalize_events(&events).unwrap();
         let params = instrument::params(InstrumentType::Tr808, "drums").iter().map(|p| p.default as f32).collect();
         let mut routes = vec![None; 1 + NUM_TRACKS];
         routes[0] = Some(0);
@@ -224,7 +220,8 @@ mod tests {
                 kind: InstrumentType::Tr808,
                 params,
                 routes,
-                pattern: RenderPattern::Drums(pattern),
+                clip_length: None,
+                events,
             }],
         }
     }

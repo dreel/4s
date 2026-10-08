@@ -591,8 +591,10 @@ pub struct Snapshot {
     pub transport: TransportState,
     pub params: BTreeMap<String, f64>,
     pub graph: Graph,
-    /// One pattern per instrument, in instrument order.
+    /// One step view per instrument, in instrument order.
     pub patterns: Vec<InstrumentPattern>,
+    /// One clip per instrument, in instrument order (RFC 0007).
+    pub clips: Vec<crate::clip::Clip>,
     pub controller: ControllerState,
     pub midi: Vec<MidiConnection>,
     pub seats: SeatsState,
@@ -669,6 +671,9 @@ pub enum Event {
     PatternChanged { instrument: String, voice: Voice, steps: Vec<u8> },
     /// A note pattern changed (all `MAX_STEPS` steps).
     NotesChanged { instrument: String, steps: Vec<NoteStep> },
+    /// An instrument's clip changed (any edit, including through a step
+    /// view, which also sends the view's events).
+    ClipChanged { clip: crate::clip::Clip },
     /// Instruments, channels, or routes changed. Parameters may have been
     /// added or removed: refetch `state.get` and `param.list`.
     Graph { graph: Graph },
@@ -706,6 +711,7 @@ impl Event {
             Event::StepChanged { .. } => "step_changed",
             Event::PatternChanged { .. } => "pattern_changed",
             Event::NotesChanged { .. } => "notes_changed",
+            Event::ClipChanged { .. } => "clip_changed",
             Event::Graph { .. } => "graph",
             Event::Transport { .. } => "transport",
             Event::Playhead { .. } => "playhead",
