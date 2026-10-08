@@ -2,7 +2,7 @@
 
 /**
  * A named set of up to 8 parameters that knobs following focus control.
- * Each instrument type declares its pages (RFC 0006).
+ * Each instrument type declares its pages (RFC 0007).
  */
 export type KnobPage = { 
 /**

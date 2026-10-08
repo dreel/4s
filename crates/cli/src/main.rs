@@ -31,8 +31,8 @@ struct Cli {
     /// Print raw JSON results.
     #[arg(long, global = true)]
     json: bool,
-    /// Who you are. The seat with this name is joined automatically
-    /// (default: your OS user).
+    /// Who you are: owns your undo history, and the seat with this name is
+    /// joined automatically. Default: $USER.
     #[arg(long, env = "FOURS_USER", global = true)]
     user: Option<String>,
     /// Join this seat (seat commands then act on it).
@@ -46,6 +46,15 @@ struct Cli {
     no_seat: bool,
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+impl Cli {
+    fn user(&self) -> Option<String> {
+        self.user
+            .clone()
+            .or_else(|| ["USER", "USERNAME"].iter().find_map(|k| std::env::var(k).ok()))
+            .filter(|u| !u.trim().is_empty())
+    }
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -130,14 +139,21 @@ enum Cmd {
         #[command(subcommand)]
         cmd: InstrumentCmd,
     },
-    /// Add, remove, and rename mixer channels.
+    /// Add, remove, rename, and reorder mixer channels.
     Channel {
         #[command(subcommand)]
         cmd: ChannelCmd,
     },
     /// Route an instrument output to a channel, e.g. `4s route drums.kick 2`,
     /// or unroute it with `none` (a direct out returns to the main mix).
-    Route { source: String, channel: String },
+    Route {
+        source: String,
+        channel: String,
+        /// Move whatever else feeds the channel to this source's old channel
+        /// (if it had none, they stay and share the channel).
+        #[arg(long)]
+        swap: bool,
+    },
     /// Show the mixer: channels, their sources, levels, mute/solo.
     Mixer,
     /// Stream events. Ctrl-C to stop.
@@ -176,7 +192,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ControllerCmd>,
     },
-    /// Seats: each performer's focus, bindings, and CC maps (RFC 0006).
+    /// Seats: each performer's focus, bindings, and CC maps (RFC 0007).
     /// `4s seat` lists them.
     Seat {
         #[command(subcommand)]
@@ -221,6 +237,28 @@ enum Cmd {
         #[command(subcommand)]
         cmd: DaemonCmd,
     },
+    /// Undo your last change (changes someone else made since are kept).
+    Undo,
+    /// Redo your last undo.
+    Redo,
+    /// Your undo and redo stacks.
+    History,
+    /// The journal: every request that could change state, who sent it, and
+    /// what it changed. Times are UTC.
+    Journal {
+        /// Only entries after this seq.
+        #[arg(long)]
+        since: Option<u64>,
+        /// Only this user's entries.
+        #[arg(long = "for")]
+        for_user: Option<String>,
+        /// At most this many (newest).
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        /// Keep printing new entries as they are recorded.
+        #[arg(long, conflicts_with_all = ["since", "for_user"])]
+        follow: bool,
+    },
     /// Call any RPC method with JSON params.
     Call { method: String, params: Option<String> },
     /// List all RPC methods.
@@ -254,7 +292,7 @@ enum InstrumentCmd {
     Types,
     /// Instruments in the project.
     List,
-    /// Add an instrument, by default on a new channel.
+    /// Add an instrument, by default on the first empty channel, else a new one.
     Add {
         /// tr808 or tb303.
         kind: String,
@@ -289,6 +327,8 @@ enum ChannelCmd {
     Rm { n: u32 },
     /// Rename a channel.
     Rename { n: u32, name: String },
+    /// Move a channel to a display position (1 = leftmost).
+    Move { n: u32, position: u32 },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -653,13 +693,16 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             ChannelCmd::Rename { n, name } => {
                 vec![Request::ChannelRename(ChannelRenameParams { n: *n, name: name.clone() })]
             }
+            ChannelCmd::Move { n, position } => {
+                vec![Request::ChannelMove(ChannelMoveParams { n: *n, position: *position })]
+            }
         },
-        Cmd::Route { source, channel } => {
+        Cmd::Route { source, channel, swap } => {
             let channel = match channel.trim().to_ascii_lowercase().as_str() {
                 "none" | "-" => None,
                 n => Some(n.parse::<u32>().map_err(|_| anyhow!("channel must be a number or `none`"))?),
             };
-            vec![Request::RouteSet(RouteSetParams { source: source.clone(), channel })]
+            vec![Request::RouteSet(RouteSetParams { source: source.clone(), channel, swap: *swap })]
         }
         Cmd::Mixer => vec![Request::StateGet(e)],
         Cmd::Watch { types, .. } => vec![
@@ -782,6 +825,18 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             // Local process management; no RPC.
             DaemonCmd::Start(_) | DaemonCmd::Restart(_) | DaemonCmd::Logs { .. } => vec![],
         },
+        Cmd::Undo => vec![Request::HistoryUndo(e)],
+        Cmd::Redo => vec![Request::HistoryRedo(e)],
+        Cmd::History => vec![Request::HistoryGet(e)],
+        Cmd::Journal { follow: true, .. } => vec![
+            Request::EventsSubscribe(SubscribeParams { types: Some(vec!["journal".into()]) }),
+            Request::EventsUnsubscribe(e),
+        ],
+        Cmd::Journal { since, for_user, limit, .. } => vec![Request::JournalGet(JournalGetParams {
+            since: *since,
+            limit: Some(*limit),
+            user: for_user.clone(),
+        })],
         Cmd::Call { method, params } => {
             let p = params.as_deref().map(serde_json::from_str::<Value>).transpose()?;
             vec![parse_request(method, p).map_err(|e| anyhow!(e))?]
@@ -1020,9 +1075,50 @@ fn print_event(e: &EventEnvelope, json: bool) {
             let hex: Vec<String> = data.iter().map(|b| format!("{b:02X}")).collect();
             format!("{port}: {}", hex.join(" "))
         }
+        Event::Journal { entry } => {
+            println!("{}", journal_line(entry));
+            return;
+        }
         other => serde_json::to_string(other).unwrap(),
     };
     println!("[{}] {:<10} {:<15} {body}", e.seq, e.origin, e.event.type_name());
+}
+
+/// `seq  time  user  origin  method params -> changed keys`, plus what an
+/// undo reverts and any error.
+fn journal_line(e: &JournalEntry) -> String {
+    let ms = (e.time * 1000.0).round() as u64 % 86_400_000;
+    let time = format!("{:02}:{:02}:{:02}.{:03}Z", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
+    let params = match &e.params {
+        Value::Object(m) if m.is_empty() => String::new(),
+        Value::Null => String::new(),
+        p => {
+            let p = p.to_string();
+            match p.char_indices().nth(100) {
+                Some((i, _)) => format!(" {}...", &p[..i]),
+                None => format!(" {p}"),
+            }
+        }
+    };
+    let keys: Vec<&str> = e.changes.iter().map(|c| c.key.as_str()).collect();
+    let shown = if keys.len() > 6 { format!("{} (+{} more)", keys[..6].join(" "), keys.len() - 6) } else { keys.join(" ") };
+    let mut line = format!("{:>5}  {time}  {}  {}  {}{params}", e.seq, e.user, e.origin, e.method);
+    if !keys.is_empty() {
+        line.push_str(&format!(" -> {shown}"));
+    }
+    if let Some(r) = e.reverts {
+        line.push_str(&format!("  (reverts #{r})"));
+    }
+    if let Some(err) = &e.error {
+        line.push_str(&format!("  error: {err}"));
+    }
+    line
+}
+
+fn print_history(h: &HistoryInfo) {
+    println!("user: {}", h.user);
+    println!("undo: {}", if h.undo.is_empty() { "(empty)".into() } else { h.undo.join(" | ") });
+    println!("redo: {}", if h.redo.is_empty() { "(empty)".into() } else { h.redo.join(" | ") });
 }
 
 fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
@@ -1120,7 +1216,9 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
         Cmd::Instrument { cmd: InstrumentCmd::Add { .. } } => {
             print_instrument(&serde_json::from_value(last)?);
         }
-        Cmd::Instrument { .. } | Cmd::Route { .. } | Cmd::Channel { cmd: ChannelCmd::Rm { .. } } => {
+        Cmd::Instrument { .. }
+        | Cmd::Route { .. }
+        | Cmd::Channel { cmd: ChannelCmd::Rm { .. } | ChannelCmd::Move { .. } } => {
             print_graph(&serde_json::from_value(last)?);
         }
         Cmd::Channel { .. } => {
@@ -1128,6 +1226,26 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             println!("ch {} {}", c.n, c.name);
         }
         Cmd::Mixer => print_mixer(&serde_json::from_value(last)?),
+        Cmd::Undo | Cmd::Redo => {
+            let r: HistoryStepResult = serde_json::from_value(last)?;
+            let verb = if matches!(cmd, Cmd::Undo) { "undid" } else { "redid" };
+            let what = if matches!(cmd, Cmd::Undo) { "undo" } else { "redo" };
+            match r.label {
+                Some(l) if r.changed.is_empty() => println!("could not {what}: {l}"),
+                Some(l) => println!("{verb}: {l}"),
+                None => println!("nothing to {what}"),
+            }
+            if !r.skipped.is_empty() {
+                println!("skipped: {} (changed by someone else)", r.skipped.join(" "));
+            }
+        }
+        Cmd::History => print_history(&serde_json::from_value(last)?),
+        Cmd::Journal { .. } => {
+            let r: JournalGetResult = serde_json::from_value(last)?;
+            for e in &r.entries {
+                println!("{}", journal_line(e));
+            }
+        }
         Cmd::Render { .. } => {
             let r: RenderResult = serde_json::from_value(last)?;
             println!("wrote {} ({:.2}s @ {} Hz)", r.path, r.duration, r.sample_rate);
@@ -1278,12 +1396,7 @@ fn resolve_url(cli: &Cli, data_dir: &std::path::Path) -> Result<String> {
 /// Seat options from the command line. The user defaults to the OS user,
 /// as the daemon's host seat does.
 fn seating(cli: &Cli) -> Seating {
-    let user = cli
-        .user
-        .clone()
-        .or_else(|| ["USER", "USERNAME"].iter().find_map(|k| std::env::var(k).ok()))
-        .filter(|u| !u.trim().is_empty());
-    Seating { user, seat: cli.seat.clone(), auto: !cli.no_seat && !cli.new_seat }
+    Seating { user: cli.user(), seat: cli.seat.clone(), auto: !cli.no_seat && !cli.new_seat }
 }
 
 async fn connect(cli: &Cli, url: &str) -> Result<Client> {
@@ -1330,7 +1443,7 @@ async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> R
                 }
                 return Ok(());
             };
-            let graceful = match Client::connect(&info.url, cli.token.clone(), "cli", &Seating::none()).await {
+            let graceful = match Client::connect(&info.url, cli.token.clone(), "cli", &Seating::unseated(cli.user())).await {
                 Ok(mut c) => c.call(&Request::DaemonShutdown(Empty {})).await.is_ok(),
                 Err(_) => false,
             };
@@ -1367,7 +1480,7 @@ async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> R
         }
         DaemonCmd::Restart(args) => {
             if let Some(info) = daemon_ctl::live(data_dir) {
-                if let Ok(mut c) = Client::connect(&info.url, cli.token.clone(), "cli", &Seating::none()).await {
+                if let Ok(mut c) = Client::connect(&info.url, cli.token.clone(), "cli", &Seating::unseated(cli.user())).await {
                     let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
                 }
                 if !daemon_ctl::wait_exit(info.pid, std::time::Duration::from_secs(5)) {
@@ -1414,7 +1527,7 @@ async fn restart_stale(cli: &Cli, data_dir: &std::path::Path, args: &StartArgs, 
     // Talking to the old daemon at all is what fails when its build is
     // incompatible (a different protocol version). Only then is discarding
     // its session on the table; any later failure (e.g. saving) just stops.
-    let session = match Client::connect(&old.url, cli.token.clone(), "cli", &Seating::none()).await {
+    let session = match Client::connect(&old.url, cli.token.clone(), "cli", &Seating::unseated(cli.user())).await {
         Ok(mut c) => {
             let session = save_session(&mut c, data_dir).await?;
             let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
@@ -1507,6 +1620,7 @@ async fn run(cli: Cli) -> Result<()> {
     let stream_count = match &cli.cmd {
         Cmd::Watch { count, .. } => Some(*count),
         Cmd::Midi { cmd: MidiCmd::Monitor { count } } => Some(*count),
+        Cmd::Journal { follow: true, .. } => Some(None),
         _ => None,
     };
     if let Some(count) = stream_count {
@@ -1560,7 +1674,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "route drums.closed_hat 2",
+            "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",
             "pattern set kick x---x---", "pattern set sd ----x---", "set mixer.1.pan -0.5", "pattern step kick 1 accent", "pattern toggle sd 5",
@@ -1572,7 +1686,7 @@ mod tests {
             "seat", "seat claim sam", "seat create --ignore", "seat leave", "seat rm sam",
             "focus bass", "bind keys --notes C1..B2 --to bass", "unbind 1", "cc map knobs 21 bass.cutoff",
             "cc unmap knobs 21", "cc learn bass.cutoff", "knobs page decay", "knobs follow knobs 21 22",
-            "daemon status", "daemon stop",
+            "daemon status", "daemon stop", "undo", "redo", "history", "journal",
         ];
         let mut covered: BTreeSet<&str> = commands.iter().flat_map(|c| methods_for(c)).collect();
         covered.insert("session.hello"); // sent by every command on connect

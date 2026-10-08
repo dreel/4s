@@ -41,6 +41,22 @@
         ],
         "type": "object"
       },
+      "Change": {
+        "description": "One change to an addressable piece of project state, e.g.\n`param:mixer.2.volume`, `step:drums.kick.3`, `note:bass.5`,\n`instrument:bass`, `channel:2`, `channels:order`, `route:drums.kick`.\n`null` means absent (or, for params and steps, the default).",
+        "properties": {
+          "after": true,
+          "before": true,
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "before",
+          "after"
+        ],
+        "type": "object"
+      },
       "ChannelInfo": {
         "properties": {
           "n": {
@@ -509,6 +525,64 @@
             "type": "object"
           },
           {
+            "description": "A user's undo/redo summary changed.",
+            "properties": {
+              "redo_count": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "redo_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "const": "history",
+                "type": "string"
+              },
+              "undo_count": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "undo_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "user": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "user",
+              "undo_count",
+              "redo_count"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A request was recorded in the journal.",
+            "properties": {
+              "entry": {
+                "$ref": "#/$defs/JournalEntry"
+              },
+              "type": {
+                "const": "journal",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "entry"
+            ],
+            "type": "object"
+          },
+          {
             "description": "State was replaced wholesale (project load/new); refetch `state.get`.",
             "properties": {
               "type": {
@@ -617,6 +691,96 @@
             "type": "string"
           }
         ]
+      },
+      "JournalContext": {
+        "description": "Transport and controller state when a journal entry was recorded.",
+        "properties": {
+          "page": {
+            "description": "Controller page (pad columns map to steps through it).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "playing": {
+            "type": "boolean"
+          },
+          "step": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "playing",
+          "page"
+        ],
+        "type": "object"
+      },
+      "JournalEntry": {
+        "description": "One request that could change state, as the daemon applied it.",
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/$defs/Change"
+            },
+            "type": "array"
+          },
+          "context": {
+            "$ref": "#/$defs/JournalContext"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "method": {
+            "description": "RPC method; MIDI input is recorded as its equivalent RPC.",
+            "type": "string"
+          },
+          "origin": {
+            "description": "The client (or `midi:<port>`) it came from.",
+            "type": "string"
+          },
+          "params": true,
+          "reverts": {
+            "description": "For `history.undo` / `history.redo`: the entry this one reverts.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "seq": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "time": {
+            "description": "Unix time in seconds.",
+            "format": "double",
+            "type": "number"
+          },
+          "user": {
+            "description": "Who owns the change (the undo stack it lands on).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "time",
+          "user",
+          "origin",
+          "method",
+          "params",
+          "context",
+          "changes"
+        ],
+        "type": "object"
       },
       "KnobFollow": {
         "description": "CCs of a device that control the focused instrument's knob page\n(knob 1 = the first CC).",
@@ -1277,7 +1441,7 @@
           "$ref": "#/$defs/SeatConfig"
         },
         "default": {},
-        "description": "Performer setups by seat name (RFC 0006): focus, knob page, note\nbindings, CC maps.",
+        "description": "Performer setups by seat name (RFC 0007): focus, knob page, note\nbindings, CC maps.",
         "type": "object"
       }
     },
@@ -1346,6 +1510,26 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "ChannelMoveParams": {
+        "properties": {
+          "n": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "position": {
+            "description": "New display position, 1 = leftmost.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "n",
+          "position"
+        ],
         "type": "object"
       },
       "ChannelRemoveParams": {
@@ -1456,7 +1640,7 @@
           },
           "user": {
             "default": null,
-            "description": "The person using this client. A seat with this name (any case) is\njoined automatically if it is the only match; in a project without\nseats, one is created for them.",
+            "description": "The person using this client: owns this connection's undo history\n(default: the daemon host's user, so local clients share one). A\nseat with this name (any case) is joined automatically if it is the\nonly match; in a project without seats, one is created for them.",
             "type": [
               "string",
               "null"
@@ -1473,7 +1657,7 @@
         "properties": {
           "channel": {
             "default": null,
-            "description": "Route the main output to this existing channel instead of a new one.",
+            "description": "Route the main output to this existing channel. By default it goes to\nthe first empty channel in display order, or a new one if none is empty.",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -1540,6 +1724,39 @@
             "type": "string"
           }
         ]
+      },
+      "JournalGetParams": {
+        "properties": {
+          "limit": {
+            "default": null,
+            "description": "At most this many (newest), default 100.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "since": {
+            "default": null,
+            "description": "Only entries with a greater seq.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "user": {
+            "default": null,
+            "description": "Only this user's entries.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       },
       "KnobFollow": {
         "description": "CCs of a device that control the focused instrument's knob page\n(knob 1 = the first CC).",
@@ -2112,6 +2329,11 @@
           "source": {
             "description": "`drums` (main out) or `drums.kick` (direct out).",
             "type": "string"
+          },
+          "swap": {
+            "default": false,
+            "description": "If the channel already has other sources, move them to this source's\ncurrent channel (if it had none, they stay and share the channel).",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2647,7 +2869,7 @@
         "type": "object"
       },
       {
-        "description": "Add an instrument; by default on a new channel.",
+        "description": "Add an instrument; by default on the first empty channel, else a new one.",
         "properties": {
           "method": {
             "const": "instrument.add",
@@ -2732,6 +2954,23 @@
         "type": "object"
       },
       {
+        "description": "Move a mixer channel to a new display position.",
+        "properties": {
+          "method": {
+            "const": "channel.move",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ChannelMoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Route an instrument output to a channel, or unroute it.",
         "properties": {
           "method": {
@@ -2740,6 +2979,74 @@
           },
           "params": {
             "$ref": "#/$defs/RouteSetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Undo the caller's last change, leaving keys another user changed since.",
+        "properties": {
+          "method": {
+            "const": "history.undo",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Redo the caller's last undo.",
+        "properties": {
+          "method": {
+            "const": "history.redo",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "The caller's undo and redo stacks.",
+        "properties": {
+          "method": {
+            "const": "history.get",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Recent journal entries: every request that could change state.",
+        "properties": {
+          "method": {
+            "const": "journal.get",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/JournalGetParams"
           }
         },
         "required": [

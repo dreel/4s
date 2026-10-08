@@ -30,7 +30,7 @@ params: { [key in string]: number },
  */
 patterns: { [key in string]: ProjectPattern }, controller: ProjectController, 
 /**
- * Performer setups by seat name (RFC 0006): focus, knob page, note
+ * Performer setups by seat name (RFC 0007): focus, knob page, note
  * bindings, CC maps.
  */
 seats: { [key in string]: SeatConfig }, };

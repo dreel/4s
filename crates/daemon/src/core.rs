@@ -13,6 +13,7 @@ mod seats;
 
 use crate::controller::{BlockInput, BlockMap, Controller, decode_block};
 use crate::hardware::{self, Hardware};
+use crate::journal::{self, Doc, History, Journal};
 use crate::midi::{Midi, MidiMessage, list_ports};
 use seats::{ClientState, Held, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
@@ -108,7 +109,8 @@ pub struct Core {
     clients: HashMap<String, ClientState>,
     /// Seat the host's own MIDI devices use (see `refresh_host_seat`).
     host_seat: String,
-    /// The OS user running the daemon.
+    /// The OS user running the daemon: the user of clients that do not
+    /// name one, and of MIDI input; its seat is the host seat by default.
     host_user: String,
     seat_clock: u64,
     /// Held notes and who holds them: a client connection (`conn:<id>`), a
@@ -125,6 +127,8 @@ pub struct Core {
     commands: Producer<Command>,
     data_dir: PathBuf,
     meters_silent: bool,
+    journal: Journal,
+    history: History,
 }
 
 impl Core {
@@ -133,6 +137,7 @@ impl Core {
         midi_tx: Sender<MidiMessage>,
         data_dir: PathBuf,
         audio: AudioStatus,
+        journal_dir: Option<PathBuf>,
         host_user: String,
     ) -> Self {
         let block_map = BlockMap::load_or_create(&data_dir.join("livid-block.json"));
@@ -169,6 +174,8 @@ impl Core {
             commands,
             data_dir,
             meters_silent: false,
+            journal: Journal::new(journal_dir),
+            history: History::default(),
         };
         core.rebuild_params();
         core.apply_project_file(&default_project(), "engine").expect("default project applies");
@@ -358,6 +365,8 @@ impl Core {
                 return Err(RpcError::invalid(format!("no channel {n}")));
             }
             Some(n)
+        } else if let Some(n) = self.first_empty_channel() {
+            Some(n)
         } else {
             if self.channels.len() >= MAX_CHANNELS {
                 return Err(RpcError::invalid(format!("at most {MAX_CHANNELS} channels")));
@@ -426,12 +435,7 @@ impl Core {
         }
         // The removal, plus deactivating every channel it may leave empty.
         self.ensure_room(1 + self.instruments[pos].outputs.len())?;
-        let inst = self.instruments.remove(pos);
-        self.send(Command::RemoveInstrument { slot: inst.slot });
-        self.slot_used[inst.slot as usize] = false;
-        self.in_flight += 1;
-        self.patterns.remove(&inst.id);
-        let fed: Vec<u32> = inst.outputs.iter().filter_map(|o| self.routes.remove(&o.source)).collect();
+        let fed = self.teardown_instrument(pos, origin);
         if !p.keep_channels {
             for n in fed {
                 if !self.routes.values().any(|c| *c == n) && self.channels.iter().any(|c| c.n == n) {
@@ -439,9 +443,24 @@ impl Core {
                 }
             }
         }
-        self.held.retain(|h| h.slot != inst.slot);
         self.graph_changed(origin);
-        // Seats focused on it fall back to the first instrument.
+        self.refresh_controller(origin, true);
+        Ok(self.graph())
+    }
+
+    /// Remove an instrument from the engine and the graph (its routes
+    /// included). Notes held on it are forgotten, and seats focused on it
+    /// fall back to the first instrument. Returns the channels its outputs
+    /// fed. The caller checks queue room and `in_flight` first, and emits
+    /// `graph`.
+    fn teardown_instrument(&mut self, pos: usize, origin: &str) -> Vec<u32> {
+        let inst = self.instruments.remove(pos);
+        self.send(Command::RemoveInstrument { slot: inst.slot });
+        self.slot_used[inst.slot as usize] = false;
+        self.in_flight += 1;
+        self.patterns.remove(&inst.id);
+        let fed: Vec<u32> = inst.outputs.iter().filter_map(|o| self.routes.remove(&o.source)).collect();
+        self.held.retain(|h| h.slot != inst.slot);
         let mut refocused = false;
         for s in self.seats.values_mut() {
             if s.config.focus.as_deref() == Some(inst.id.as_str()) {
@@ -449,8 +468,15 @@ impl Core {
                 refocused = true;
             }
         }
-        self.seats_changed(origin, refocused);
-        Ok(self.graph())
+        if refocused {
+            self.seats_changed(origin, true);
+        }
+        fed
+    }
+
+    /// The first channel, in display order, that nothing is routed to.
+    fn first_empty_channel(&self) -> Option<u32> {
+        self.channels.iter().map(|c| c.n).find(|n| !self.routes.values().any(|r| r == n))
     }
 
     /// Lowest free channel number, activated in the engine at defaults.
@@ -540,8 +566,37 @@ impl Core {
         if let Some(n) = p.channel {
             self.check_channel(n)?;
         }
-        self.ensure_room(2)?;
+        // With `swap`, whatever else feeds the target channel takes this
+        // source's old place. If it had none, they stay and share the channel,
+        // so nothing goes silent.
+        let old = self.routes.get(&p.source).copied();
+        let displaced: Vec<(String, usize)> = match p.channel {
+            Some(n) if p.swap && old.is_some() => self
+                .routes
+                .iter()
+                .filter(|(s, c)| **c == n && **s != p.source)
+                .filter_map(|(s, _)| self.find_source(s))
+                .collect(),
+            _ => Vec::new(),
+        };
+        self.ensure_room(2 * (1 + displaced.len()))?;
+        for (did, doutput) in &displaced {
+            self.set_route_unchecked(did, *doutput, old);
+        }
         self.set_route_unchecked(&id, output, p.channel);
+        self.graph_changed(origin);
+        Ok(self.graph())
+    }
+
+    pub fn channel_move(&mut self, p: ChannelMoveParams, origin: &str) -> Result<Graph, RpcError> {
+        self.check_channel(p.n)?;
+        let len = self.channels.len() as u32;
+        if p.position < 1 || p.position > len {
+            return Err(RpcError::invalid(format!("position must be 1..={len}")));
+        }
+        let from = self.channels.iter().position(|c| c.n == p.n).unwrap();
+        let c = self.channels.remove(from);
+        self.channels.insert(p.position as usize - 1, c);
         self.graph_changed(origin);
         Ok(self.graph())
     }
@@ -924,15 +979,24 @@ impl Core {
         Ok(self.controller_state())
     }
 
-    /// Handle a raw message from a connected MIDI device: it plays in the
-    /// host seat.
+    /// Handle a raw message from a connected MIDI device. It plays in the
+    /// host seat, and is handled (and journaled, RFC 0006) as `midi.input`
+    /// from the host user, with the port (`midi:<port>`) as origin and the
+    /// device (`midi:<device>`) holding the notes it plays.
     pub fn handle_midi(&mut self, msg: MidiMessage) {
         let origin = format!("midi:{}", msg.port);
         self.emit(&origin, Event::MidiIn { port: msg.port.clone(), data: msg.data.clone() });
         let Some(c) = self.midi.connection(&msg.port) else { return };
         let (device, profile) = (c.device.clone(), c.profile);
-        let seat = self.host_seat.clone();
-        self.device_input(&seat, &device, profile, &format!("midi:{device}"), &msg.data, &origin);
+        // A Block pad release does nothing (pads toggle on press): not journaled.
+        if profile == DeviceProfile::LividBlock
+            && matches!(decode_block(&self.block_map, &msg.data), Some(BlockInput::Pad { pressed: false, .. }))
+        {
+            return;
+        }
+        let req = Request::MidiInput(MidiInputParams { device: device.clone(), data: msg.data, seat: Some(self.host_seat.clone()) });
+        let user = self.host_user.clone();
+        let _ = self.handle(req, &origin, &format!("midi:{device}"), Some(&user));
     }
 
     // ---- midi --------------------------------------------------------------
@@ -1043,8 +1107,15 @@ impl Core {
             None => self.client_seat(client).unwrap_or_else(|| self.host_seat.clone()),
         };
         let profile = self.midi.by_device(&p.device).map(|c| c.profile).unwrap_or_default();
-        self.emit(origin, Event::MidiIn { port: p.device.clone(), data: p.data.clone() });
-        let holder = format!("input:{client}:{}", p.device);
+        // From a device on this machine (`handle_midi`): it already emitted
+        // `midi_in`, and the device itself holds its notes.
+        let local = format!("midi:{}", p.device);
+        let holder = if client == local {
+            local
+        } else {
+            self.emit(origin, Event::MidiIn { port: p.device.clone(), data: p.data.clone() });
+            format!("input:{client}:{}", p.device)
+        };
         self.device_input(&seat, &p.device, profile, &holder, &p.data, origin);
         Ok(())
     }
@@ -1401,13 +1472,413 @@ impl Core {
         ProjectListResult { projects }
     }
 
+    // ---- journal and undo ----------------------------------------------------
+
+    /// The undoable state as flat keys (see `journal`): params and steps that
+    /// differ from their defaults, instruments, channels and their order, and
+    /// routes. Transport, MIDI connections, and the controller view are not
+    /// in it.
+    fn doc(&self) -> Doc {
+        let mut d = Doc::new();
+        for p in &self.params {
+            if p.value != p.info.default {
+                d.insert(format!("param:{}", p.info.path), json!(p.value));
+            }
+        }
+        for i in &self.instruments {
+            d.insert(format!("instrument:{}", i.id), json!({ "type": i.kind.id(), "name": i.name }));
+        }
+        for (id, pattern) in &self.patterns {
+            match pattern {
+                PatternState::Drums(tracks) => {
+                    for (t, steps) in tracks.iter().enumerate() {
+                        let voice = Voice::from_index(t).map(|v| v.id()).unwrap_or_default();
+                        for (i, level) in steps.iter().enumerate().filter(|(_, l)| **l != STEP_OFF) {
+                            d.insert(format!("step:{id}.{voice}.{i}"), json!(level));
+                        }
+                    }
+                }
+                PatternState::Notes(steps) => {
+                    for (i, step) in steps.iter().enumerate().filter(|(_, s)| **s != NoteStep::default()) {
+                        d.insert(format!("note:{id}.{i}"), json!(step));
+                    }
+                }
+            }
+        }
+        for c in &self.channels {
+            d.insert(format!("channel:{}", c.n), json!(c.name));
+        }
+        d.insert("channels:order".into(), json!(self.channels.iter().map(|c| c.n).collect::<Vec<_>>()));
+        for (source, n) in &self.routes {
+            d.insert(format!("route:{source}"), json!(n));
+        }
+        // What a project saves of a seat (RFC 0007): focus, page, bindings.
+        for (name, seat) in &self.seats {
+            if seat.saved && seat.config != SeatConfig::default() {
+                d.insert(format!("seat:{name}"), json!(seat.config));
+            }
+        }
+        d
+    }
+
+    fn journal_context(&self) -> JournalContext {
+        JournalContext { playing: self.playing, step: self.playhead, page: self.controller.page }
+    }
+
+    fn journal_push(&mut self, entry: JournalEntry, origin: &str) {
+        self.emit(origin, Event::Journal { entry: entry.clone() });
+        self.journal.push(entry);
+    }
+
+    fn emit_history(&mut self, user: &str, origin: &str) {
+        let s = self.history.summary(user);
+        self.emit(
+            origin,
+            Event::History {
+                user: user.to_string(),
+                undo_label: s.undo_label,
+                redo_label: s.redo_label,
+                undo_count: s.undo_count,
+                redo_count: s.redo_count,
+            },
+        );
+    }
+
+    /// Undo (or redo) the user's last step, leaving keys another user
+    /// changed since. Journaled as its own entry that `reverts` the step.
+    fn history_step(&mut self, user: &str, origin: &str, redo: bool) -> Result<HistoryStepResult, RpcError> {
+        let Some(plan) = self.history.plan(user, redo) else {
+            return Ok(HistoryStepResult {
+                label: None,
+                changed: Vec::new(),
+                skipped: Vec::new(),
+                history: self.history.info(user),
+            });
+        };
+        let context = self.journal_context();
+        let before = self.doc();
+        let mut skipped = plan.skipped;
+        let applied = self.apply_sets(&plan.sets, origin);
+        let changes = journal::diff(&before, &self.doc());
+        let method = if redo { "history.redo" } else { "history.undo" };
+        let entry = |seq: u64, changes: Vec<Change>, error: Option<String>| JournalEntry {
+            seq,
+            time: unix_time(),
+            user: user.to_string(),
+            origin: origin.to_string(),
+            method: method.to_string(),
+            params: json!({}),
+            context: context.clone(),
+            changes,
+            reverts: Some(plan.seq),
+            error,
+        };
+        let more = match applied {
+            Ok(more) => more,
+            Err(e) => {
+                // A limit was hit before anything changed: journal the failure
+                // and leave the stacks as they were.
+                let seq = self.journal.next_seq();
+                let failed = entry(seq, changes, Some(e.message.clone()));
+                self.journal_push(failed, origin);
+                return Err(e);
+            }
+        };
+        skipped.extend(more);
+        let changed = changes.iter().map(|c| c.key.clone()).collect();
+        let seq = self.journal.next_seq();
+        self.history.finish(user, redo, seq, changes.clone());
+        self.emit_history(user, origin);
+        let done = entry(seq, changes, None);
+        self.journal_push(done, origin);
+        Ok(HistoryStepResult { label: Some(plan.label), changed, skipped, history: self.history.info(user) })
+    }
+
+    /// Set doc keys to the given values (`null`: absent, or the default for
+    /// params and steps), in an order that keeps the graph valid: channels
+    /// and instruments are created first, then order, routes, params, and
+    /// steps are restored, then instruments and channels are removed. Every
+    /// limit is checked before anything changes, so an error means nothing
+    /// changed. Returns keys that could not be set (e.g. a channel that still
+    /// has other sources is not removed).
+    fn apply_sets(&mut self, sets: &[(String, Value)], origin: &str) -> Result<Vec<String>, RpcError> {
+        let mut channels: Vec<(u32, Option<String>)> = Vec::new();
+        let mut instruments: Vec<(String, Option<(InstrumentType, String)>)> = Vec::new();
+        let mut order: Option<Vec<u32>> = None;
+        let mut routes: Vec<(String, Option<u32>)> = Vec::new();
+        let mut params: Vec<(String, Option<f64>)> = Vec::new();
+        let mut tracks: BTreeMap<(String, Voice), Vec<(usize, u8)>> = BTreeMap::new();
+        let mut notes: BTreeMap<String, Vec<(usize, NoteStep)>> = BTreeMap::new();
+        let mut seats: Vec<(String, SeatConfig)> = Vec::new();
+        let mut skipped = Vec::new();
+        for (key, v) in sets {
+            let Some((kind, rest)) = key.split_once(':') else { continue };
+            let parsed = match kind {
+                "channel" => rest.parse().ok().map(|n| channels.push((n, v.as_str().map(String::from)))),
+                "instrument" => {
+                    let inst = v.get("type").and_then(Value::as_str).and_then(InstrumentType::parse);
+                    let name = v.get("name").and_then(Value::as_str).unwrap_or(rest).to_string();
+                    match (v.is_null(), inst) {
+                        (true, _) => Some(instruments.push((rest.to_string(), None))),
+                        (false, Some(k)) => Some(instruments.push((rest.to_string(), Some((k, name))))),
+                        (false, None) => None,
+                    }
+                }
+                "channels" => serde_json::from_value(v.clone()).ok().map(|o| order = Some(o)),
+                "route" => Some(routes.push((rest.to_string(), v.as_u64().map(|n| n as u32)))),
+                "param" => Some(params.push((rest.to_string(), v.as_f64()))),
+                "step" => {
+                    let mut parts = rest.splitn(3, '.');
+                    match (parts.next(), parts.next().and_then(Voice::parse), parts.next().and_then(|i| i.parse().ok())) {
+                        (Some(id), Some(voice), Some(i)) if i < MAX_STEPS => {
+                            let level = v.as_u64().unwrap_or(STEP_OFF as u64) as u8;
+                            Some(tracks.entry((id.to_string(), voice)).or_default().push((i, level)))
+                        }
+                        _ => None,
+                    }
+                }
+                "seat" => match v {
+                    Value::Null => Some(seats.push((rest.to_string(), SeatConfig::default()))),
+                    v => serde_json::from_value(v.clone()).ok().map(|c| seats.push((rest.to_string(), c))),
+                },
+                "note" => match rest.split_once('.').map(|(id, i)| (id, i.parse::<usize>())) {
+                    Some((id, Ok(i))) if i < MAX_STEPS => {
+                        let step = serde_json::from_value(v.clone()).unwrap_or_default();
+                        Some(notes.entry(id.to_string()).or_default().push((i, step)))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if parsed.is_none() {
+                skipped.push(key.clone());
+            }
+        }
+
+        // Nothing that belongs to an instrument being removed needs restoring.
+        let removing: Vec<String> = instruments
+            .iter()
+            .filter(|(id, v)| v.is_none() && self.instruments.iter().any(|i| &i.id == id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        let owned = |key: &str| removing.iter().any(|id| key == id || key.starts_with(&format!("{id}.")));
+        routes.retain(|(s, _)| !owned(s));
+        params.retain(|(p, _)| !owned(p));
+        tracks.retain(|(id, _), _| !owned(id));
+        notes.retain(|id, _| !owned(id));
+        let adding: Vec<&(String, Option<(InstrumentType, String)>)> = instruments
+            .iter()
+            .filter(|(id, v)| v.is_some() && !self.instruments.iter().any(|i| &i.id == id))
+            .collect();
+        let free = self.slot_used.iter().filter(|u| !**u).count();
+        if adding.len() > free {
+            return Err(RpcError::failed(format!("at most {MAX_INSTRUMENTS} instruments")));
+        }
+        if self.in_flight + removing.len() > RETURN_CAPACITY {
+            return Err(RpcError::failed(format!(
+                "{} removed instruments are still waiting to be returned by the audio engine",
+                self.in_flight
+            )));
+        }
+        let new_channels = channels.iter().filter(|(n, v)| v.is_some() && !self.channels.iter().any(|c| c.n == *n));
+        if self.channels.len() + new_channels.count() > MAX_CHANNELS {
+            return Err(RpcError::failed(format!("at most {MAX_CHANNELS} channels")));
+        }
+        self.ensure_room(
+            adding.len() * ADD_COMMANDS
+                + removing.len() * (1 + MAX_OUTPUTS)
+                + channels.len()
+                + routes.len()
+                + params.len()
+                + tracks.len()
+                + notes.len(),
+        )?;
+
+        let mut graph = false;
+        for (n, name) in &channels {
+            let Some(name) = name else { continue };
+            match self.channels.iter_mut().find(|c| c.n == *n) {
+                Some(c) => c.name = name.clone(),
+                None => {
+                    self.send(Command::SetChannelActive { ch: (*n - 1) as u8, active: true });
+                    self.channels.push(ChannelInfo { n: *n, name: name.clone() });
+                }
+            }
+            graph = true;
+        }
+        let mut added = Vec::new();
+        for (id, v) in &instruments {
+            let Some((kind, name)) = v else { continue };
+            if let Some(i) = self.instruments.iter_mut().find(|i| &i.id == id) {
+                i.name = name.clone();
+                i.outputs = instrument::outputs(i.kind, id, name);
+            } else {
+                let slot = self.slot_used.iter().position(|u| !u).unwrap() as u8;
+                self.add_instrument_unchecked(id, *kind, name, slot);
+                added.push(id.clone());
+            }
+            graph = true;
+        }
+        if let Some(order) = order {
+            let mut rest = std::mem::take(&mut self.channels);
+            for n in order {
+                if let Some(pos) = rest.iter().position(|c| c.n == n) {
+                    self.channels.push(rest.remove(pos));
+                }
+            }
+            self.channels.extend(rest);
+            graph = true;
+        }
+        if graph {
+            self.rebuild_params();
+            for id in &added {
+                self.push_instrument_params(id);
+            }
+        }
+        for (source, n) in routes {
+            match (self.find_source(&source), n) {
+                (Some((id, o)), Some(n)) if self.channels.iter().any(|c| c.n == n) => {
+                    self.set_route_unchecked(&id, o, Some(n))
+                }
+                (Some((id, o)), None) => self.set_route_unchecked(&id, o, None),
+                _ => {
+                    skipped.push(format!("route:{source}"));
+                    continue;
+                }
+            }
+            graph = true;
+        }
+        for (path, v) in params {
+            match self.index.get(&path) {
+                Some(&i) => {
+                    let value = v.unwrap_or(self.params[i].info.default);
+                    if self.set_param(&path, value, origin).is_err() {
+                        skipped.push(format!("param:{path}"));
+                    }
+                }
+                None => skipped.push(format!("param:{path}")),
+            }
+        }
+        for ((id, voice), steps) in tracks {
+            if !matches!(self.patterns.get(&id), Some(PatternState::Drums(_))) {
+                skipped.extend(steps.iter().map(|(i, _)| format!("step:{id}.{}.{i}", voice.id())));
+                continue;
+            }
+            let mut full = self.drums(&id)[voice.index()];
+            for (i, level) in steps {
+                full[i] = level;
+            }
+            if self.set_track(&id, voice, &full, origin).is_err() {
+                skipped.push(format!("step:{id}.{}", voice.id()));
+            }
+        }
+        for (id, steps) in notes {
+            let Some(PatternState::Notes(current)) = self.patterns.get(&id) else {
+                skipped.extend(steps.iter().map(|(i, _)| format!("note:{id}.{i}")));
+                continue;
+            };
+            let mut full = **current;
+            for (i, step) in steps {
+                full[i] = step;
+            }
+            if self.set_notes(&id, &full, origin).is_err() {
+                skipped.push(format!("note:{id}"));
+            }
+        }
+        if !seats.is_empty() {
+            for (name, config) in seats {
+                let seat = self.seats.entry(name).or_insert(SeatState {
+                    config: SeatConfig::default(),
+                    saved: true,
+                    learning: None,
+                });
+                seat.config = config;
+                seat.saved = true;
+            }
+            self.seats_changed(origin, true);
+        }
+        for id in &removing {
+            if let Some(pos) = self.instruments.iter().position(|i| &i.id == id) {
+                self.teardown_instrument(pos, origin);
+                graph = true;
+            }
+        }
+        for (n, name) in &channels {
+            if name.is_some() || !self.channels.iter().any(|c| c.n == *n) {
+                continue;
+            }
+            if self.routes.values().any(|c| c == n) {
+                skipped.push(format!("channel:{n}"));
+            } else {
+                self.remove_channel_unchecked(*n);
+                graph = true;
+            }
+        }
+        if graph {
+            self.graph_changed(origin);
+            self.refresh_controller(origin, true);
+        }
+        Ok(skipped)
+    }
+
     // ---- dispatch ----------------------------------------------------------
 
-    /// Handle a request. Connection-level methods (hello, subscribe, render)
-    /// are handled by the server before reaching here.
+    /// Handle a request and journal it. Connection-level methods (hello,
+    /// subscribe, render) are handled by the server before reaching here.
     /// `origin` names the client in events; `client` identifies this
-    /// connection (`conn:<id>`) and holds the notes it starts.
-    pub fn handle(&mut self, req: Request, origin: &str, client: &str) -> RpcResult {
+    /// connection (`conn:<id>`) and holds the notes it starts; `user` owns
+    /// the change in the undo history (None: the host user).
+    pub fn handle(&mut self, req: Request, origin: &str, client: &str, user: Option<&str>) -> RpcResult {
+        let user = user.unwrap_or(&self.host_user).to_string();
+        match &req {
+            Request::HistoryUndo(_) => return ok(self.history_step(&user, origin, false)?),
+            Request::HistoryRedo(_) => return ok(self.history_step(&user, origin, true)?),
+            Request::HistoryGet(_) => return ok(self.history.info(&user)),
+            Request::JournalGet(p) => return ok(JournalGetResult { entries: self.journal.get(p) }),
+            _ => {}
+        }
+        if read_only(&req) {
+            return self.dispatch(req, origin, client);
+        }
+        let method = req.method();
+        let params = serde_json::to_value(&req).ok().and_then(|mut v| v.get_mut("params").map(Value::take));
+        let params = params.unwrap_or(Value::Null);
+        // A project load or new replaces everything and starts a fresh history.
+        let fresh = matches!(req, Request::ProjectNew(_) | Request::ProjectLoad(_));
+        let context = self.journal_context();
+        let before = (!fresh && self.changes_doc(&req)).then(|| self.doc());
+        let result = self.dispatch(req, origin, client);
+        let changes = before.map(|b| journal::diff(&b, &self.doc())).unwrap_or_default();
+        let seq = self.journal.next_seq();
+        if fresh && result.is_ok() {
+            for u in self.history.clear() {
+                self.emit_history(&u, origin);
+            }
+        } else if !changes.is_empty() {
+            let was = self.history.summary(&user);
+            self.history.record(&user, seq, journal::label(method, &params, &changes), &changes);
+            if self.history.summary(&user) != was {
+                self.emit_history(&user, origin);
+            }
+        }
+        let error = result.as_ref().err().map(|e| e.message.clone());
+        let entry = JournalEntry {
+            seq,
+            time: unix_time(),
+            user,
+            origin: origin.to_string(),
+            method: method.to_string(),
+            params,
+            context,
+            changes,
+            reverts: None,
+            error,
+        };
+        self.journal_push(entry, origin);
+        result
+    }
+
+    fn dispatch(&mut self, req: Request, origin: &str, client: &str) -> RpcResult {
         let drum = |c: &Self, id: &Option<String>| c.resolve(id.as_deref(), InstrumentType::Tr808);
         let req = match self.handle_seat(req, origin, client) {
             Ok(r) => return r,
@@ -1439,6 +1910,7 @@ impl Core {
             Request::ChannelAdd(p) => ok(self.channel_add(p.name, origin)?),
             Request::ChannelRemove(p) => ok(self.channel_remove(p.n, origin)?),
             Request::ChannelRename(p) => ok(self.channel_rename(p.n, p.name, origin)?),
+            Request::ChannelMove(p) => ok(self.channel_move(p, origin)?),
             Request::RouteSet(p) => ok(self.route_set(p, origin)?),
             Request::PatternGet(p) => {
                 let id = drum(self, &p.instrument)?;
@@ -1561,6 +2033,9 @@ impl Core {
             | Request::RenderOffline(_)
             | Request::DaemonInfo(_)
             | Request::DaemonShutdown(_) => Err(RpcError::failed("handled by connection")),
+            Request::HistoryUndo(_) | Request::HistoryRedo(_) | Request::HistoryGet(_) | Request::JournalGet(_) => {
+                Err(RpcError::failed("handled by Core::handle"))
+            }
             Request::SeatList(_)
             | Request::SeatClaim(_)
             | Request::SeatCreate(_)
@@ -1576,6 +2051,62 @@ impl Core {
             | Request::SeatFollowKnobs(_) => unreachable!("handled by handle_seat"),
         }
     }
+}
+
+/// Requests that cannot change state, so are not journaled. An exhaustive
+/// match: a new method must be classified here.
+fn read_only(req: &Request) -> bool {
+    use Request::*;
+    match req {
+        Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
+        | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
+        | JournalGet(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_) | EngineStatus(_)
+        | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) => true,
+        ParamSet(_) | TransportPlay(_) | TransportStop(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
+        | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
+        | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
+        | PatternSetNote(_) | VoiceTrigger(_) | VoiceNoteOn(_) | VoiceNoteOff(_) | ControllerPress(_)
+        | ControllerKnob(_) | ControllerSetMode(_) | MidiConnect(_) | MidiDisconnect(_) | ProjectNew(_)
+        | ProjectSave(_) | ProjectLoad(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_) | SeatClaim(_)
+        | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_) | SeatUnbind(_)
+        | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) => false,
+    }
+}
+
+/// Whether a journaled request can change the doc (`Core::doc`). Those that
+/// cannot (performance, transport, connections) skip building it twice,
+/// which matters for a stream of notes from a keyboard.
+impl Core {
+    fn changes_doc(&self, req: &Request) -> bool {
+        match req {
+            // Notes from a generic device only play; CCs set parameters, and a
+            // Block's pads and knobs edit steps and parameters.
+            Request::MidiInput(p) => {
+                let block = self.midi.by_device(&p.device).is_some_and(|c| c.profile == DeviceProfile::LividBlock);
+                block || p.data.first().is_some_and(|s| s & 0xf0 == 0xb0)
+            }
+            _ => !matches!(
+                req,
+                Request::TransportPlay(_)
+                    | Request::TransportStop(_)
+                    | Request::VoiceTrigger(_)
+                    | Request::VoiceNoteOn(_)
+                    | Request::VoiceNoteOff(_)
+                    | Request::ControllerSetMode(_)
+                    | Request::MidiConnect(_)
+                    | Request::MidiDisconnect(_)
+                    | Request::MidiRename(_)
+                    | Request::MidiSetSeat(_)
+                    | Request::SeatClaim(_)
+                    | Request::SeatLeave(_)
+                    | Request::ProjectSave(_)
+            ),
+        }
+    }
+}
+
+fn unix_time() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
 /// Trim a display name; an empty one is an error.

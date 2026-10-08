@@ -1,4 +1,4 @@
-//! This machine's MIDI hardware entries (RFC 0006): physical port -> logical
+//! This machine's MIDI hardware entries (RFC 0007): physical port -> logical
 //! device name, profile, and whether to connect it automatically. Kept in
 //! `<data-dir>/midi-devices.json` because port names belong to a machine,
 //! while the bindings that use the logical names travel with the project.

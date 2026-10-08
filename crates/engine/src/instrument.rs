@@ -41,7 +41,7 @@ pub trait Instrument: Send {
     /// The transport stopped.
     fn on_stop(&mut self) {}
 
-    /// Start a note: the one input every instrument takes (RFC 0006). With
+    /// Start a note: the one input every instrument takes (RFC 0007). With
     /// `gate_samples`, it releases by itself after that long; otherwise it
     /// holds until `note_off` for the same note. Returns what played, or
     /// `None` if the note means nothing to this instrument (a drum machine
@@ -77,7 +77,7 @@ pub fn params(kind: InstrumentType, id: &str) -> Vec<ParamInfo> {
     }
 }
 
-/// Knob pages of an instance with id `id` (RFC 0006).
+/// Knob pages of an instance with id `id` (RFC 0007).
 pub fn knob_pages(kind: InstrumentType, id: &str) -> Vec<KnobPage> {
     match kind {
         InstrumentType::Tr808 => Tr808::knob_pages(id),

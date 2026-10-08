@@ -1,4 +1,4 @@
-// Seats (RFC 0006): which performer setup this client plays in. The daemon
+// Seats (RFC 0007): which performer setup this client plays in. The daemon
 // seats a client automatically when exactly one seat matches its user;
 // otherwise this chooser asks: join a seat, create one, or ignore (a seat
 // for this session only). It can always be reopened from the header.

@@ -80,6 +80,9 @@ echo "pad 0 2" >&7
 echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
 sleep 0.5
 check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
+check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","seat":"e2e"} -> step:drums.kick.2' s journal
+check "undo takes back a device pad press (the host user's)" "kick        ---- ---- ---- ----" bash -c "$BIN/4s undo >/dev/null && $BIN/4s pattern show kick"
+check "redo" "kick        --x- ---- ---- ----" bash -c "$BIN/4s redo >/dev/null && $BIN/4s pattern show kick"
 # Knob 2 (CC 2) on the decay page -> snare decay. Knobs pick up: one far
 # from the current value does nothing until it passes it.
 echo "knob 1 0" >&7; sleep 0.5
@@ -171,7 +174,7 @@ import json
 levels = [c['left'] for l in open('$TMP/key-meters2.json') if l.strip()
           for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
 print('released' if levels and max(levels) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
-# Bindings (RFC 0006): channel 10 plays the drums' GM voices, and the upper
+# Bindings (RFC 0007): channel 10 plays the drums' GM voices, and the upper
 # keys play the bass an octave down. Once a device has bindings, notes no
 # binding matches do nothing.
 check "reconnecting keeps the saved name" "$KDEV as keys (Generic)" s midi connect "$KDEV"
@@ -256,6 +259,19 @@ check "rename a channel" "ch 3 Hits" s channel rename 3 Hits
 check "remove a channel" "ch 2  Bass         <- bass" s channel rm 3
 check "a reused channel number starts at defaults" "mixer.3.mute = 0" bash -c "$BIN/4s channel add >/dev/null && $BIN/4s get mixer.3.mute"
 s channel rm 3 >/dev/null
+s channel add --name Spare >/dev/null
+check "a new instrument takes the first empty channel" "ch 3  Spare        vol 100%  pan C          <- fill" bash -c "$BIN/4s instrument add tb303 --id fill >/dev/null && $BIN/4s mixer"
+check "route --swap trades channels" "ch 2  Bass         <- fill
+ch 3  Spare        <- bass" s route fill 2 --swap
+s route bass 2 --swap >/dev/null
+s instrument add tb303 --id loose --no-channel >/dev/null
+check "swapping in an unrouted source keeps the channel's input" "ch 2  Bass         <- bass, loose" s route loose 2 --swap
+s instrument rm loose >/dev/null
+check "channel move reorders the mixer" "ch 3  Spare        vol 100%  pan C          <- fill
+ch 1  Drums" bash -c "$BIN/4s channel move 3 1 >/dev/null && $BIN/4s mixer"
+check "move position is checked" "position must be 1..=3" s channel move 3 4
+s channel move 3 3 >/dev/null
+s instrument rm fill >/dev/null
 check "unknown source" "no output 'nope'" s route nope 1
 check "instrument list" "bass       tb303  Bass" s instrument list
 check "add onto an existing channel" "ch 2  Bass         vol 100%  pan C          <- bass, bass2" bash -c "$BIN/4s instrument add tb303 --channel 2 >/dev/null && $BIN/4s mixer"
@@ -283,6 +299,38 @@ for _ in $(seq 14); do s instrument add tb303 --no-channel >/dev/null; done
 check "instrument pool limit" "at most 16 instruments" s instrument add tb303 --no-channel
 for n in $(seq 2 15); do s instrument rm "bass$n" >/dev/null; done
 check "pools back to the start" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
+
+# --- Undo/redo and the journal ---
+s set mixer.1.volume 0.9 >/dev/null; s set mixer.1.volume 0.8 >/dev/null; s set mixer.1.volume 0.7 >/dev/null
+check "a run of sets to one param is one undo step" "mixer.1.volume = 1" bash -c "$BIN/4s undo >/dev/null && $BIN/4s get mixer.1.volume"
+check "redo it" "redid: param.set mixer.1.volume" s redo
+s undo >/dev/null
+NOTES_BEFORE=$(s notes bass)
+s set bass.cutoff 0.11 >/dev/null
+check "undo an instrument removal" "undid: instrument.remove bass" bash -c "$BIN/4s instrument rm bass >/dev/null && $BIN/4s undo"
+check "its channel and route are back" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
+check "its notes are back" "$NOTES_BEFORE" s notes bass
+check "its params are back" "bass.cutoff = 0.11" s get bass.cutoff
+check "it plays again" "(bass 9, drums 9)" s render --bars 1 --out renders/undo.wav
+s undo >/dev/null   # the cutoff
+check "nothing left to redo after a new edit" "nothing to redo" bash -c "$BIN/4s set bass.cutoff 0.3 >/dev/null; $BIN/4s undo >/dev/null; $BIN/4s set mixer.1.pan 0.1 >/dev/null; $BIN/4s redo"
+s undo >/dev/null   # the pan
+FOURS_USER=alice s set mixer.1.pan 0.5 >/dev/null
+FOURS_USER=bob s set mixer.1.pan -0.5 >/dev/null
+check "undo leaves what another user changed since" "could not undo: param.set mixer.1.pan
+skipped: param:mixer.1.pan (changed by someone else)" env FOURS_USER=alice "$BIN/4s" undo
+check "...so their value stays" "mixer.1.pan = -0.5" s get mixer.1.pan
+check "each user has their own history" "mixer.1.pan = 0.5" bash -c "FOURS_USER=bob $BIN/4s undo >/dev/null && $BIN/4s get mixer.1.pan"
+s set mixer.1.pan 0 >/dev/null; s undo >/dev/null; s set mixer.1.pan 0 >/dev/null
+check "the journal says who did what" 'alice  cli  param.set {"path":"mixer.1.pan","value":0.5} -> param:mixer.1.pan' s journal --for alice
+check "undo is journaled with what it reverts" "history.undo -> param:mixer.1.pan  (reverts #" s journal --for bob
+check "the journal is written on the engine host" "jsonl" ls "$FOURS_DATA_DIR/journal"
+LAST=$(s --json journal --limit 1 | python3 -c "import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])")
+s tempo 121 >/dev/null; s tempo 120 >/dev/null
+check "journal --since shows only newer entries" "2 entries, first param.set" bash -c "$BIN/4s --json journal --since $LAST | python3 -c \"import json,sys;e=json.load(sys.stdin)['entries'];print(len(e),'entries, first',e[0]['method'])\""
+check "journal --limit keeps the newest" '"value":120' s journal --limit 1
+check "journal --follow streams entries" 'param.set {"path":"transport.tempo","value":122.0}' bash -c "$BIN/4s journal --follow > $TMP/follow.txt & P=\$!; sleep 0.5; $BIN/4s tempo 122 >/dev/null; sleep 0.5; kill \$P; cat $TMP/follow.txt"
+s tempo 120 >/dev/null
 mkdir -p "$FOURS_DATA_DIR/projects/bad.4s"
 python3 -c "
 import json
@@ -378,7 +426,7 @@ rm -rf "$FOURS_DATA_DIR/projects/old.4s"
 s instrument add tb303 >/dev/null
 s notes bass "C2 - G1! C3~" >/dev/null
 s set bass.cutoff 0.25 >/dev/null
-# Seats (RFC 0006): each performer has a focus and bindings; the CLI joins
+# Seats (RFC 0007): each performer has a focus and bindings; the CLI joins
 # the seat matching its user, and the host's devices play in the host seat.
 check "the CLI joins the seat matching its user" "you: e2e" s seat
 check "it is this engine's devices' seat" "e2e: cli#" s seat
@@ -432,6 +480,8 @@ check "save" "e2e.4s" s project save e2e
 check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project reveal --no-open
 check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
 check "new is the default graph" "ch 1  Drums        vol 100%  pan C          <- drums" s mixer
+check "a new project starts a fresh history" "undo: (empty)" s history
+check "undoing the only 808's removal makes it the focus again" "focus: drums" bash -c "$BIN/4s instrument rm drums >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s controller"
 check "load restores" "kick        X--- x--- X--- x---" bash -c "$BIN/4s project load e2e >/dev/null && $BIN/4s pattern show kick"
 check "load restores the 303 and its channel" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
 check "load restores notes" "bass: C2 - G1! C3~" s notes bass

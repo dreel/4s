@@ -1,7 +1,8 @@
 // The console: the app's central control point. Transport on top, then one
 // strip per mixer channel (in display order), the master, and controls to
-// add instruments and channels. Clicking a strip selects the instrument that
-// feeds it for the editor below.
+// add instruments and channels. Each strip picks its input instrument and can
+// be moved left or right. Clicking a strip's source selects the instrument
+// that feeds it for the editor below.
 
 import { useEffect, useState } from "react";
 import type { ChannelInfo } from "../generated/ChannelInfo";
@@ -70,7 +71,47 @@ function ChannelName({ channel }: { channel: ChannelInfo }) {
   );
 }
 
-function Strip({ channel }: { channel: ChannelInfo }) {
+function StripInput({ n }: { n: number }) {
+  const routes = useApp((s) => s.snapshot?.graph.routes ?? {});
+  const instruments = useApp((s) => s.snapshot?.graph.instruments ?? []);
+  const here = Object.entries(routes)
+    .filter(([, c]) => c === n)
+    .map(([src]) => src);
+  const mains = instruments.map((i) => ({ id: i.id, name: i.name, source: i.outputs[0]?.source })).filter((m) => m.source);
+  const main = mains.find((m) => here.includes(m.source!));
+  const others = here.filter((src) => src !== main?.source);
+  const value = main ? main.source! : others.length ? "@other" : "";
+  const onChange = (v: string) => {
+    if (v === "") {
+      for (const source of here) void act(client.call("route.set", { source, channel: null, swap: false }));
+    } else {
+      void act(client.call("route.set", { source: v, channel: n, swap: true }));
+    }
+  };
+  return (
+    <select
+      className="w-20 px-1 py-0.5 rounded bg-zinc-950 border border-zinc-700 text-[10px] text-zinc-300"
+      value={value}
+      title="input: the instrument this channel plays (swaps with the instrument's old channel)"
+      data-testid={`strip-input-${n}`}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">(none)</option>
+      {value === "@other" && (
+        <option value="@other" disabled>
+          {others.join(", ")}
+        </option>
+      )}
+      {mains.map((m) => (
+        <option key={m.id} value={m.source}>
+          {m.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Strip({ channel, index, count }: { channel: ChannelInfo; index: number; count: number }) {
   const n = channel.n;
   const sources = useApp((s) =>
     Object.entries(s.snapshot?.graph.routes ?? {})
@@ -87,6 +128,8 @@ function Strip({ channel }: { channel: ChannelInfo }) {
   const mute = useApp((s) => (s.snapshot?.params[`mixer.${n}.mute`] ?? 0) >= 0.5);
   const solo = useApp((s) => (s.snapshot?.params[`mixer.${n}.solo`] ?? 0) >= 0.5);
   const active = instrument !== null && instrument === selected;
+  const move = (position: number) => void act(client.call("channel.move", { n, position }));
+  const small = "text-[10px] text-zinc-600 hover:text-zinc-300 disabled:opacity-30 disabled:hover:text-zinc-600";
   return (
     <div
       className={`flex flex-col items-center gap-2 p-2 rounded bg-zinc-900 border ${
@@ -96,7 +139,19 @@ function Strip({ channel }: { channel: ChannelInfo }) {
       data-selected={active}
     >
       <div className="flex items-center gap-1 w-full justify-between">
+        <button className={small} title="move left" disabled={index === 0} data-testid={`channel-left-${n}`} onClick={() => move(index)}>
+          &lt;
+        </button>
         <span className="text-[10px] text-zinc-500 tabular-nums">{n}</span>
+        <button
+          className={small}
+          title="move right"
+          disabled={index === count - 1}
+          data-testid={`channel-right-${n}`}
+          onClick={() => move(index + 2)}
+        >
+          &gt;
+        </button>
         <button
           className="text-[10px] text-zinc-600 hover:text-red-400"
           title="remove channel"
@@ -107,10 +162,11 @@ function Strip({ channel }: { channel: ChannelInfo }) {
         </button>
       </div>
       <ChannelName channel={channel} />
+      <StripInput n={n} />
       <button
         className="max-w-20 truncate text-[10px] text-amber-400/80 hover:text-amber-300 disabled:text-zinc-600"
         disabled={!instrument}
-        title={sources || "nothing routed here"}
+        title={sources ? `edit: ${sources}` : "nothing routed here"}
         data-testid={`strip-source-${n}`}
         onClick={() => instrument && select(instrument)}
       >
@@ -189,8 +245,8 @@ export function Console() {
     <section className="flex flex-col gap-3 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800" data-testid="console">
       <Transport />
       <div className="flex gap-2 overflow-x-auto">
-        {channels.map((c) => (
-          <Strip key={c.n} channel={c} />
+        {channels.map((c, i) => (
+          <Strip key={c.n} channel={c} index={i} count={channels.length} />
         ))}
         <div className="flex flex-col items-center justify-end gap-2 p-2 rounded bg-zinc-900 border border-zinc-700 min-w-20">
           <div className="text-xs font-semibold text-zinc-300">Master</div>

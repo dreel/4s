@@ -64,12 +64,12 @@ clients use `external` mode and never start or stop it. See
 ## Controller bridge
 
 - The bridge reads local MIDI devices and forwards their raw input upstream
-  with `midi.input {device, data, seat}` (RFC 0006): the logical device
+  with `midi.input {device, data, seat}` (RFC 0007): the logical device
   name from its own `midi-devices.json`, and the seat of its user. The
   engine resolves the seat's bindings and CC maps, so bindings live in one
   place (the project) and everyone sees them. The bridge applies LED and
   state events coming back to the device.
-- **Seats** (RFC 0006): each performer's focus, bindings, and CC maps,
+- **Seats** (RFC 0007): each performer's focus, bindings, and CC maps,
   saved in the project. A client joins the seat matching its user name if
   exactly one does; otherwise its UI asks (join, create, or ignore for a
   session-only seat). Remote input plays a fixed delay (default 20 ms)
@@ -105,5 +105,11 @@ clients use `external` mode and never start or stop it. See
   their origin so UIs can show who changed what.
 - Conflicts: the engine applies commands in arrival order (last write wins).
   Ownership (e.g. a collaborator claims a track) is deferred until needed.
+- Undo is per user and selective ([RFC 0006](rfcs/0006-journal-and-undo.md)):
+  each user (`user` in `session.hello`; default the engine host's user)
+  undoes only their own changes, and keys someone else changed since are
+  kept and reported as skipped.
+- The engine journals every request that could change state (who, when, the
+  request, and what it changed), in memory and under `<data_dir>/journal/`.
 - Remote listening (collaborators not in the same room as the engine's audio
   out) requires audio streaming. Deferred.

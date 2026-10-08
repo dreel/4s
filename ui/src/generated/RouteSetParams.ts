@@ -9,4 +9,9 @@ source: string,
  * Channel number, or omitted/null to unroute (a direct out then plays
  * through its instrument's main mix again).
  */
-channel: number | null, };
+channel: number | null, 
+/**
+ * If the channel already has other sources, move them to this source's
+ * current channel (if it had none, they stay and share the channel).
+ */
+swap: boolean, };

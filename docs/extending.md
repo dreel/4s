@@ -92,7 +92,7 @@ Validate:
 Keyboards, pad controllers, and knob boxes need no code: connect them as
 `generic` devices (`4s midi connect <port> --name keys`) and route them with
 seat bindings and CC maps (`4s bind`, `4s cc map`, `4s cc learn`,
-`4s knobs follow`; see RFC 0006 and
+`4s knobs follow`; see RFC 0007 and
 [architecture.md](architecture.md#midi-input-and-seats)). A device with no
 bindings plays the seat's focus.
 
@@ -106,9 +106,12 @@ feedback, like the Livid Block (the reference). For one:
    For a grid or knob controller, follow `BlockMap` and `decode_block`
    (`crates/daemon/src/controller.rs`): keep the note/CC map in a JSON file
    in the data dir so users can correct it without a rebuild.
-3. Turn input into existing core actions (`set_step`, `controller_pad`,
-   `page_knob`, `knob_to`, `hold_note`) so events fire, knobs pick up, and
-   all clients sync. Don't add a parallel state path.
+3. Turn input into the equivalent RPC `Request` and pass it to
+   `Core::handle`, so events fire, all clients sync, and the input is
+   journaled and undoable (RFC 0006). Device input is journaled as
+   `midi.input` and resolved by `Core::device_input` into existing core
+   actions (`set_step`, `controller_pad`, `page_knob`, `knob_to`,
+   `hold_note`), so knobs pick up. Don't add a parallel state path.
 4. Feedback (LEDs, displays): today's output path is Block-specific
    (`Midi::send_block`, `BlockMap::led_message`, `Midi::block_name`, called
    from `refresh_controller`). A second device kind with feedback needs a
@@ -135,10 +138,14 @@ Validate:
    `crates/protocol/src/api.rs`, with param and result structs. Add any new
    event variants to `Event` in `types.rs`, and new state to `Snapshot` so
    reconnecting clients resync. Regenerate bindings.
-2. **Daemon.** Handle it in `Core::handle` (`crates/daemon/src/core.rs`).
+2. **Daemon.** Handle it in `Core::dispatch` (`crates/daemon/src/core.rs`).
    Mutate state, push a `Command` to the engine if audio is involved, and
    `emit` an event. Validate inputs and return `RpcError::invalid` with a
-   helpful message.
+   helpful message. Classify the method in `read_only` (an exhaustive
+   match): anything that can change state is journaled, and its changes to
+   the doc (`Core::doc`) are undoable with no extra code. If it adds new
+   state, add keys for it to `Core::doc` and `apply_sets`. If it can never
+   change the doc (performance, like notes), list it in `changes_doc`.
 3. **CLI.** Add a subcommand and map it to the request in `plan()`
    (`crates/cli/src/main.rs`). Add the command to `cli_covers_every_method`.
    That test fails until every method has a CLI command. Format the result

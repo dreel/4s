@@ -49,7 +49,8 @@ Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop`), the instrument graph (`instrument.*`, `channel.*`,
 `route.set`), pattern edits (`pattern.*`, drum steps and note steps),
 auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
-seats and their bindings (`seat.*`, RFC 0006), projects
+seats and their bindings (`seat.*`, RFC 0007), undo and the journal
+(`history.*`, `journal.get`), projects
 (`project.*`), rendering (`render.offline`), status (`engine.status`), and the
 daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).
 
@@ -87,7 +88,7 @@ current parameter set.
   a note-on sent with `midi.input`) holds a note for the calling connection
   until it sends the note-off for that note, or until the connection closes
   (the daemon then releases it). Other connections cannot release it. A
-  connection also sits in a seat (RFC 0006): `session.hello` joins the seat
+  connection also sits in a seat (RFC 0007): `session.hello` joins the seat
   matching its `user` if exactly one does (and returns `choose_seat` when
   the user should be asked), and `seat.claim` / `seat.create` /
   `seat.leave` change it. Seat edits without a `seat` act on the caller's.
@@ -127,7 +128,12 @@ Implemented:
 - **Version handshake**: `session.hello` carries `protocol_version`; a
   mismatch is refused.
 - **Identity**: `hello` carries a client name; events carry `origin` (client
-  name, `midi:<port>`, or `engine`).
+  name, `midi:<port>`, or `engine`). `hello` may also carry a `user`, which
+  owns the connection's undo history (default: the engine host's user); see
+  [RFC 0006](rfcs/0006-journal-and-undo.md).
+- **Journal**: every request that could change state is journaled with its
+  user, origin, and changes (`journal.get`, `journal` events); MIDI input is
+  journaled as its equivalent RPC.
 - **Resync**: snapshot + sequence-numbered events, as above.
 - **Files**: projects and renders are engine-side paths; relative paths
   resolve under the daemon's data dir.

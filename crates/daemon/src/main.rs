@@ -8,6 +8,7 @@ mod audio;
 mod controller;
 mod core;
 mod hardware;
+mod journal;
 mod midi;
 mod runtime;
 mod server;
@@ -50,10 +51,13 @@ struct Args {
     /// a crashed app never leaves an orphaned daemon behind).
     #[arg(long)]
     parent_pid: Option<u32>,
+    /// Keep the journal in memory only (no files under <data-dir>/journal).
+    #[arg(long)]
+    no_journal_file: bool,
 }
 
 /// The person running the daemon: their host seat is matched by this name
-/// (RFC 0006). `FOURS_USER` overrides the OS user.
+/// (RFC 0007). `FOURS_USER` overrides the OS user.
 fn host_user() -> String {
     ["FOURS_USER", "USER", "USERNAME"]
         .iter()
@@ -148,7 +152,15 @@ fn run(args: Args) -> Result<()> {
     // Must precede any other MIDI use so hotplugged devices are seen.
     midi::start_device_watcher();
     let (midi_tx, midi_rx) = std::sync::mpsc::channel();
-    let core = Arc::new(Mutex::new(core::Core::new(commands, midi_tx, data_dir.clone(), audio_status, host_user())));
+    let journal_dir = (!args.no_journal_file).then(|| data_dir.join("journal"));
+    let core = Arc::new(Mutex::new(core::Core::new(
+        commands,
+        midi_tx,
+        data_dir.clone(),
+        audio_status,
+        journal_dir,
+        host_user(),
+    )));
     tracing::info!("data dir: {}", data_dir.display());
 
     if let Some(p) = &args.project {

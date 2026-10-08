@@ -1,4 +1,4 @@
-# RFC 0006: MIDI bindings, seats, clips, and recording
+# RFC 0007: MIDI bindings, seats, clips, and recording
 
 - Status: accepted (phase 1 implemented; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
@@ -416,6 +416,12 @@ differ from the sections above, these win):
   file. No migration, as no project is known to use it.
 - **Device names**: connecting a port with a name that a now-absent port
   had moves the name to the new port (a replacement keyboard keeps `keys`).
+- **Journal and undo** (RFC 0006, merged alongside): device input is
+  journaled as `midi.input`, and saved seat configs are undoable doc keys
+  (`seat:<name>`); see RFC 0006's amendment. The journal's `user` and the
+  seat-matching `user` are the same `session.hello` field.
+- **Numbering**: drafted as RFC 0006; renumbered 0007 because the journal
+  RFC took 0006 first.
 - **Not built yet**: the bridge itself, so the remote input delay exists
   only as the design above.
 

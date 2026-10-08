@@ -34,6 +34,11 @@ Rules that hold in every mode:
 4s daemon logs [-n N]
 ```
 
+The daemon journals every state-changing request (RFC 0006) to JSONL files
+in `<data_dir>/journal/`: up to 20 files of 50 MB, oldest deleted first.
+`4sd --no-journal-file` (or `FOURSD_ARGS` for the app) keeps the journal in
+memory only.
+
 `start` launches `4sd` in its own process group (closing the terminal or
 Ctrl-C does not affect it), waits until it is ready, and returns. It is a
 no-op if a daemon is already running for the data dir.

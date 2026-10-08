@@ -11,7 +11,7 @@
 // Other knobs: FOURS_URL, FOURS_DATA_DIR, FOURSD_BIN, FOURSD_ARGS (extra
 // daemon flags, e.g. "--no-audio --no-midi" for tests).
 
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -135,8 +135,37 @@ async function stopOwnedDaemon(url) {
   child.kill("SIGKILL");
 }
 
+// The app menu, with Edit > Undo / Redo sent to the page: it undoes in the
+// focused text field if there is one, else the project's history (over RPC).
+function setMenu() {
+  const isMac = process.platform === "darwin";
+  const send = (what) => (_item, win) =>
+    (win ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0])?.webContents.send("history", what);
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      ...(isMac ? [{ role: "appMenu" }] : []),
+      { role: "fileMenu" },
+      {
+        label: "Edit",
+        submenu: [
+          { id: "undo", label: "Undo", accelerator: "CmdOrCtrl+Z", click: send("undo") },
+          { id: "redo", label: "Redo", accelerator: isMac ? "Shift+Cmd+Z" : "Ctrl+Y", click: send("redo") },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { role: "selectAll" },
+        ],
+      },
+      { role: "viewMenu" },
+      { role: "windowMenu" },
+    ]),
+  );
+}
+
 async function main() {
   await app.whenReady();
+  setMenu();
   const { url, lifecycle, error } = await ensureDaemon();
   if (error) console.error(`[4s] ${error}`);
 

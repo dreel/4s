@@ -6,4 +6,6 @@ contextBridge.exposeInMainWorld("fours", {
   platform: process.platform,
   /** Open the OS file manager with `path` selected. Resolves to { ok, error }. */
   revealPath: (path) => ipcRenderer.invoke("reveal-path", path),
+  /** Edit > Undo / Redo from the app menu: calls `cb("undo" | "redo")`. */
+  onHistory: (cb) => ipcRenderer.on("history", (_event, what) => cb(what)),
 });

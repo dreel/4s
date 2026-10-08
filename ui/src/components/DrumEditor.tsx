@@ -29,7 +29,7 @@ function OutputSelect({ id, voice }: { id: string; voice: Voice }) {
       title="output: main mix, or a direct out to a channel"
       data-testid={`out-${voice}`}
       onChange={(e) =>
-        void act(client.call("route.set", { source, channel: e.target.value === "" ? null : Number(e.target.value) }))
+        void act(client.call("route.set", { source, channel: e.target.value === "" ? null : Number(e.target.value), swap: false }))
       }
     >
       <option value="">main</option>

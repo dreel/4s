@@ -336,7 +336,7 @@ pub struct TransportState {
 // ---------------------------------------------------------------------------
 
 /// A named set of up to 8 parameters that knobs following focus control.
-/// Each instrument type declares its pages (RFC 0006).
+/// Each instrument type declares its pages (RFC 0007).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct KnobPage {
     /// Stable id, e.g. `decay`.
@@ -370,7 +370,7 @@ pub struct ControllerState {
 }
 
 // ---------------------------------------------------------------------------
-// MIDI devices and seats (RFC 0006)
+// MIDI devices and seats (RFC 0007)
 // ---------------------------------------------------------------------------
 
 /// How a device's input is interpreted.
@@ -601,6 +601,63 @@ pub struct Snapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Journal and undo history
+// ---------------------------------------------------------------------------
+
+/// One change to an addressable piece of project state, e.g.
+/// `param:mixer.2.volume`, `step:drums.kick.3`, `note:bass.5`,
+/// `instrument:bass`, `channel:2`, `channels:order`, `route:drums.kick`.
+/// `null` means absent (or, for params and steps, the default).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Change {
+    pub key: String,
+    #[ts(type = "unknown")]
+    pub before: serde_json::Value,
+    #[ts(type = "unknown")]
+    pub after: serde_json::Value,
+}
+
+/// Transport and controller state when a journal entry was recorded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct JournalContext {
+    pub playing: bool,
+    pub step: Option<u32>,
+    /// Controller page (pad columns map to steps through it).
+    pub page: u32,
+}
+
+/// One request that could change state, as the daemon applied it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct JournalEntry {
+    #[ts(type = "number")]
+    pub seq: u64,
+    /// Unix time in seconds.
+    pub time: f64,
+    /// Who owns the change (the undo stack it lands on).
+    pub user: String,
+    /// The client (or `midi:<port>`) it came from.
+    pub origin: String,
+    /// RPC method; MIDI input is recorded as its equivalent RPC.
+    pub method: String,
+    #[ts(type = "unknown")]
+    pub params: serde_json::Value,
+    pub context: JournalContext,
+    pub changes: Vec<Change>,
+    /// For `history.undo` / `history.redo`: the entry this one reverts.
+    #[ts(type = "number | null")]
+    pub reverts: Option<u64>,
+    pub error: Option<String>,
+}
+
+/// A user's undo and redo stacks (labels, newest first).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct HistoryInfo {
+    pub user: String,
+    pub undo: Vec<String>,
+    pub redo: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
 
@@ -632,6 +689,10 @@ pub enum Event {
     /// the port name (for `midi.input`, the logical device name).
     MidiIn { port: String, data: Vec<u8> },
     Project { info: ProjectInfo },
+    /// A user's undo/redo summary changed.
+    History { user: String, undo_label: Option<String>, redo_label: Option<String>, undo_count: u32, redo_count: u32 },
+    /// A request was recorded in the journal.
+    Journal { entry: JournalEntry },
     /// State was replaced wholesale (project load/new); refetch `state.get`.
     Reset,
     /// This subscriber fell behind and missed events; refetch `state.get`.
@@ -655,6 +716,8 @@ impl Event {
             Event::Seats { .. } => "seats",
             Event::MidiIn { .. } => "midi_in",
             Event::Project { .. } => "project",
+            Event::History { .. } => "history",
+            Event::Journal { .. } => "journal",
             Event::Reset => "reset",
             Event::Lagged { .. } => "lagged",
         }

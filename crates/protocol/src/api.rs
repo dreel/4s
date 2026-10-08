@@ -82,9 +82,10 @@ pub struct HelloParams {
     /// Required when the daemon was started with `--token`.
     #[serde(default)]
     pub token: Option<String>,
-    /// The person using this client. A seat with this name (any case) is
-    /// joined automatically if it is the only match; in a project without
-    /// seats, one is created for them.
+    /// The person using this client: owns this connection's undo history
+    /// (default: the daemon host's user, so local clients share one). A
+    /// seat with this name (any case) is joined automatically if it is the
+    /// only match; in a project without seats, one is created for them.
     #[serde(default)]
     pub user: Option<String>,
     /// Join this existing seat instead of matching by `user`.
@@ -185,7 +186,8 @@ pub struct InstrumentAddParams {
     pub id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
-    /// Route the main output to this existing channel instead of a new one.
+    /// Route the main output to this existing channel. By default it goes to
+    /// the first empty channel in display order, or a new one if none is empty.
     #[serde(default)]
     pub channel: Option<u32>,
     /// Leave the main output unrouted (no new channel).
@@ -219,6 +221,13 @@ pub struct ChannelRenameParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ChannelMoveParams {
+    pub n: u32,
+    /// New display position, 1 = leftmost.
+    pub position: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct RouteSetParams {
     /// `drums` (main out) or `drums.kick` (direct out).
     pub source: String,
@@ -226,6 +235,43 @@ pub struct RouteSetParams {
     /// through its instrument's main mix again).
     #[serde(default)]
     pub channel: Option<u32>,
+    /// If the channel already has other sources, move them to this source's
+    /// current channel (if it had none, they stay and share the channel).
+    #[serde(default)]
+    pub swap: bool,
+}
+
+// ---- history and journal -------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct HistoryStepResult {
+    /// What was undone or redone; null if the stack was empty.
+    pub label: Option<String>,
+    /// Keys it changed.
+    pub changed: Vec<String>,
+    /// Keys left alone because another user changed them since.
+    pub skipped: Vec<String>,
+    pub history: HistoryInfo,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct JournalGetParams {
+    /// Only entries with a greater seq.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub since: Option<u64>,
+    /// At most this many (newest), default 100.
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// Only this user's entries.
+    #[serde(default)]
+    pub user: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct JournalGetResult {
+    /// Oldest first.
+    pub entries: Vec<JournalEntry>,
 }
 
 // ---- pattern -------------------------------------------------------------
@@ -640,7 +686,7 @@ api! {
     InstrumentTypes = "instrument.types" (Empty) -> InstrumentTypesResult;
     /// Instruments in creation order.
     InstrumentList = "instrument.list" (Empty) -> InstrumentListResult;
-    /// Add an instrument; by default on a new channel.
+    /// Add an instrument; by default on the first empty channel, else a new one.
     InstrumentAdd = "instrument.add" (InstrumentAddParams) -> InstrumentInfo;
     /// Remove an instrument (and channels left empty, unless kept).
     InstrumentRemove = "instrument.remove" (InstrumentRemoveParams) -> Graph;
@@ -650,8 +696,19 @@ api! {
     ChannelRemove = "channel.remove" (ChannelRemoveParams) -> Graph;
     /// Rename a mixer channel.
     ChannelRename = "channel.rename" (ChannelRenameParams) -> ChannelInfo;
+    /// Move a mixer channel to a new display position.
+    ChannelMove = "channel.move" (ChannelMoveParams) -> Graph;
     /// Route an instrument output to a channel, or unroute it.
     RouteSet = "route.set" (RouteSetParams) -> Graph;
+
+    /// Undo the caller's last change, leaving keys another user changed since.
+    HistoryUndo = "history.undo" (Empty) -> HistoryStepResult;
+    /// Redo the caller's last undo.
+    HistoryRedo = "history.redo" (Empty) -> HistoryStepResult;
+    /// The caller's undo and redo stacks.
+    HistoryGet = "history.get" (Empty) -> HistoryInfo;
+    /// Recent journal entries: every request that could change state.
+    JournalGet = "journal.get" (JournalGetParams) -> JournalGetResult;
 
     /// Read a drum pattern (one voice or all).
     PatternGet = "pattern.get" (PatternGetParams) -> PatternResult;

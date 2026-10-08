@@ -33,7 +33,7 @@ pub struct ProjectFile {
     /// Instruments with an empty pattern are omitted.
     pub patterns: BTreeMap<String, ProjectPattern>,
     pub controller: ProjectController,
-    /// Performer setups by seat name (RFC 0006): focus, knob page, note
+    /// Performer setups by seat name (RFC 0007): focus, knob page, note
     /// bindings, CC maps.
     #[serde(default)]
     pub seats: BTreeMap<String, SeatConfig>,
@@ -67,7 +67,7 @@ pub struct ProjectController {
 type Migration = fn(Value) -> Result<Value, String>;
 const MIGRATIONS: &[Migration] = &[v2_to_v3];
 
-/// v3 (RFC 0006): the controller's `target` and `knob_mode` became each
+/// v3 (RFC 0007): the controller's `target` and `knob_mode` became each
 /// seat's focus and knob page. A v2 project has no seats, so both are
 /// dropped: seats start focused on the first instrument, on its first page.
 fn v2_to_v3(mut v: Value) -> Result<Value, String> {

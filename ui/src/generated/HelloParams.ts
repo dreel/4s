@@ -10,9 +10,10 @@ client_name: string, protocol_version: number,
  */
 token: string | null, 
 /**
- * The person using this client. A seat with this name (any case) is
- * joined automatically if it is the only match; in a project without
- * seats, one is created for them.
+ * The person using this client: owns this connection's undo history
+ * (default: the daemon host's user, so local clients share one). A
+ * seat with this name (any case) is joined automatically if it is the
+ * only match; in a project without seats, one is created for them.
  */
 user: string | null, 
 /**

@@ -1,4 +1,4 @@
-//! Seats, MIDI input routing, held notes, and knob pickup (RFC 0006).
+//! Seats, MIDI input routing, held notes, and knob pickup (RFC 0007).
 //!
 //! A seat is one performer's setup (focus, knob page, note bindings, CC
 //! maps), saved in the project. Clients sit in seats; the engine host's own

@@ -21,7 +21,7 @@ mysong.4s/
 snapshot; loading applies it. One set of types covers the API and the file, and
 agents can generate or edit projects directly.
 
-It contains (format version 3; RFC 0004, RFC 0006):
+It contains (format version 3; RFC 0004, RFC 0007):
 
 - The graph: `instruments` (`{id, type, name}`, in creation order),
   `channels` (`{n, name}`, in display order), and `routes`
@@ -32,7 +32,7 @@ It contains (format version 3; RFC 0004, RFC 0006):
 - Patterns per instrument id: drum step strings per voice, or a note string
   (and later, arrangement).
 - The controller: whether the grid page follows the playhead.
-- Seats (RFC 0006), by name: `focus`, `knob_page`, note `bindings`, `cc`
+- Seats (RFC 0007), by name: `focus`, `knob_page`, note `bindings`, `cc`
   maps, and `knobs` that follow the focus. Seats with nothing set are left
   out. Port names are not here: they belong to each machine
   (`<data-dir>/midi-devices.json`), and bindings use logical device names.
@@ -67,7 +67,7 @@ pool limits of 16 instruments and 32 channels) before anything changes.
   migration, by the maintainer's decision while the project had no other
   users: loading a v1 file fails with a clear error. From version 2 on,
   format changes come with migrations.
-- v2 -> v3 (RFC 0006) drops the controller's `target` and `knob_mode` (now
+- v2 -> v3 (RFC 0007) drops the controller's `target` and `knob_mode` (now
   each seat's focus and knob page) and adds `seats`. `focus` became a
   reserved instrument id; a project with an instrument called `focus` must
   be renamed by hand.

@@ -5,6 +5,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { EventEnvelope } from "./generated/EventEnvelope";
+import type { HistoryStepResult } from "./generated/HistoryStepResult";
 import type { ParamInfo } from "./generated/ParamInfo";
 import type { InstrumentPattern } from "./generated/InstrumentPattern";
 import type { NoteStep } from "./generated/NoteStep";
@@ -25,7 +26,19 @@ export type AppState = {
   clientId: string | null;
   /** The seat chooser is open (opened by the user, or because we have no seat). */
   choosingSeat: boolean;
+  /** Our undo/redo stacks: top labels and depths. */
+  history: History;
 };
+
+export type History = {
+  user: string | null;
+  undo: string | null;
+  redo: string | null;
+  undoCount: number;
+  redoCount: number;
+};
+
+const NO_HISTORY: History = { user: null, undo: null, redo: null, undoCount: 0, redoCount: 0 };
 
 export type LiveState = {
   /** Peak [left, right] per channel number. */
@@ -61,7 +74,7 @@ function daemonUrl(): string {
 export const launch = {
   lifecycle: query.get("lifecycle") ?? "external",
   error: query.get("daemonError"),
-  /** The person using the app; seats are matched by this name (RFC 0006). */
+  /** The person using the app; seats are matched by this name (RFC 0007). */
   user: query.get("user"),
 };
 
@@ -74,6 +87,7 @@ export const app = new Store<AppState>({
   selected: null,
   clientId: null,
   choosingSeat: false,
+  history: NO_HISTORY,
 });
 export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {} });
 
@@ -108,17 +122,43 @@ export function useLive<S>(select: (s: LiveState) => S): S {
 
 let buffered: EventEnvelope[] | null = null;
 
+const UI_EVENTS: EventEnvelope["event"]["type"][] = [
+  "param_changed",
+  "step_changed",
+  "pattern_changed",
+  "notes_changed",
+  "graph",
+  "transport",
+  "playhead",
+  "trigger",
+  "meters",
+  "controller",
+  "midi",
+  "seats",
+  "project",
+  "history",
+  "reset",
+];
+
 async function resync() {
   // Subscribe first and buffer, then fetch the snapshot, then replay any
   // buffered events newer than it. Nothing is missed or applied twice.
   if (!buffered) buffered = [];
-  const [registry, snapshot] = await Promise.all([
+  const [registry, snapshot, h] = await Promise.all([
     client.call("param.list", { prefix: null }),
     client.call("state.get", {}),
+    client.call("history.get", {}),
   ]);
   const pending = buffered;
   buffered = null;
-  app.set({ registry: registry.params, snapshot });
+  const history = {
+    user: h.user,
+    undo: h.undo[0] ?? null,
+    redo: h.redo[0] ?? null,
+    undoCount: h.undo.length,
+    redoCount: h.redo.length,
+  };
+  app.set({ registry: registry.params, snapshot, history });
   // No seat after a (re)connect or a project load: ask.
   if (!mySeat(app.state)) app.set({ choosingSeat: true });
   live.set({ channels: {} });
@@ -126,6 +166,8 @@ async function resync() {
 }
 
 client.onConnect = async () => {
+  // `user` names our seat and owns our undo history; locally it is the
+  // daemon host's user too, so this app and a local CLI share one history.
   const hello = await client.call("session.hello", {
     client_name: "ui",
     protocol_version: PROTOCOL_VERSION,
@@ -136,7 +178,9 @@ client.onConnect = async () => {
   });
   app.set({ clientId: hello.client_id, choosingSeat: hello.choose_seat });
   buffered = [];
-  await client.call("events.subscribe", { types: null });
+  // Everything the UI applies; not `journal` or `midi_in`, which can be
+  // dense under MIDI input.
+  await client.call("events.subscribe", { types: UI_EVENTS });
   await resync();
 };
 client.onState((connection) => app.set({ connection }));
@@ -165,6 +209,20 @@ function apply(env: EventEnvelope) {
       return;
     }
     case "midi_in":
+    case "journal":
+      return;
+    case "history":
+      if (ev.user === app.state.history.user) {
+        app.set({
+          history: {
+            user: ev.user,
+            undo: ev.undo_label,
+            redo: ev.redo_label,
+            undoCount: ev.undo_count,
+            redoCount: ev.redo_count,
+          },
+        });
+      }
       return;
     case "reset":
     case "lagged":
@@ -235,6 +293,15 @@ export async function act<T>(p: Promise<T>): Promise<T | undefined> {
   } catch (e) {
     app.set({ error: e instanceof Error ? e.message : String(e) });
     return undefined;
+  }
+}
+
+/** Undo (or redo) our last change; report keys someone else changed since. */
+export async function undo(redo = false) {
+  const r: HistoryStepResult | undefined = await act(client.call(redo ? "history.redo" : "history.undo", {}));
+  if (r && r.skipped.length > 0) {
+    const what = r.changed.length === 0 ? `could not ${redo ? "redo" : "undo"}` : `${redo ? "redo" : "undo"}: kept`;
+    app.set({ error: `${what} ${r.skipped.join(", ")} (changed by someone else)` });
   }
 }
 

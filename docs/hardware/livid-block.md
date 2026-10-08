@@ -36,7 +36,7 @@ unplug.
 
 ## Layout
 
-- The Block plays in the host seat (RFC 0006: the seat of this machine's
+- The Block plays in the host seat (RFC 0007: the seat of this machine's
   devices, see `4s midi ports`) and drives that seat's **focus** (default:
   the first instrument). Choose it with `4s focus drums2` or the focus
   button in an instrument's editor. If the focus is removed, the first

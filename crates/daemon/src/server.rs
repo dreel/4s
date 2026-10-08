@@ -44,6 +44,8 @@ struct Conn {
     name: String,
     /// Connected from the engine host itself.
     local: bool,
+    /// Owner of this connection's undo history (None: the host user).
+    user: Option<String>,
     authed: bool,
     subscription: Option<JoinHandle<()>>,
 }
@@ -73,7 +75,8 @@ async fn handle_connection(
         }
     });
 
-    let mut conn = Conn { id, name: format!("client-{id}"), local, authed: token.is_none(), subscription: None };
+    let mut conn =
+        Conn { id, name: format!("client-{id}"), local, user: None, authed: token.is_none(), subscription: None };
     while let Some(msg) = source.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -164,7 +167,7 @@ async fn handle_text(
             let mut c = core.lock().unwrap();
             // Holder key: the connection id alone, which a renaming
             // `session.hello` cannot change.
-            c.handle(other, &conn.name, &format!("conn:{}", conn.id))
+            c.handle(other, &conn.name, &format!("conn:{}", conn.id), conn.user.as_deref())
         }
     };
     (reply(result), shutdown)
@@ -186,6 +189,7 @@ fn hello(core: &Shared, conn: &mut Conn, token: Option<&str>, p: HelloParams) ->
     if !p.client_name.trim().is_empty() {
         conn.name = p.client_name.trim().to_string();
     }
+    conn.user = p.user.clone().map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
     let client_id = format!("{}#{}", conn.name, conn.id);
     let (seat, choose_seat) = core.lock().unwrap().client_hello(
         &format!("conn:{}", conn.id),
