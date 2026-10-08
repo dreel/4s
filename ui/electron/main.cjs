@@ -10,7 +10,8 @@
 //              Default when FOURS_URL points at a non-loopback host.
 // Other knobs: FOURS_URL, FOURS_DATA_DIR, FOURSD_BIN, FOURSD_ARGS (extra
 // daemon flags, e.g. "--no-audio --no-midi" for tests), FOURS_UI_BACKGROUND=1
-// (open without taking focus; the e2e harness sets it).
+// (the window stays hidden and, on macOS, the app has no Dock icon and never
+// activates; the e2e harness sets it).
 
 const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
@@ -187,9 +188,9 @@ async function main() {
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
       // A hidden window must keep timers and animation frames running
-      // (playhead, meters) and still paint (screenshots).
+      // (playhead, meters). It still paints (paintWhenInitiallyHidden
+      // defaults to true), so screenshots work.
       backgroundThrottling: !BACKGROUND,
-      paintWhenInitiallyHidden: true,
     },
   });
   const query = { daemon: url, lifecycle, ...(error ? { daemonError: error } : {}) };
