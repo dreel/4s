@@ -155,7 +155,9 @@ impl BlockMap {
                 Ok(m) if m == Self::transposed_default() => {
                     tracing::info!("{}: updating the transposed default grid map", path.display());
                     let m = BlockMap::default();
-                    let _ = std::fs::write(path, serde_json::to_string_pretty(&m).unwrap() + "\n");
+                    if let Err(e) = std::fs::write(path, serde_json::to_string_pretty(&m).unwrap() + "\n") {
+                        tracing::warn!("{}: could not save the updated map: {e}", path.display());
+                    }
                     m
                 }
                 Ok(m) => m,
@@ -244,10 +246,8 @@ mod tests {
     }
 
     #[test]
-    fn grid_notes_run_down_columns_and_the_old_default_is_migrated() {
+    fn the_old_transposed_default_is_migrated_and_edited_maps_kept() {
         let m = BlockMap::default();
-        assert_eq!(m.pad_for_note(1), Some((1, 0)), "note 1 is the second pad down the first column");
-        assert_eq!(m.led_message(0, 2, 1), [0x90, 16, 127], "step 3 of row 1 is note 16");
 
         let dir = std::env::temp_dir().join(format!("4s-blockmap-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

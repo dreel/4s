@@ -76,8 +76,11 @@ written with defaults on first run:
 
 ## Calibrating
 
-1. Run `4s midi monitor` and press the top-left pad, the top-right pad, the
-   bottom-left pad, then turn knob 1 and knob 8.
+The grid layout is verified on the device. The knob CCs and the channel are
+still the defaults:
+
+1. Run `4s midi monitor`, then turn knob 1 and knob 8 (and, to double-check
+   the grid, press the top-left pad and the pad below it: notes 0 and 1).
 2. Compare the printed messages (`90 nn vv` = note-on, `B0 cc vv` = CC) with
    the defaults above.
 3. Edit `livid-block.json` to match and restart `4sd`.
