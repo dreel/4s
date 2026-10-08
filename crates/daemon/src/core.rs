@@ -886,6 +886,18 @@ impl Core {
         self.emit(&origin, Event::MidiIn { port: msg.port.clone(), data: msg.data.clone() });
         let Some(c) = self.midi.connection(&msg.port) else { return };
         let (device, profile) = (c.device.clone(), c.profile);
+        // Only input that can do something is handled and journaled: notes
+        // and CCs (a Block's pads and knobs). Clock, active sensing, sysex,
+        // pitch bend, and aftertouch would flood the journal.
+        let useful = match profile {
+            DeviceProfile::LividBlock => decode_block(&self.block_map, &msg.data).is_some(),
+            DeviceProfile::Generic => {
+                msg.data.len() >= 3 && matches!(msg.data[0] & 0xf0, 0x80 | 0x90 | 0xb0) && msg.data[0] < 0xf0
+            }
+        };
+        if !useful {
+            return;
+        }
         // A Block pad release does nothing (pads toggle on press): not journaled.
         if profile == DeviceProfile::LividBlock
             && matches!(decode_block(&self.block_map, &msg.data), Some(BlockInput::Pad { pressed: false, .. }))

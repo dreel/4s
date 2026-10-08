@@ -295,22 +295,26 @@ impl Core {
         if let Some(s) = &seat {
             self.check_seat(s)?;
         }
-        let chosen = seat.or_else(|| if auto { self.auto_seat(user.as_deref()) } else { None });
+        let chosen = seat.or_else(|| if auto { self.auto_seat(client) } else { None });
         self.sit(client, chosen.clone());
         self.seats_changed(origin, false);
         Ok((chosen.clone(), auto && chosen.is_none()))
     }
 
-    /// The seat a user joins without asking, creating one in a project
-    /// that has no saved seats (only the host's untouched default).
-    fn auto_seat(&mut self, user: Option<&str>) -> Option<String> {
-        let user = user?;
-        if let Some(s) = self.match_user(user) {
+    /// The seat a client's user joins without asking, creating one in a
+    /// project that has no saved seats (only the host's untouched default).
+    /// Only a remote client, or a local one of the host's own user, gets a
+    /// new seat: a one-off `4s --user carol ...` on the host does not.
+    fn auto_seat(&mut self, client: &str) -> Option<String> {
+        let c = self.clients.get(client)?;
+        let user = c.user.clone()?;
+        let may_create = !c.local || c.drives_host;
+        if let Some(s) = self.match_user(&user) {
             return Some(s);
         }
         let only_default = self.seats.iter().all(|(n, s)| !s.saved || (*n == self.host_seat && s.config == SeatConfig::default()));
-        if only_default && self.clients.values().all(|c| c.seat.is_none()) {
-            let n = self.free_seat_name(&slug(user));
+        if may_create && only_default && self.clients.values().all(|c| c.seat.is_none()) {
+            let n = self.free_seat_name(&slug(&user));
             self.new_seat(&n, true);
             return Some(n);
         }
@@ -338,8 +342,8 @@ impl Core {
             self.sit(client, None);
         }
         lost.sort_by_key(|(k, _, _, local)| (!local, k.clone()));
-        for (client, user, auto, _) in lost {
-            let seat = if auto { self.auto_seat(user.as_deref()) } else { None };
+        for (client, _, auto, _) in lost {
+            let seat = if auto { self.auto_seat(&client) } else { None };
             self.sit(&client, seat);
         }
     }

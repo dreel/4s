@@ -150,6 +150,9 @@ check "a seat focused on a removed instrument falls back to the first" "focus: d
 check "focus the bass" "focus: bass" s focus bass
 check "connect a keyboard as a named device" "$KDEV as keys (Generic) out: -" s midi connect "$KDEV" --name keys
 check "the name is saved for this machine" '"name": "keys"' cat "$FOURS_DATA_DIR/midi-devices.json"
+BEFORE=$(s --json journal --limit 10000 | python3 -c "import json,sys;print(len(json.load(sys.stdin)['entries']))")
+for _ in 1 2 3 4 5; do echo "raw F8" >&8; done; echo "raw FE" >&8; echo "raw E0 00 40" >&8; sleep 0.5
+check "clock, active sensing, and pitch bend are not journaled" "0 new entries" bash -c "echo \$(( \$($BIN/4s --json journal --limit 10000 | python3 -c \"import json,sys;print(len(json.load(sys.stdin)['entries']))\") - $BEFORE )) new entries"
 "$BIN/4s" watch --type trigger --count 1 --json > "$TMP/key.json" &
 WATCH=$!; sleep 0.5
 echo "raw 90 24 64" >&8   # note on, C2 (36)
@@ -485,6 +488,7 @@ check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project revea
 check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
 check "new is the default graph" "ch 1  Drums        vol 100%  pan C          <- drums" s mixer
 check "a new project starts a fresh history" "undo: (empty)" s history
+check "a one-off command as another user on the host makes no seat" "no dave" bash -c "$BIN/4s --user dave status >/dev/null; $BIN/4s seat | grep -q '^dave' && echo dave || echo no dave"
 check "undoing the only 808's removal makes it the focus again" "focus: drums" bash -c "$BIN/4s instrument rm drums >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s controller"
 check "load restores" "kick        X--- x--- X--- x---" bash -c "$BIN/4s project load e2e >/dev/null && $BIN/4s pattern show kick"
 check "load restores the 303 and its channel" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
