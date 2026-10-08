@@ -9,7 +9,8 @@
 //   external - never start or stop a daemon (remote / multiplayer).
 //              Default when FOURS_URL points at a non-loopback host.
 // Other knobs: FOURS_URL, FOURS_DATA_DIR, FOURSD_BIN, FOURSD_ARGS (extra
-// daemon flags, e.g. "--no-audio --no-midi" for tests).
+// daemon flags, e.g. "--no-audio --no-midi" for tests), FOURS_UI_BACKGROUND=1
+// (open without taking focus; the e2e harness sets it).
 
 const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
@@ -20,6 +21,9 @@ const path = require("node:path");
 
 const DEFAULT_URL = "ws://127.0.0.1:4440";
 const DATA_DIR = process.env.FOURS_DATA_DIR || path.join(os.homedir(), ".4s");
+// FOURS_UI_BACKGROUND=1 (set by the e2e harness): open without taking focus,
+// so test runs do not pull the window in front of whatever you are doing.
+const BACKGROUND = process.env.FOURS_UI_BACKGROUND === "1";
 
 /** @type {import("node:child_process").ChildProcess | null} */
 let ownedChild = null;
@@ -164,6 +168,8 @@ function setMenu() {
 }
 
 async function main() {
+  // macOS: an "accessory" app has no Dock icon and is not activated.
+  if (BACKGROUND && process.platform === "darwin") app.setActivationPolicy("accessory");
   await app.whenReady();
   setMenu();
   const { url, lifecycle, error } = await ensureDaemon();
@@ -174,12 +180,18 @@ async function main() {
     height: 940,
     backgroundColor: "#09090b",
     title: "4S",
+    show: !BACKGROUND,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
+      // An unfocused window must keep timers and animation frames running
+      // (playhead, meters).
+      backgroundThrottling: !BACKGROUND,
     },
   });
+  // Shown, but behind the window you are using.
+  if (BACKGROUND) win.once("ready-to-show", () => win.showInactive());
   const query = { daemon: url, lifecycle, ...(error ? { daemonError: error } : {}) };
   const devUrl = process.env.FOURS_UI_DEV_URL;
   if (devUrl) {
