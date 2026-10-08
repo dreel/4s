@@ -215,6 +215,13 @@ impl Core {
         self.global(params::LENGTH) as u32
     }
 
+    /// Steps the Block grid shows: the host focus clip's own length (whole
+    /// steps, rounded up), else `sequencer.length`.
+    fn grid_length(&self) -> u32 {
+        let own = self.drum_focus(&self.host_seat).and_then(|id| self.clips.get(&id).and_then(|c| c.length));
+        own.map(|l| l.div_ceil(TICKS_PER_STEP).min(MAX_STEPS as u32)).unwrap_or_else(|| self.length())
+    }
+
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
     }
@@ -611,12 +618,12 @@ impl Core {
     /// Recompute controller LEDs, push changes to hardware, and emit an event
     /// if anything visible changed.
     fn refresh_controller(&mut self, origin: &str, force_event: bool) {
-        let pages = Controller::num_pages(self.length());
+        let pages = Controller::num_pages(self.grid_length());
         if self.controller.page >= pages {
             self.controller.page = pages - 1;
         }
         let pattern = self.target_pattern();
-        let leds = self.controller.compute_leds(pattern.as_ref(), self.length(), self.playhead);
+        let leds = self.controller.compute_leds(pattern.as_ref(), self.grid_length(), self.playhead);
         let diff = self.controller.set_leds(leds);
         for (r, c, v) in &diff {
             let msg = self.block_map.led_message(*r, *c, *v);
@@ -844,7 +851,7 @@ impl Core {
             return Ok(());
         }
         let step = self.controller.pad_step(col);
-        if step >= self.length() {
+        if step >= self.grid_length() {
             return Ok(());
         }
         let voice = Voice::from_index(row as usize).unwrap();
@@ -859,7 +866,7 @@ impl Core {
             self.controller.follow = f;
         }
         if let Some(page) = p.page {
-            self.controller.page = page.min(Controller::num_pages(self.length()) - 1);
+            self.controller.page = page.min(Controller::num_pages(self.grid_length()) - 1);
             // Manually choosing a page while playing implies not following.
             if p.follow.is_none() && self.playing {
                 self.controller.follow = false;
@@ -1930,10 +1937,10 @@ fn read_only(req: &Request) -> bool {
     }
 }
 
-/// Whether a journaled request can change the doc (`Core::doc`). Those that
-/// cannot (performance, transport, connections) skip building it twice,
-/// which matters for a stream of notes from a keyboard.
 impl Core {
+    /// Whether a journaled request can change the doc (`Core::doc`). Those
+    /// that cannot (performance, transport, connections) skip building it
+    /// twice, which matters for a stream of notes from a keyboard.
     fn changes_doc(&self, req: &Request) -> bool {
         match req {
             // Notes from a generic device only play; CCs set parameters, and a

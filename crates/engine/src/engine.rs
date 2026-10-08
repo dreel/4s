@@ -379,11 +379,14 @@ impl Engine {
             while i < t.num_active {
                 let (end, note) = t.active[i];
                 if until.is_none_or(|u| end <= u) {
-                    if let Some(Some(s)) = self.slots.get_mut(slot) {
-                        s.instrument.note_off(note);
-                    }
                     t.num_active -= 1;
                     t.active[i] = t.active[t.num_active];
+                    // A later clip note on the same pitch is still sounding:
+                    // ending this one must not cut it short.
+                    let still = t.active[..t.num_active].iter().any(|(e, n)| *n == note && until.is_some_and(|u| *e > u));
+                    if !still && let Some(Some(s)) = self.slots.get_mut(slot) {
+                        s.instrument.note_off(note);
+                    }
                 } else {
                     i += 1;
                 }
@@ -722,6 +725,26 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(silent_bars, 0, "the bass went silent");
+    }
+
+    /// A clip note that ends while a later one on the same pitch sounds must
+    /// not cut that one short (both are C2; the first ends at tick 30, the
+    /// second at 36 = 0.1875 s at 120 bpm).
+    #[test]
+    fn overlapping_same_note_is_not_cut_short() {
+        let level = |events: &[ClipEvent]| {
+            let mut e = note_engine();
+            add_events(&mut e, events.iter().copied());
+            let _ = e.apply(Command::Play, &mut |_| {});
+            let out = render_secs(&mut e, 0.2, &mut vec![]);
+            let (a, b) = ((0.165 * 48000.0) as usize * 2, (0.18 * 48000.0) as usize * 2);
+            out[a..b].iter().fold(0.0f32, |m, x| m.max(x.abs()))
+        };
+        let c2 = |tick, len| ClipEvent { tick, len, note: 36, velocity: 89 };
+        let overlapped = level(&[c2(0, 30), c2(24, 12)]);
+        let alone = level(&[c2(0, 30)]);
+        assert!(overlapped > 0.05, "the second C2 should still sound: {overlapped}");
+        assert!(alone < overlapped * 0.5, "without it the note has ended: {alone} vs {overlapped}");
     }
 
     /// A slid note glides in without retriggering the filter envelope: the

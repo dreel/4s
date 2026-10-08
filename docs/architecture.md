@@ -129,7 +129,9 @@ None currently.
 
 ## MIDI input and seats
 
-RFC 0007 (phase 1). Every instrument takes the same input, note on/off
+RFC 0007 (phase 1; phase 2 sequences every instrument with a clip of timed
+notes on a tick clock, see [engine.md](engine.md#sequencer)). Every
+instrument takes the same input, note on/off
 (`Instrument::note_on`, `note_off`); the 808 maps GM drum notes to voices,
 the 303 keeps a note stack with last-note priority. MIDI is routed on the
 control side, in `crates/daemon/src/core/seats.rs`, in three layers:

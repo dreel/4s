@@ -442,11 +442,16 @@ they differ from the sections above, these win):
   every clip full fits in one go.
 - **Step views** (`crates/protocol/src/clip.rs`): drum step = event on the
   step's first tick at the voice's GM note, one step long, velocity 89 (the
-  0.7 steps always played at) or 127 (accent; 120 and up reads as accent);
+  0.7 steps always played at) or 127 (accent; 121 and up reads as accent,
+  the 0.95 at which the 303 plays one);
   303 step = half a step long, slide = 25 ticks (one tick past the next
   step). Renders of existing patterns are unchanged (the e2e level and
   onset checks still pass). `pattern.*` edits replace only the view's
   events, so notes off the grid survive step edits.
+- **Same note twice**: when a clip note ends while a later clip note on the
+  same pitch still sounds, no note-off is sent, so overlaps never cut a note
+  short. Quantize wraps a note that would land on the loop's end to its
+  start. The Block grid shows the focus clip's own length.
 - **Events**: every clip edit emits `clip_changed`, plus the step view's
   `step_changed` / `pattern_changed` / `notes_changed` so editors that only
   know steps keep working. The UI notes how many events are off the grid

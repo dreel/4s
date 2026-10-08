@@ -22,8 +22,9 @@ pub const MAX_CLIP_TICKS: u32 = MAX_STEPS as u32 * TICKS_PER_STEP;
 pub const VEL_ON: u8 = 89;
 /// Velocity of an accented step.
 pub const VEL_ACCENT: u8 = 127;
-/// Velocities at or above this read as accented in step views.
-pub const VEL_ACCENT_MIN: u8 = 120;
+/// Velocities at or above this read as accented in step views: the same
+/// 0.95 at which the 303 plays an accent (121/127).
+pub const VEL_ACCENT_MIN: u8 = 121;
 /// A 303 note step gates for half a step.
 pub const NOTE_LEN: u32 = TICKS_PER_STEP / 2;
 /// A sliding 303 step holds one tick past the next step's start, so the

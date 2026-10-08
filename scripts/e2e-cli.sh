@@ -515,6 +515,8 @@ s clip length seq auto >/dev/null
 check "quantize moves it to the nearest 16th" "48:C3:6:100" s clip quantize seq 1/16
 check "undo takes back the quantize" "36:C3:6:100" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq"
 check "clip edits are journaled per event" "event:seq.36.48" s journal --limit 3
+check "quantize wraps a note at the loop's end to its start" "0:D2:6:89" bash -c "$BIN/4s clip set seq 70:D2:6 >/dev/null && $BIN/4s clip length seq 3 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
+s clip length seq auto >/dev/null; s clip set seq "0:C2:12:89 36:C3:6:100 48:D#2:25:89 72:G1:12:89" >/dev/null
 check "remove a note" "0:C2:12:89 48:D#2:25:89 72:G1:12:89" bash -c "$BIN/4s clip rm seq 36 C3 >/dev/null && $BIN/4s clip show seq | tail -1"
 check "clip set replaces the events" "seq: 1 notes" s clip set seq "0:60:96:127"
 check "clear" "seq: 0 notes" s clip clear seq
