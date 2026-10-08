@@ -244,14 +244,16 @@ check "known models" "akai_mpk_mini_iv   Akai MPK mini IV" s midi models
 check "a model's port gets its name" "$MPK as mpk (Generic) model akai_mpk_mini_iv" s midi connect "$MPK"
 check "and its other port its own" "$MPKD as mpk_daw (Generic) model akai_mpk_mini_iv" s midi connect "$MPKD"
 check "with no bindings, the seat uses the model's default layout" "default layout: mpk (Akai MPK mini IV)" s seat
+s focus drums >/dev/null   # the keys play the bass anyway (@tb303|focus)
 "$BIN/4s" watch --type trigger --count 2 --json > "$TMP/mpk.json" &
 WATCH=$!; sleep 0.5
 echo "raw 90 30 64" >&5; echo "raw 80 30 00" >&5   # a key, channel 1
 echo "raw 99 25 64" >&5; echo "raw 89 25 00" >&5   # pad 2, channel 10
 echo "raw 99 25 64" >&6; echo "raw 89 25 00" >&6   # the DAW Port's copy of it
 wait $WATCH; sleep 0.3
-check "keys play the focus" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
+check "keys play the first 303 whatever the focus" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
 check "pads play the 808's voices in order" '"instrument":"drums","voice":"snare"' cat "$TMP/mpk.json"
+s focus bass >/dev/null
 # A held key (channel 1, note 48) survives a pad with the same note number
 # on channel 10 (bank B pad 5) being tapped.
 "$BIN/4s" watch --type meters --json > "$TMP/mpk-hold.json" &

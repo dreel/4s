@@ -12,7 +12,7 @@
   "profile": "generic",
   "layout": {
     "bindings": [
-      { "device": "mpk", "channel": 1, "target": "focus" },
+      { "device": "mpk", "channel": 1, "target": "@tb303|focus" },
       { "device": "mpk", "channel": 10, "low": 36, "high": 43, "remap": [36, 38, 39, 42, 46, 45, 50, 56], "target": "@tr808" },
       { "device": "mpk", "channel": 10, "low": 44, "high": 51, "remap": [36, 38, 39, 42, 46, 45, 50, 56], "target": "@tr808" }
     ],
@@ -22,6 +22,6 @@
     "knobs": [
       { "device": "mpk_daw", "channel": 1, "ccs": [24, 25, 26, 27, 28, 29, 30, 31], "mode": "relative" }
     ],
-    "pitch_bend": "focus"
+    "pitch_bend": "@tb303|focus"
   }
 }

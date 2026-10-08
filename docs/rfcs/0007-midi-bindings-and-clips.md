@@ -486,7 +486,8 @@ and endless knobs:
   copies it into the seat for every connected port of the model, as an
   undoable seat edit.
 - **General additions**: `NoteBinding.remap` (output notes from the range's
-  low end), `@<type>` targets, `focus.<param>` CC maps (skipped when the
+  low end), `@<type>` targets and `a|b` fallbacks (the MPK's keys play
+  `@tb303|focus`), `focus.<param>` CC maps (skipped when the
   focus lacks the parameter), `CcMode::Relative` for endless encoders (200
   steps per range, no pickup needed), and `SeatConfig.pitch_bend` (default
   the focus; +/-2 semitones; `Instrument::pitch_bend`, the 303 bends).

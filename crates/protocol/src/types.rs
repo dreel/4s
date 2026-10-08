@@ -510,6 +510,7 @@ pub struct NoteBinding {
     pub remap: Option<Vec<u8>>,
     /// An instrument id, `focus` for the seat's focused instrument, or
     /// `@<type>` for the first instrument of a type (`@tr808`).
+    /// Alternatives separated by `|` are tried in order: `@tb303|focus`.
     pub target: String,
 }
 

@@ -54,14 +54,19 @@ pub(super) struct Pickup {
 }
 
 /// A binding target: `focus`, an instrument id, or `@<type>`.
+/// Alternatives separated by `|` are tried in order (`@tb303|focus`).
 fn check_target(t: &str) -> Result<(), RpcError> {
-    match t.strip_prefix('@') {
-        _ if t == "focus" => Ok(()),
-        Some(kind) => InstrumentType::parse(kind)
-            .map(|_| ())
-            .ok_or_else(|| RpcError::invalid(format!("unknown instrument type in target '{t}'"))),
-        None => validate_instrument_id(t).map_err(RpcError::invalid),
+    for part in t.split('|') {
+        match part.strip_prefix('@') {
+            _ if part == "focus" => {}
+            Some(kind) => {
+                InstrumentType::parse(kind)
+                    .ok_or_else(|| RpcError::invalid(format!("unknown instrument type in target '{t}'")))?;
+            }
+            None => validate_instrument_id(part).map_err(RpcError::invalid)?,
+        }
     }
+    Ok(())
 }
 
 /// What a held note is released by: the input note and its MIDI channel
@@ -756,6 +761,10 @@ impl Core {
     /// An instrument a binding target names in a seat: `focus`, `@<type>`
     /// (the first of that type), or an id.
     pub(super) fn resolve_target(&self, seat: &str, target: &str) -> Option<String> {
+        // `a|b`: the first alternative that names an instrument.
+        if target.contains('|') {
+            return target.split('|').find_map(|t| self.resolve_target(seat, t));
+        }
         if target == "focus" {
             return self.seat_focus(seat);
         }
