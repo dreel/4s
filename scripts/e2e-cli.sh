@@ -474,6 +474,10 @@ check "after a focus change the same knob drives the new focus" "drums.snare.dec
 s set drums.snare.decay 0.4 >/dev/null; s focus bass >/dev/null
 check "stop following" "focus: bass" s knobs follow knobs
 s set bass.cutoff 0.25 >/dev/null; s set bass.resonance 0.5 >/dev/null
+s bind pads --to drums >/dev/null
+check "undo takes back a seat edit" "no pads binding" bash -c "$BIN/4s undo >/dev/null; $BIN/4s seat | grep -q 'bind 1: pads' && echo still bound || echo no pads binding"
+check "and redo brings it back" "bind 1: pads any ch all notes -> drums" bash -c "$BIN/4s redo >/dev/null; $BIN/4s seat"
+s unbind 1 >/dev/null
 s --seat bob bind keys --notes C1..B2 --to bass >/dev/null
 check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e
