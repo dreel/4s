@@ -108,7 +108,9 @@ resonant ladder lowpass (24 dB/oct, tanh stages), and a VCA.
   retriggering the envelopes: a **slide** step is a note held one tick past
   the next step's start. Releasing the sounding note glides back to the last
   one still held (last-note priority). The clip's notes and keys share this
-  stack; stopping the transport releases only the clip's notes.
+  stack; stopping the transport releases only the clip's notes. Notes are
+  keyed by pitch: a clip note ending on the same pitch as a held key ends
+  that key's note too (and the other way round).
 - Output: one mono main.
 
 Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,

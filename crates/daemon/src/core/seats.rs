@@ -282,7 +282,8 @@ impl Core {
         local: bool,
         origin: &str,
     ) -> Result<(Option<String>, bool), RpcError> {
-        let user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+        // No user: the daemon host's user, as for undo history.
+        let user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()).or(Some(self.host_user.clone()));
         let host_user = user.as_deref().is_some_and(|u| slug(u) == slug(&self.host_user));
         let drives_host = local && seat.is_none() && host_user;
         self.clients.insert(

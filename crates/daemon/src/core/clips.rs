@@ -216,8 +216,8 @@ impl Core {
         Ok(StepResult { instrument: id.to_string(), voice, step, level })
     }
 
-    /// A voice's row: its on-grid events are replaced; anything else in the
-    /// clip stays.
+    /// A voice's row: only steps whose level changes are rewritten, so
+    /// other velocities, lengths, and anything off the grid stay.
     pub(super) fn set_track(&mut self, id: &str, voice: Voice, steps: &[u8], origin: &str) -> Result<TrackPattern, RpcError> {
         if steps.len() > MAX_STEPS {
             return Err(RpcError::invalid(format!("at most {MAX_STEPS} steps")));
@@ -227,13 +227,18 @@ impl Core {
         }
         let mut full = [STEP_OFF; MAX_STEPS];
         full[..steps.len()].copy_from_slice(steps);
+        let old = self.drums(id)[voice.index()];
+        let changed: Vec<usize> = (0..MAX_STEPS).filter(|s| old[*s] != full[*s]).collect();
         let mut events: Vec<ClipEvent> = self.clips[id]
             .events
             .iter()
-            .filter(|e| !(e.note == voice.gm_note() && on_drum_grid(e)))
+            .filter(|e| {
+                let step = (e.tick / TICKS_PER_STEP) as usize;
+                !(e.note == voice.gm_note() && on_drum_grid(e) && changed.contains(&step))
+            })
             .copied()
             .collect();
-        events.extend((0..MAX_STEPS).filter_map(|s| drum_event(voice, s, full[s])));
+        events.extend(changed.iter().filter_map(|s| drum_event(voice, *s, full[*s])));
         self.edit_clip(id, events, None, origin)?;
         Ok(TrackPattern { voice, steps: full.to_vec() })
     }
@@ -242,8 +247,9 @@ impl Core {
         NotesResult { instrument: id.to_string(), length: self.length(), steps: self.note_view(id).to_vec() }
     }
 
-    /// Note steps: events on step starts are replaced; events between steps
-    /// stay.
+    /// Note steps: only steps whose view changes are rewritten (their
+    /// events on the step's first tick), so chords, velocities, lengths, and
+    /// events between steps stay elsewhere.
     pub(super) fn set_notes(&mut self, id: &str, steps: &[NoteStep], origin: &str) -> Result<NotesResult, RpcError> {
         if steps.len() > MAX_STEPS {
             return Err(RpcError::invalid(format!("at most {MAX_STEPS} steps")));
@@ -251,8 +257,17 @@ impl Core {
         if let Some(bad) = steps.iter().filter_map(|s| s.note).find(|n| !(NOTE_MIN..=NOTE_MAX).contains(n)) {
             return Err(RpcError::invalid(format!("note {bad} out of range ({NOTE_MIN}..{NOTE_MAX})")));
         }
-        let mut events: Vec<ClipEvent> = self.clips[id].events.iter().filter(|e| !on_note_grid(e)).copied().collect();
-        events.extend(step_events(steps));
+        let mut full = [NoteStep::default(); MAX_STEPS];
+        full[..steps.len()].copy_from_slice(steps);
+        let old = self.note_view(id);
+        let changed: Vec<usize> = (0..MAX_STEPS).filter(|i| old[*i] != full[*i]).collect();
+        let mut events: Vec<ClipEvent> = self.clips[id]
+            .events
+            .iter()
+            .filter(|e| !(on_note_grid(e) && changed.contains(&((e.tick / TICKS_PER_STEP) as usize))))
+            .copied()
+            .collect();
+        events.extend(changed.iter().filter_map(|i| note_event(*i, &full[*i])));
         self.edit_clip(id, events, None, origin)?;
         Ok(self.notes_result(id))
     }

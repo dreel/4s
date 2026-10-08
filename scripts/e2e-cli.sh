@@ -518,6 +518,12 @@ check "clip edits are journaled per event" "event:seq.36.48" s journal --limit 3
 check "quantize wraps a note at the loop's end to its start" "0:D2:6:89" bash -c "$BIN/4s clip set seq 70:D2:6 >/dev/null && $BIN/4s clip length seq 3 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
 s clip length seq auto >/dev/null; s clip set seq "0:C2:12:89 36:C3:6:100 48:D#2:25:89 72:G1:12:89" >/dev/null
 check "remove a note" "0:C2:12:89 48:D#2:25:89 72:G1:12:89" bash -c "$BIN/4s clip rm seq 36 C3 >/dev/null && $BIN/4s clip show seq | tail -1"
+s clip set seq "0:C2:12:100 0:G2:12:89 48:D#2:6:89" >/dev/null
+check "a step edit leaves chords, velocities, and lengths on other steps alone" "0:C2:12:100 0:G2:12:89 48:D#2:6:89 96:C3:12:89" bash -c "$BIN/4s note seq 5 C3 >/dev/null && $BIN/4s clip show seq | tail -1"
+s instrument add tr808 --id seqd --no-channel >/dev/null
+s clip set seqd "0:36:24:100 12:42:6:89" >/dev/null
+check "so does a drum step edit" "0:C2:24:100 12:F#2:6:89 96:D2:24:89" bash -c "$BIN/4s pattern --instrument seqd step snare 5 on >/dev/null && $BIN/4s clip show seqd | tail -1"
+s instrument rm seqd >/dev/null
 check "clip set replaces the events" "seq: 1 notes" s clip set seq "0:60:96:127"
 check "clear" "seq: 0 notes" s clip clear seq
 s instrument rm seq >/dev/null

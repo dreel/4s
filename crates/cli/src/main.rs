@@ -449,7 +449,7 @@ enum ClipCmd {
         /// Ticks (default: one step, 24).
         #[arg(long)]
         len: Option<u32>,
-        /// 1..127 (default 89; 120 and up is accented).
+        /// 1..127 (default 89; 121 and up is accented).
         #[arg(long)]
         vel: Option<u8>,
     },
@@ -856,7 +856,10 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 instrument: Some(instrument),
                 length: match steps.as_str() {
                     "auto" => None,
-                    n => Some(n.parse::<u32>().map_err(|_| anyhow!("length is a number of steps or `auto`"))? * TICKS_PER_STEP),
+                    n => match n.parse::<u32>() {
+                        Ok(steps) if (1..=MAX_STEPS as u32).contains(&steps) => Some(steps * TICKS_PER_STEP),
+                        _ => bail!("length is 1..{MAX_STEPS} steps or `auto`"),
+                    },
                 },
             }),
             ClipCmd::Clear { instrument } => Request::ClipClear(ClipGetParams { instrument: Some(instrument) }),
