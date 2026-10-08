@@ -176,7 +176,11 @@ pub fn parse_events(s: &str) -> Result<Vec<ClipEvent>, String> {
             tick: num(parts[0], "tick")?,
             note,
             len: parts.get(2).map(|p| num(p, "len")).transpose()?.unwrap_or(TICKS_PER_STEP),
-            velocity: parts.get(3).map(|p| num(p, "velocity")).transpose()?.unwrap_or(VEL_ON as u32) as u8,
+            velocity: match parts.get(3).map(|p| num(p, "velocity")).transpose()? {
+                None => VEL_ON,
+                Some(v) if (1..=127).contains(&v) => v as u8,
+                Some(v) => return Err(format!("velocity {v} in '{tok}' is not 1..127")),
+            },
         });
     }
     normalize_events(&out)
@@ -208,5 +212,6 @@ mod tests {
         assert_eq!(e[0], ClipEvent { tick: 0, len: 12, note: 36, velocity: VEL_ON });
         assert_eq!(e[1], ClipEvent { tick: 3, len: TICKS_PER_STEP, note: 60, velocity: VEL_ON });
         assert_eq!(parse_events(&format_events(&e)).unwrap(), e);
+        assert!(parse_events("0:C2:12:300").is_err(), "velocity out of range");
     }
 }
