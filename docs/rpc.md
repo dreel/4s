@@ -49,8 +49,8 @@ Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop`), the instrument graph (`instrument.*`, `channel.*`,
 `route.set`), pattern edits (`pattern.*`, drum steps and note steps),
 auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
-undo and the journal (`history.*`, `journal.get`), projects
-(`project.*`), rendering (`render.offline`), status (`engine.status`), and the
+undo and the journal (`history.*`, `journal.get`, `journal.export`), projects
+(`project.*`, including `project.import` to load a project sent inline), rendering (`render.offline`), status (`engine.status`), and the
 daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).
 
 ### Generic parameters

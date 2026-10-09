@@ -6,6 +6,7 @@
 //!   to its params and result types,
 //! - `export_ts()`: exports all param/result types with ts-rs.
 
+use crate::project::ProjectFile;
 use crate::types::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -250,6 +251,29 @@ pub struct JournalGetParams {
     /// Only this user's entries.
     #[serde(default)]
     pub user: Option<String>,
+}
+
+/// Version of the `Recording` format.
+pub const RECORDING_FORMAT_VERSION: u32 = 1;
+
+/// A replayable session: the project at the start of the current history
+/// segment (daemon start, or the last project new/load/import) and every
+/// journal entry since. `4s journal replay` re-sends the entries to another
+/// daemon and checks it ends up the same.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Recording {
+    pub format_version: u32,
+    pub base: ProjectFile,
+    /// Oldest first.
+    pub entries: Vec<JournalEntry>,
+    /// Hash of the undoable state after the last entry.
+    pub digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ProjectImportParams {
+    /// A project sent inline (the contents of a bundle's `project.json`).
+    pub file: ProjectFile,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -562,6 +586,8 @@ api! {
     HistoryGet = "history.get" (Empty) -> HistoryInfo;
     /// Recent journal entries: every request that could change state.
     JournalGet = "journal.get" (JournalGetParams) -> JournalGetResult;
+    /// The current history segment as a replayable recording.
+    JournalExport = "journal.export" (Empty) -> Recording;
 
     /// Read a drum pattern (one voice or all).
     PatternGet = "pattern.get" (PatternGetParams) -> PatternResult;
@@ -611,6 +637,8 @@ api! {
     ProjectSave = "project.save" (ProjectSaveParams) -> ProjectInfo;
     /// Load a project bundle.
     ProjectLoad = "project.load" (ProjectLoadParams) -> ProjectInfo;
+    /// Load a project sent inline (unsaved; no bundle path).
+    ProjectImport = "project.import" (ProjectImportParams) -> ProjectInfo;
     /// List project bundles in the daemon's projects dir.
     ProjectList = "project.list" (Empty) -> ProjectListResult;
 

@@ -59,4 +59,4 @@ decisions (before implementation).
 | [0003](0003-ci-agent-review.md) | Automatic CI agent review (Muse Contributor tier) | implemented |
 | [0004](0004-instruments-and-mixer.md) | Instruments and the channel mixer | implemented |
 | [0005](0005-build-phase.md) | Build phase: suspend the RFC gate, lighten the review bar | implemented |
-| [0006](0006-journal-and-undo.md) | Journal and per-user undo | implemented (part A) |
+| [0006](0006-journal-and-undo.md) | Journal and per-user undo | implemented |

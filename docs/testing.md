@@ -78,6 +78,14 @@ then fix it. Add a unit test as well only if the root cause is complex
 logic. Examples: the MIDI hotplug bug got a `virtual_block` e2e check; the
 onset false positive got a render test with long tails.
 
+A bug that shows up as wrong state after a sequence of edits (from the app,
+a controller, or several users) can be pinned by a **recording**: a session
+exported from the journal and kept in `tests/journals/`. `scripts/e2e-cli.sh`
+replays each one into a fresh daemon and fails if any step's changes differ.
+See [journal.md](journal.md#turn-a-bug-into-a-regression-test). Recordings
+check state, not audio, so pair one with a render check when the bug is
+audible.
+
 ## When no harness fits
 
 Some behavior can't be expressed by today's harnesses: multi-daemon setups

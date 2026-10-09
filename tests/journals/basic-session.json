@@ -1,0 +1,1693 @@
+{
+  "format_version": 1,
+  "base": {
+    "format_version": 2,
+    "instruments": [
+      {
+        "id": "drums",
+        "type": "tr808",
+        "name": "Drums"
+      }
+    ],
+    "channels": [
+      {
+        "n": 1,
+        "name": "Drums"
+      }
+    ],
+    "routes": {
+      "drums": 1
+    },
+    "params": {
+      "drums.clap.decay": 0.4,
+      "drums.clap.level": 0.8,
+      "drums.clap.mute": 0.0,
+      "drums.clap.pan": 0.0,
+      "drums.clap.tone": 0.5,
+      "drums.clap.tune": 0.0,
+      "drums.closed_hat.decay": 0.3,
+      "drums.closed_hat.level": 0.8,
+      "drums.closed_hat.mute": 0.0,
+      "drums.closed_hat.pan": 0.0,
+      "drums.closed_hat.tone": 0.5,
+      "drums.closed_hat.tune": 0.0,
+      "drums.cowbell.decay": 0.4,
+      "drums.cowbell.level": 0.8,
+      "drums.cowbell.mute": 0.0,
+      "drums.cowbell.pan": 0.0,
+      "drums.cowbell.tone": 0.5,
+      "drums.cowbell.tune": 0.0,
+      "drums.high_tom.decay": 0.5,
+      "drums.high_tom.level": 0.8,
+      "drums.high_tom.mute": 0.0,
+      "drums.high_tom.pan": 0.0,
+      "drums.high_tom.tone": 0.5,
+      "drums.high_tom.tune": 0.0,
+      "drums.kick.decay": 0.5,
+      "drums.kick.level": 0.8,
+      "drums.kick.mute": 0.0,
+      "drums.kick.pan": 0.0,
+      "drums.kick.tone": 0.5,
+      "drums.kick.tune": 0.0,
+      "drums.low_tom.decay": 0.5,
+      "drums.low_tom.level": 0.8,
+      "drums.low_tom.mute": 0.0,
+      "drums.low_tom.pan": 0.0,
+      "drums.low_tom.tone": 0.5,
+      "drums.low_tom.tune": 0.0,
+      "drums.open_hat.decay": 0.5,
+      "drums.open_hat.level": 0.8,
+      "drums.open_hat.mute": 0.0,
+      "drums.open_hat.pan": 0.0,
+      "drums.open_hat.tone": 0.5,
+      "drums.open_hat.tune": 0.0,
+      "drums.snare.decay": 0.4,
+      "drums.snare.level": 0.8,
+      "drums.snare.mute": 0.0,
+      "drums.snare.pan": 0.0,
+      "drums.snare.tone": 0.5,
+      "drums.snare.tune": 0.0,
+      "mixer.1.mute": 0.0,
+      "mixer.1.pan": 0.0,
+      "mixer.1.solo": 0.0,
+      "mixer.1.volume": 1.0,
+      "mixer.master.volume": 0.8,
+      "sequencer.length": 16.0,
+      "transport.swing": 0.0,
+      "transport.tempo": 120.0
+    },
+    "patterns": {},
+    "controller": {
+      "target": "drums",
+      "knob_mode": "volume",
+      "follow": true
+    }
+  },
+  "entries": [
+    {
+      "seq": 1,
+      "time": 1791339490.545464,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "transport.tempo",
+        "value": 124.0
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "param:transport.tempo",
+          "before": null,
+          "after": 124.0
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 2,
+      "time": 1791339490.549845,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "pattern.set",
+      "params": {
+        "instrument": null,
+        "steps": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0
+        ],
+        "voice": "kick"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "step:drums.kick.0",
+          "before": null,
+          "after": 1
+        },
+        {
+          "key": "step:drums.kick.12",
+          "before": null,
+          "after": 1
+        },
+        {
+          "key": "step:drums.kick.14",
+          "before": null,
+          "after": 1
+        },
+        {
+          "key": "step:drums.kick.4",
+          "before": null,
+          "after": 1
+        },
+        {
+          "key": "step:drums.kick.8",
+          "before": null,
+          "after": 1
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 3,
+      "time": 1791339490.553872,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "pattern.set",
+      "params": {
+        "instrument": null,
+        "steps": [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        "voice": "closed_hat"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "step:drums.closed_hat.10",
+          "before": null,
+          "after": 1
+        },
+        {
+          "key": "step:drums.closed_hat.14",
+          "before": null,
+          "after": 1
+        },
+        {
+          "key": "step:drums.closed_hat.2",
+          "before": null,
+          "after": 1
+        },
+        {
+          "key": "step:drums.closed_hat.6",
+          "before": null,
+          "after": 1
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 4,
+      "time": 1791339490.557634,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "pattern.set_step",
+      "params": {
+        "instrument": null,
+        "level": 2,
+        "step": 4,
+        "voice": "snare"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "step:drums.snare.4",
+          "before": null,
+          "after": 2
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 5,
+      "time": 1791339490.561405,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "instrument.add",
+      "params": {
+        "channel": null,
+        "id": null,
+        "name": null,
+        "no_channel": false,
+        "type": "tb303"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "channel:2",
+          "before": null,
+          "after": "Bass"
+        },
+        {
+          "key": "channels:order",
+          "before": [
+            1
+          ],
+          "after": [
+            1,
+            2
+          ]
+        },
+        {
+          "key": "instrument:bass",
+          "before": null,
+          "after": {
+            "name": "Bass",
+            "type": "tb303"
+          }
+        },
+        {
+          "key": "route:bass",
+          "before": null,
+          "after": 2
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 6,
+      "time": 1791339490.565229,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "pattern.set_notes",
+      "params": {
+        "instrument": "bass",
+        "steps": [
+          {
+            "accent": false,
+            "note": 36,
+            "slide": false
+          },
+          {
+            "accent": true,
+            "note": 36,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 39,
+            "slide": true
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 31,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 48,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          }
+        ]
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "note:bass.0",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 36,
+            "slide": false
+          }
+        },
+        {
+          "key": "note:bass.1",
+          "before": null,
+          "after": {
+            "accent": true,
+            "note": 36,
+            "slide": false
+          }
+        },
+        {
+          "key": "note:bass.2",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 39,
+            "slide": true
+          }
+        },
+        {
+          "key": "note:bass.4",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 31,
+            "slide": false
+          }
+        },
+        {
+          "key": "note:bass.6",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 48,
+            "slide": false
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 7,
+      "time": 1791339490.569299,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "pattern.set_note",
+      "params": {
+        "instrument": "bass",
+        "note": {
+          "accent": true,
+          "note": 43,
+          "slide": true
+        },
+        "step": 15
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "note:bass.15",
+          "before": null,
+          "after": {
+            "accent": true,
+            "note": 43,
+            "slide": true
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 8,
+      "time": 1791339490.572869,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "bass.cutoff",
+        "value": 0.3
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "param:bass.cutoff",
+          "before": null,
+          "after": 0.3
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 9,
+      "time": 1791339490.577709,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "bass.cutoff",
+        "value": 0.35
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "param:bass.cutoff",
+          "before": 0.3,
+          "after": 0.35
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 10,
+      "time": 1791339490.580859,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "controller.press",
+      "params": {
+        "col": 6,
+        "pressed": null,
+        "row": 1
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "step:drums.snare.6",
+          "before": null,
+          "after": 1
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 11,
+      "time": 1791339490.583962,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "controller.press",
+      "params": {
+        "col": 8,
+        "pressed": null,
+        "row": 1
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [],
+      "reverts": null,
+      "error": "row and col must be 0..7"
+    },
+    {
+      "seq": 12,
+      "time": 1791339490.586702,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "controller.set_mode",
+      "params": {
+        "follow": null,
+        "knob_mode": "decay",
+        "page": null,
+        "target": null
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 13,
+      "time": 1791339490.589491,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "controller.knob",
+      "params": {
+        "index": 0,
+        "value": 0.8
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "param:drums.kick.decay",
+          "before": null,
+          "after": 0.8
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 14,
+      "time": 1791339490.592668,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "channel.add",
+      "params": {
+        "name": "Kick"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "channel:3",
+          "before": null,
+          "after": "Kick"
+        },
+        {
+          "key": "channels:order",
+          "before": [
+            1,
+            2
+          ],
+          "after": [
+            1,
+            2,
+            3
+          ]
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 15,
+      "time": 1791339490.595692,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "route.set",
+      "params": {
+        "channel": 3,
+        "source": "drums.kick",
+        "swap": false
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "route:drums.kick",
+          "before": null,
+          "after": 3
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 16,
+      "time": 1791339490.598919,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "route.set",
+      "params": {
+        "channel": 1,
+        "source": "bass",
+        "swap": true
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "route:bass",
+          "before": 2,
+          "after": 1
+        },
+        {
+          "key": "route:drums",
+          "before": 1,
+          "after": 2
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 17,
+      "time": 1791339490.601826,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "channel.move",
+      "params": {
+        "n": 3,
+        "position": 1
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "channels:order",
+          "before": [
+            1,
+            2,
+            3
+          ],
+          "after": [
+            3,
+            1,
+            2
+          ]
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 18,
+      "time": 1791339490.604804,
+      "user": "alice",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "mixer.2.pan",
+        "value": 0.4
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "param:mixer.2.pan",
+          "before": null,
+          "after": 0.4
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 19,
+      "time": 1791339490.60757,
+      "user": "bob",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "mixer.2.pan",
+        "value": -0.4
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "param:mixer.2.pan",
+          "before": 0.4,
+          "after": -0.4
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 20,
+      "time": 1791339490.610649,
+      "user": "alice",
+      "origin": "cli",
+      "method": "history.undo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [],
+      "reverts": 18,
+      "error": null
+    },
+    {
+      "seq": 21,
+      "time": 1791339490.613561,
+      "user": "bob",
+      "origin": "cli",
+      "method": "history.undo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "param:mixer.2.pan",
+          "before": -0.4,
+          "after": 0.4
+        }
+      ],
+      "reverts": 19,
+      "error": null
+    },
+    {
+      "seq": 22,
+      "time": 1791339490.616384,
+      "user": "bob",
+      "origin": "cli",
+      "method": "history.redo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "param:mixer.2.pan",
+          "before": 0.4,
+          "after": -0.4
+        }
+      ],
+      "reverts": 21,
+      "error": null
+    },
+    {
+      "seq": 23,
+      "time": 1791339490.619275,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "instrument.add",
+      "params": {
+        "channel": null,
+        "id": "lead",
+        "name": null,
+        "no_channel": true,
+        "type": "tb303"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "instrument:lead",
+          "before": null,
+          "after": {
+            "name": "Bass",
+            "type": "tb303"
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 24,
+      "time": 1791339490.622255,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "pattern.set_notes",
+      "params": {
+        "instrument": "lead",
+        "steps": [
+          {
+            "accent": false,
+            "note": 48,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 52,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 55,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          }
+        ]
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "note:lead.0",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 48,
+            "slide": false
+          }
+        },
+        {
+          "key": "note:lead.1",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 52,
+            "slide": false
+          }
+        },
+        {
+          "key": "note:lead.2",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 55,
+            "slide": false
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 25,
+      "time": 1791339490.625697,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "instrument.remove",
+      "params": {
+        "id": "lead",
+        "keep_channels": false
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "instrument:lead",
+          "before": {
+            "name": "Bass",
+            "type": "tb303"
+          },
+          "after": null
+        },
+        {
+          "key": "note:lead.0",
+          "before": {
+            "accent": false,
+            "note": 48,
+            "slide": false
+          },
+          "after": null
+        },
+        {
+          "key": "note:lead.1",
+          "before": {
+            "accent": false,
+            "note": 52,
+            "slide": false
+          },
+          "after": null
+        },
+        {
+          "key": "note:lead.2",
+          "before": {
+            "accent": false,
+            "note": 55,
+            "slide": false
+          },
+          "after": null
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 26,
+      "time": 1791339490.62891,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "history.undo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "instrument:lead",
+          "before": null,
+          "after": {
+            "name": "Bass",
+            "type": "tb303"
+          }
+        },
+        {
+          "key": "note:lead.0",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 48,
+            "slide": false
+          }
+        },
+        {
+          "key": "note:lead.1",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 52,
+            "slide": false
+          }
+        },
+        {
+          "key": "note:lead.2",
+          "before": null,
+          "after": {
+            "accent": false,
+            "note": 55,
+            "slide": false
+          }
+        }
+      ],
+      "reverts": 25,
+      "error": null
+    },
+    {
+      "seq": 27,
+      "time": 1791339490.631705,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "nope.param",
+        "value": 1.0
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [],
+      "reverts": null,
+      "error": "unknown parameter 'nope.param' (see param.list)"
+    },
+    {
+      "seq": 28,
+      "time": 1791339490.634353,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "pattern.clear",
+      "params": {
+        "instrument": null,
+        "voice": "snare"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "step:drums.snare.4",
+          "before": 2,
+          "after": null
+        },
+        {
+          "key": "step:drums.snare.6",
+          "before": 1,
+          "after": null
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 29,
+      "time": 1791339490.637087,
+      "user": "samuelt",
+      "origin": "cli",
+      "method": "history.undo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0
+      },
+      "changes": [
+        {
+          "key": "step:drums.snare.4",
+          "before": null,
+          "after": 2
+        },
+        {
+          "key": "step:drums.snare.6",
+          "before": null,
+          "after": 1
+        }
+      ],
+      "reverts": 28,
+      "error": null
+    }
+  ],
+  "digest": "dfa7a969a130ef38"
+}

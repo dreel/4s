@@ -12,7 +12,7 @@
 //! journal entries themselves (`reverts` names the entry they revert), so the
 //! journal is never rewritten.
 
-use fours_protocol::{Change, HistoryInfo, JournalEntry, JournalGetParams};
+use fours_protocol::{Change, HistoryInfo, JournalEntry, JournalGetParams, ProjectFile};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::Write;
@@ -38,6 +38,18 @@ pub fn diff(before: &Doc, after: &Doc) -> Vec<Change> {
     );
     out.sort_by(|a, b| a.key.cmp(&b.key));
     out
+}
+
+/// A stable hash of a doc (FNV-1a over its JSON, keys sorted), to check that
+/// a replay ends in the same state.
+pub fn digest(doc: &Doc) -> String {
+    let json = serde_json::to_string(doc).unwrap_or_default();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in json.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 /// The instrument id a key belongs to: `instrument:bass`, `param:bass.cutoff`,
@@ -273,6 +285,31 @@ impl Journal {
     pub fn next_seq(&mut self) -> u64 {
         self.seq += 1;
         self.seq
+    }
+
+    /// The last seq handed out.
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// Mark the start of a history segment in the journal file: a
+    /// `{"segment": {seq, time, base}}` line with the project at that point,
+    /// so a file can be replayed from it (entries after it have greater seqs).
+    pub fn push_segment(&mut self, base: &ProjectFile, time: f64) {
+        if let Some(tx) = &self.file {
+            let line = serde_json::json!({ "segment": { "seq": self.seq, "time": time, "base": base } });
+            let _ = tx.send(line.to_string());
+        }
+    }
+
+    /// Every entry after `seq`, oldest first; None if some have already been
+    /// dropped from memory.
+    pub fn since(&self, seq: u64) -> Option<Vec<JournalEntry>> {
+        let first = self.ring.front().map_or(self.seq + 1, |e| e.seq);
+        if first > seq + 1 {
+            return None;
+        }
+        Some(self.ring.iter().filter(|e| e.seq > seq).cloned().collect())
     }
 
     pub fn push(&mut self, entry: JournalEntry) {

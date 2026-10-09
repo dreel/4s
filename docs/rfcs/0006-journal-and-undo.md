@@ -1,7 +1,7 @@
 # RFC 0006: Journal and per-user undo
 
-- Status: implemented (part A: journal, undo/redo); part B (recordings and
-  replay) planned
+- Status: implemented (part A: journal, undo/redo; part B: recordings and
+  replay). How to use it: [docs/journal.md](../journal.md)
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-06
 - Discussion: the PR that introduces this RFC (build phase, RFC 0005: a
@@ -76,7 +76,7 @@ decodes to:
 
 The origin is `midi:<port>`, and the user is the host user.
 
-`project.new` and `project.load` start a fresh history.
+`project.new`, `project.load`, and `project.import` start a fresh history.
 
 The journal keeps the last 10k entries in memory (`journal.get`, and a
 `journal` event per entry). A writer thread appends entries to JSONL files
@@ -182,16 +182,41 @@ Everything is additive: an optional `user` in hello, new methods, and new
 events. There is no project-format change and no protocol-version bump. An
 older client simply ignores the new events.
 
-## Part B: recordings (planned)
+## Part B: recordings
 
-- `journal.export` returns `{base: ProjectFile, entries, digest}` for the
-  current history segment.
-- `project.import {file}` loads a project sent inline.
-- `4s journal replay <file>` re-sends each entry as its recorded user (one
-  connection per user), restores the recorded controller page before pad
-  presses, and compares changes entry by entry plus the final digest.
-- A mismatch exits non-zero, so a saved recording works as a regression test
-  (`tests/journals/`).
+- **Segments.** A segment starts at daemon start, `project.new`,
+  `project.load`, or `project.import`. The journal file gets a
+  `{"segment": {seq, time, base}}` line holding the project at that point,
+  so a file is replayable on its own, even after a crash.
+- **`journal.export`** returns `Recording {format_version, base, entries,
+  digest}` for the current segment. `digest` is an FNV-1a hash of the doc's
+  JSON. It is read-only; the CLI writes the file on the client machine
+  (`4s journal export -o`), or as `4s call` lines with `--format sh`.
+- **`project.import {file}`** loads a `ProjectFile` sent inline (unsaved).
+  Replay uses it; it also lets a remote client load a local project
+  (`4s project import <bundle>`).
+- **`4s journal replay <recording.json | journal.jsonl>`** runs on the
+  client. Step by step:
+  1. Refuses a daemon with unsaved changes unless `--force`.
+  2. Imports the base.
+  3. Re-sends each entry on one connection per recorded (user, origin), so
+     per-user undo and held notes behave the same.
+  4. Before `controller.press` / `controller.knob`, restores the recorded
+     controller page from its own `replay` connection. Entries from that
+     connection are left out of the comparison.
+  5. Compares method, changes, and error entry by entry, then the digest.
+     The first divergence is named, and the command exits non-zero.
+- **Options.**
+  - `--realtime` keeps the recorded timing.
+  - `--segment N` picks a segment of a `.jsonl` file.
+  - `--accept` rewrites a diverging recording with the replayed result,
+    after a deliberate change.
+- **What is not replayed.** `project.save`, failed `project.load`s,
+  `midi.connect`, and `midi.disconnect` depend on the engine host's disk or
+  ports and never change the doc, so they are not replayed.
+- **Tests.** `tests/journals/*.json` are replayed by `scripts/e2e-cli.sh`.
+  The e2e also exports its whole session, with virtual-MIDI Block pads,
+  keyboard notes, and GM drums, and replays it into a second daemon.
 
 ## Open questions
 
@@ -201,5 +226,8 @@ older client simply ignores the new events.
   the base.
 - An RPC to inject raw MIDI, for replaying input that has no RPC
   equivalent.
+- The request that crashes the daemon is not journaled (an entry is written
+  when its request finishes). A "started" line before dispatch would catch
+  it, at the cost of a second file line per request.
 - Whether history should survive `daemon start --restart-if-stale`. Today it
   does not; the session's state carries over, but its history doesn't.
