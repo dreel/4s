@@ -10,7 +10,17 @@ client_name: string, protocol_version: number,
  */
 token: string | null, 
 /**
- * Who is editing: owns this connection's undo history. Defaults to the
- * daemon host's user, so local clients share one history.
+ * The person using this client: owns this connection's undo history
+ * (default: the daemon host's user, so local clients share one). A
+ * seat with this name (any case) is joined automatically if it is the
+ * only match; in a project without seats, one is created for them.
  */
-user: string | null, };
+user: string | null, 
+/**
+ * Join this existing seat instead of matching by `user`.
+ */
+seat: string | null, 
+/**
+ * Match a seat by `user` (default true). False stays unseated.
+ */
+auto_seat: boolean | null, };

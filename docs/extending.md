@@ -89,36 +89,40 @@ Validate:
 
 ## 3. Support a new MIDI controller
 
-Controllers are MIDI devices whose input the daemon decodes into the same
-actions the UI and CLI use. The Livid Block is the reference for a grid
-controller with feedback. `DeviceKind::GenericDrums` (note-on triggers
-the controller target's voices) and `DeviceKind::Keyboard` (note on/off
-plays a note instrument, the connection's `instrument` or the first
-`tb303`, holding the note until its note-off), both in `Core::handle_midi`,
-are the simpler references for note-only devices. A keyboard is connected
-with `4s midi connect <port> --kind keyboard [--instrument bass]` or the
-UI's MIDI panel.
+Keyboards, pad controllers, and knob boxes need no code: connect them as
+`generic` devices (`4s midi connect <port> --name keys`) and route them with
+seat bindings and CC maps (`4s bind`, `4s cc map`, `4s cc learn`,
+`4s knobs follow`; see RFC 0007 and
+[architecture.md](architecture.md#midi-input-and-seats)). A device with no
+bindings plays the seat's focus.
 
-1. Add a `DeviceKind` variant in `crates/protocol/src/types.rs` and
+Code is only needed for a **surface**: a controller with its own layout and
+feedback, like the Livid Block (the reference). For one:
+
+1. Add a `DeviceProfile` variant in `crates/protocol/src/types.rs` and
    regenerate bindings (`cargo run -p fours-protocol --bin gen-bindings`).
-2. Decode its messages in `Core::handle_midi` (`crates/daemon/src/core.rs`).
+2. Decode its messages in `Core::device_input`
+   (`crates/daemon/src/core/seats.rs`).
    For a grid or knob controller, follow `BlockMap` and `decode_block`
    (`crates/daemon/src/controller.rs`): keep the note/CC map in a JSON file
    in the data dir so users can correct it without a rebuild.
-3. Turn input into the equivalent RPC `Request` (`controller.press`,
-   `controller.knob`, `voice.note_on`, ...) and pass it to `Core::handle`,
-   so events fire, all clients sync, and the input is journaled and
-   undoable (RFC 0006). Don't add a parallel state path.
+3. Turn input into the equivalent RPC `Request` and pass it to
+   `Core::handle`, so events fire, all clients sync, and the input is
+   journaled and undoable (RFC 0006). Device input is journaled as
+   `midi.input` and resolved by `Core::device_input` into existing core
+   actions (`set_step`, `controller_pad`, `page_knob`, `knob_to`,
+   `hold_note`), so knobs pick up. Don't add a parallel state path.
 4. Feedback (LEDs, displays): today's output path is Block-specific
    (`Midi::send_block`, `BlockMap::led_message`, `Midi::block_name`, called
    from `refresh_controller`). A second device kind with feedback needs a
    per-kind send path in `crates/daemon/src/midi.rs`, still diffing so only
    changes go out.
-5. Auto-connect, if appropriate: `midi_autoconnect` currently matches only
-   "block" and connects as `LividBlock`; extend it with your device's name
-   match.
-6. Expose it in `4s midi connect --kind ...` and the UI's MIDI panel (the
-   kind list).
+5. Auto-connect, if appropriate: `midi_autoconnect` connects ports named
+   like a Block, and every port connected before (`midi-devices.json`);
+   default your profile by port name in `Hardware::resolve` (as
+   `looks_like_block` does).
+6. Expose it in `4s midi connect --profile ...` and the UI's MIDI panel (the
+   profile list).
 7. Document the mapping in `docs/hardware/<device>.md`, following
    [livid-block.md](hardware/livid-block.md).
 

@@ -8,7 +8,7 @@ use crate::dsp::Smoother;
 use crate::instrument::{Hit, Instrument, MAX_BLOCK};
 use crate::params::{cont, mono_pan, toggle, volume_to_gain};
 use crate::voices::{DrumVoice, VoiceParams, default_decay, make_voice};
-use fours_protocol::{MAX_STEPS, NUM_TRACKS, OutputInfo, OutputWidth, ParamInfo, STEP_ACCENT, STEP_OFF, Voice};
+use fours_protocol::{KnobPage, MAX_STEPS, NUM_TRACKS, OutputInfo, OutputWidth, ParamInfo, STEP_ACCENT, STEP_OFF, Voice};
 
 pub const VELOCITY_ON: f32 = 0.7;
 pub const VELOCITY_ACCENT: f32 = 1.0;
@@ -76,6 +76,18 @@ impl Tr808 {
             r.push(toggle(format!("{id}.{vid}.mute"), format!("{l} Mute")));
         }
         r
+    }
+
+    /// One page per voice parameter, knob N = voice N.
+    pub fn knob_pages(id: &str) -> Vec<KnobPage> {
+        [("level", "Volume"), ("tune", "Tune"), ("decay", "Decay"), ("tone", "Tone")]
+            .iter()
+            .map(|(p, label)| KnobPage {
+                id: if *p == "level" { "volume".into() } else { p.to_string() },
+                label: label.to_string(),
+                params: Voice::ALL.iter().map(|v| format!("{id}.{}.{p}", v.id())).collect(),
+            })
+            .collect()
     }
 
     pub fn outputs(id: &str, name: &str) -> Vec<OutputInfo> {
@@ -159,12 +171,12 @@ impl Instrument for Tr808 {
         }
     }
 
-    fn trigger(&mut self, voice: usize, velocity: f32) -> bool {
-        if voice >= NUM_TRACKS {
-            return false;
-        }
+    /// GM drum notes play voices (`Voice::gm_note`); other notes do
+    /// nothing. Drums are one-shot, so there is no `note_off`.
+    fn note_on(&mut self, note: u8, velocity: f32, _gate_samples: Option<f64>) -> Option<Hit> {
+        let voice = Voice::ALL.iter().position(|v| v.gm_note() == note)?;
         self.play(voice, velocity);
-        true
+        Some(Hit { voice: Some(voice as u8), note: None, velocity })
     }
 
     fn render(&mut self, frames: usize) {

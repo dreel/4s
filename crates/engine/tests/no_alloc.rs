@@ -76,8 +76,12 @@ fn process_never_allocates() {
             Command::SetNotes { slot: 1, steps: notes },
             Command::SetParam { target: ParamTarget::Channel { ch: 1, index: 1 }, value: -0.5 },
             Command::SetParam { target: ParamTarget::Instrument { slot: 1, index: 2 }, value: 0.7 },
-            Command::Trigger { slot: 0, voice: 3, velocity: 1.0 },
+            Command::NoteOn { slot: 0, note: 42, velocity: 1.0, gate: false },
             Command::NoteOn { slot: 1, note: 40, velocity: 1.0, gate: true },
+            Command::NoteOn { slot: 1, note: 41, velocity: 0.7, gate: false },
+            Command::NoteOn { slot: 1, note: 43, velocity: 0.7, gate: false },
+            Command::NoteOff { slot: 1, note: 43 },
+            Command::NoteOff { slot: 1, note: 41 },
             Command::Play,
         ];
         for c in cmds {

@@ -49,8 +49,10 @@ Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop`), the instrument graph (`instrument.*`, `channel.*`,
 `route.set`), pattern edits (`pattern.*`, drum steps and note steps),
 auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
-undo and the journal (`history.*`, `journal.get`, `journal.export`), projects
-(`project.*`, including `project.import` to load a project sent inline), rendering (`render.offline`), status (`engine.status`), and the
+seats and their bindings (`seat.*`, RFC 0007), undo and the journal
+(`history.*`, `journal.get`, `journal.export`), projects (`project.*`,
+including `project.import` to load a project sent inline), rendering
+(`render.offline`), status (`engine.status`), and the
 daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).
 
 ### Generic parameters
@@ -83,12 +85,16 @@ current parameter set.
 - Pattern and trigger events name their instrument (`step_changed`,
   `pattern_changed`, `notes_changed`, `trigger`), so clients know which
   instrument an edit or hit belongs to.
-- **Connection-scoped state: held notes.** `voice.note_on` holds a note for
-  the calling connection until it sends `voice.note_off` for that note, or
-  until the connection closes (the daemon then releases it). Other
-  connections cannot release it. This is the only state tied to a
-  connection; everything else is shared. A bridge must therefore track
-  holders per local client (see [topology.md](topology.md)).
+- **Connection-scoped state: held notes and seats.** `voice.note_on` (and
+  a note-on sent with `midi.input`) holds a note for the calling connection
+  until it sends the note-off for that note, or until the connection closes
+  (the daemon then releases it). Other connections cannot release it. A
+  connection also sits in a seat (RFC 0007): `session.hello` joins the seat
+  matching its `user` if exactly one does (and returns `choose_seat` when
+  the user should be asked), and `seat.claim` / `seat.create` /
+  `seat.leave` change it. Seat edits without a `seat` act on the caller's.
+  Everything else is shared. A bridge must therefore track holders per
+  local client (see [topology.md](topology.md)).
 - High-rate events: `playhead` (per step), `trigger` (per hit), `meters`
   (~30 Hz, suppressed while silent). JSON is fine at these rates.
 

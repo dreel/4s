@@ -176,7 +176,7 @@ impl InstrumentType {
 }
 
 /// Top-level path segments that cannot be instrument ids.
-pub const RESERVED_IDS: &[&str] = &["transport", "sequencer", "mixer", "controller"];
+pub const RESERVED_IDS: &[&str] = &["transport", "sequencer", "mixer", "controller", "focus"];
 
 /// Check an instrument id: `[a-z][a-z0-9_]*`, not reserved.
 pub fn validate_instrument_id(id: &str) -> Result<(), String> {
@@ -335,41 +335,29 @@ pub struct TransportState {
 // Controller (Livid Block, real or virtual)
 // ---------------------------------------------------------------------------
 
-/// What the 8 knobs control. Knob N always maps to track N.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum KnobMode {
-    Volume,
-    Tune,
-    Decay,
-    Tone,
-}
-
-impl KnobMode {
-    pub const ALL: [KnobMode; 4] = [KnobMode::Volume, KnobMode::Tune, KnobMode::Decay, KnobMode::Tone];
-
-    /// Parameter path knob `track` (0-based) controls in this mode, on the
-    /// drum instrument `target`.
-    pub fn param_path(self, target: &str, track: usize) -> String {
-        let voice = Voice::from_index(track).unwrap_or(Voice::Kick);
-        let param = match self {
-            KnobMode::Volume => "level",
-            KnobMode::Tune => "tune",
-            KnobMode::Decay => "decay",
-            KnobMode::Tone => "tone",
-        };
-        format!("{target}.{}.{param}", voice.id())
-    }
+/// A named set of up to 8 parameters that knobs following focus control.
+/// Each instrument type declares its pages (RFC 0007).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct KnobPage {
+    /// Stable id, e.g. `decay`.
+    pub id: String,
+    pub label: String,
+    /// Full parameter paths, knob 1 first.
+    pub params: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ControllerState {
-    /// The drum instrument the grid and knobs control. `None` when there is
-    /// no `tr808`: the grid is dark and input does nothing.
-    pub target: Option<String>,
-    pub knob_mode: KnobMode,
-    /// Parameter path each knob currently controls (knob N -> track N).
-    /// Empty when there is no target.
+    /// The seat the engine host's own devices (the Block) belong to.
+    pub seat: String,
+    /// That seat's focused instrument: the grid edits it when it is a
+    /// `tr808` (otherwise the grid is dark) and the knobs control its page.
+    pub focus: Option<String>,
+    /// Knob page in use (an id from `knob_pages`).
+    pub knob_page: Option<String>,
+    /// Pages the focused instrument offers.
+    pub knob_pages: Vec<String>,
+    /// Parameter path each knob currently controls. Empty without focus.
     pub knob_params: Vec<String>,
     /// Which 8-step page the grid shows (0 = steps 1-8, 1 = steps 9-16, ...).
     pub page: u32,
@@ -382,28 +370,159 @@ pub struct ControllerState {
 }
 
 // ---------------------------------------------------------------------------
-// MIDI
+// MIDI devices and seats (RFC 0007)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+/// How a device's input is interpreted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum DeviceKind {
-    /// Grid + knobs mapped onto the sequencer, LEDs driven.
+pub enum DeviceProfile {
+    /// Notes and CCs, routed by the seat's bindings and CC maps.
+    #[default]
+    Generic,
+    /// Grid + knobs as a surface for the seat's focus, LEDs driven.
     LividBlock,
-    /// General MIDI drum notes trigger voices of the controller target.
-    GenericDrums,
-    /// Note on/off plays a note instrument (default: the first `tb303`).
-    Keyboard,
+}
+
+/// A physical port's hardware entry, kept per machine in
+/// `<data-dir>/midi-devices.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct MidiDevice {
+    pub port: String,
+    /// Logical device name that seats bind to, e.g. `keys`.
+    pub name: String,
+    pub profile: DeviceProfile,
+    /// Connect automatically when the port appears.
+    pub auto_connect: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct MidiConnection {
     pub input: String,
     pub output: Option<String>,
-    pub kind: DeviceKind,
-    /// Instrument a `keyboard` plays; `None` = the first `tb303`.
+    /// Logical device name.
+    pub device: String,
+    pub profile: DeviceProfile,
+}
+
+/// Check a logical device or seat name: `[a-z][a-z0-9_]*`, at most 32
+/// characters.
+pub fn validate_name(what: &str, name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let ok = name.len() <= 32
+        && chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if ok { Ok(()) } else { Err(format!("invalid {what} name '{name}': use [a-z][a-z0-9_]*, at most 32 characters")) }
+}
+
+/// Turn any label (a port name, a user name) into a valid name:
+/// `Arturia KeyStep 37` -> `arturia_keystep_37`.
+pub fn slug(label: &str) -> String {
+    let mut s = String::new();
+    for c in label.trim().to_ascii_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            s.push(c);
+        } else if !s.ends_with('_') && !s.is_empty() {
+            s.push('_');
+        }
+    }
+    let mut s = s.trim_end_matches('_').to_string();
+    if !s.starts_with(|c: char| c.is_ascii_lowercase()) {
+        s.insert(0, 'd');
+    }
+    s.truncate(32);
+    s.trim_end_matches('_').to_string()
+}
+
+/// Route notes from a device into an instrument.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct NoteBinding {
+    /// Logical device name.
+    pub device: String,
+    /// MIDI channel 1-16; any channel if absent.
     #[serde(default)]
-    pub instrument: Option<String>,
+    pub channel: Option<u8>,
+    /// Lowest and highest input note (inclusive); all notes if absent.
+    #[serde(default)]
+    pub low: Option<u8>,
+    #[serde(default)]
+    pub high: Option<u8>,
+    /// Semitones added to each note.
+    #[serde(default)]
+    pub transpose: i8,
+    /// An instrument id, or `focus` for the seat's focused instrument.
+    pub target: String,
+}
+
+impl NoteBinding {
+    pub fn matches(&self, device: &str, channel: u8, note: u8) -> bool {
+        self.device == device
+            && self.channel.is_none_or(|c| c == channel)
+            && self.low.is_none_or(|l| note >= l)
+            && self.high.is_none_or(|h| note <= h)
+    }
+}
+
+/// Bind one CC to one parameter, scaled over its range.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct CcMap {
+    pub device: String,
+    #[serde(default)]
+    pub channel: Option<u8>,
+    pub cc: u8,
+    /// Parameter path.
+    pub param: String,
+    /// Only take over once the knob passes the current value.
+    #[serde(default = "yes")]
+    pub pickup: bool,
+}
+
+/// CCs of a device that control the focused instrument's knob page
+/// (knob 1 = the first CC).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct KnobFollow {
+    pub device: String,
+    #[serde(default)]
+    pub channel: Option<u8>,
+    pub ccs: Vec<u8>,
+    #[serde(default = "yes")]
+    pub pickup: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// One performer's setup: saved in the project.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatConfig {
+    /// Instrument that `focus` bindings, the Block, and following knobs
+    /// play. The first instrument if absent.
+    #[serde(default)]
+    pub focus: Option<String>,
+    /// Knob page id; the focused instrument's first page if absent or not
+    /// one of its pages.
+    #[serde(default)]
+    pub knob_page: Option<String>,
+    #[serde(default)]
+    pub bindings: Vec<NoteBinding>,
+    #[serde(default)]
+    pub cc: Vec<CcMap>,
+    #[serde(default)]
+    pub knobs: Vec<KnobFollow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Seat {
+    pub name: String,
+    /// Saved with the project. A seat made with "ignore" is not.
+    pub saved: bool,
+    pub config: SeatConfig,
+    /// Client ids (`name#n`) sitting in this seat.
+    pub occupants: Vec<String>,
+    /// Parameter that the next CC moved on this seat's devices will be
+    /// mapped to (`seat.learn_cc`).
+    pub learning: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -456,6 +575,14 @@ pub struct DaemonInfo {
 /// Name of the runtime file inside the data dir.
 pub const RUNTIME_FILE: &str = "4sd.json";
 
+/// Every seat, and which one the engine host's own devices use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatsState {
+    pub seats: Vec<Seat>,
+    /// Seat of the MIDI devices attached to the engine host.
+    pub host: String,
+}
+
 /// Full engine state. Subscribers apply events with `seq` greater than this.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct Snapshot {
@@ -468,6 +595,7 @@ pub struct Snapshot {
     pub patterns: Vec<InstrumentPattern>,
     pub controller: ControllerState,
     pub midi: Vec<MidiConnection>,
+    pub seats: SeatsState,
     pub project: ProjectInfo,
     pub audio: AudioStatus,
 }
@@ -496,6 +624,9 @@ pub struct JournalContext {
     pub step: Option<u32>,
     /// Controller page (pad columns map to steps through it).
     pub page: u32,
+    /// The caller's seat, which seat-relative requests apply to.
+    #[serde(default)]
+    pub seat: Option<String>,
 }
 
 /// One request that could change state, as the daemon applied it.
@@ -555,7 +686,10 @@ pub enum Event {
     Meters { channels: Vec<ChannelLevel>, master: Vec<f32> },
     Controller { state: ControllerState },
     Midi { connections: Vec<MidiConnection> },
-    /// Raw incoming MIDI, for discovering controller mappings.
+    /// Seats, their bindings, or who sits where changed.
+    Seats { state: SeatsState },
+    /// Raw incoming MIDI, for discovering controller mappings. `port` is
+    /// the port name (for `midi.input`, the logical device name).
     MidiIn { port: String, data: Vec<u8> },
     Project { info: ProjectInfo },
     /// A user's undo/redo summary changed.
@@ -582,6 +716,7 @@ impl Event {
             Event::Meters { .. } => "meters",
             Event::Controller { .. } => "controller",
             Event::Midi { .. } => "midi",
+            Event::Seats { .. } => "seats",
             Event::MidiIn { .. } => "midi_in",
             Event::Project { .. } => "project",
             Event::History { .. } => "history",

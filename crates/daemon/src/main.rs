@@ -7,6 +7,7 @@
 mod audio;
 mod controller;
 mod core;
+mod hardware;
 mod journal;
 mod midi;
 mod runtime;
@@ -53,6 +54,15 @@ struct Args {
     /// Keep the journal in memory only (no files under <data-dir>/journal).
     #[arg(long)]
     no_journal_file: bool,
+}
+
+/// The person running the daemon: their host seat is matched by this name
+/// (RFC 0007). `FOURS_USER` overrides the OS user.
+fn host_user() -> String {
+    ["FOURS_USER", "USER", "USERNAME"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))
+        .unwrap_or_else(|| "me".into())
 }
 
 fn init_logging(log_file: Option<&PathBuf>) -> Result<()> {
@@ -142,12 +152,6 @@ fn run(args: Args) -> Result<()> {
     // Must precede any other MIDI use so hotplugged devices are seen.
     midi::start_device_watcher();
     let (midi_tx, midi_rx) = std::sync::mpsc::channel();
-    // Clients that do not name a user share the host user's undo history.
-    let host_user = std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .ok()
-        .filter(|u| !u.trim().is_empty())
-        .unwrap_or_else(|| "local".into());
     let journal_dir = (!args.no_journal_file).then(|| data_dir.join("journal"));
     let core = Arc::new(Mutex::new(core::Core::new(
         commands,
@@ -155,7 +159,7 @@ fn run(args: Args) -> Result<()> {
         data_dir.clone(),
         audio_status,
         journal_dir,
-        host_user,
+        host_user(),
     )));
     tracing::info!("data dir: {}", data_dir.display());
 

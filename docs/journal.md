@@ -99,7 +99,7 @@ still journaled (with empty `changes`).
 
 ## Where it lives
 
-- **In memory:** the last 10,000 entries, for `4s journal` and
+- **In memory:** the last 100,000 entries, for `4s journal` and
   `journal.get`. There is also a `journal` event per entry, which is what
   `4s journal --follow` streams.
 - **On disk, on the engine host:** `<data-dir>/journal/<start>-<pid>-<part>.jsonl`.
@@ -241,14 +241,27 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
 
 - **Not replayed:** `project.save`, `project.load` (a successful one starts
   a new segment, so one inside a segment is a failed load), `midi.connect`,
-  and `midi.disconnect`. They depend on the engine host's disk or ports and
-  never change the doc.
+  `midi.disconnect`, `midi.rename`, and `midi.set_seat`. They depend on the
+  engine host's disk or ports and never change the doc. MIDI input from a
+  device is recorded as `midi.input` with the device's profile, so it
+  replays the same way without the device.
+- **Replay into a daemon with the recording's host user.** Each entry
+  records its caller's seat, and replay joins it, but `controller.*` and a
+  Block act on the host seat, the daemon's own user (`FOURS_USER`, else the
+  OS user). Fixtures in `tests/journals/` are recorded as `e2e`, the user
+  `scripts/e2e-cli.sh` runs as.
 - **Export covers the current segment only.** If it is longer than the
-  in-memory journal (10k entries), export fails; replay the `.jsonl` file
+  in-memory journal (100k entries), export fails; replay the `.jsonl` file
   instead.
 - **Several RPCs are several steps.** A UI action that sends several RPCs
   (e.g. a strip's `(none)`) undoes one RPC at a time.
 - **An undo or redo with nothing to do is not journaled.** It changes
   nothing.
+- **MIDI input that can do nothing is not journaled.** That is clock,
+  active sensing, SysEx and other system messages; pitch bend, aftertouch
+  and program change; a CC that no map, following knob or learn uses in
+  the seat; a Block pad release; and a Block message that is not one of
+  its pads or knobs. A keyboard that sends clock would otherwise fill the
+  journal in minutes.
 - **`user` is self-asserted.** Any client that may connect can claim any
   user.

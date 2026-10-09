@@ -36,13 +36,13 @@ unplug.
 
 ## Layout
 
-- The Block drives one drum instrument, the controller **target** (default:
-  the first `tr808`, usually `drums`). Choose another with
-  `4s controller mode --target drums2` or the "control with Block" button in
-  its editor. If the target is removed, the next `tr808` takes over; with no
-  `tr808` at all the grid goes dark and input does nothing until one is
-  added.
-- Rows 1-8 = the target's tracks (kick, snare, clap, closed hat, open hat,
+- The Block plays in the host seat (RFC 0007: the seat of this machine's
+  devices, see `4s midi ports`) and drives that seat's **focus** (default:
+  the first instrument). Choose it with `4s focus drums2` or the focus
+  button in an instrument's editor. If the focus is removed, the first
+  instrument takes over. When the focus is not a drum machine the grid goes
+  dark and pads do nothing; the knobs still work.
+- Rows 1-8 = the focus's tracks (kick, snare, clap, closed hat, open hat,
   low tom, high tom, cowbell). Columns = 8 steps of the current page.
 - Pressing a pad toggles that step. Steps past `sequencer.length` are dark and
   ignored.
@@ -52,10 +52,13 @@ unplug.
   (default), the page follows the playhead while playing. Choose a page with
   `4s controller mode --page N` or the UI (choosing a page while playing turns
   follow off).
-- Knobs: knob N controls track N of the target. The knob mode picks the
-  parameter: volume (`<target>.<voice>.level`, the voice's level in the
-  808's own mix), tune, decay, or tone (`<target>.<voice>.*`). Knobs are
-  absolute: turning one jumps the parameter to the knob position.
+- Knobs: knob N controls parameter N of the focus's **knob page**
+  (`4s knobs page decay`). A `tr808` has volume (`<id>.<voice>.level`, the
+  voice's level in the 808's own mix), tune, decay, and tone, knob N =
+  voice N; a `tb303` has `main` (cutoff, resonance, env mod, decay, accent,
+  tune, waveform). Knobs **pick up**: after the value changed elsewhere, a
+  knob does nothing until it passes the current value, so it never jumps.
+  `controller.knob` (the virtual knobs) sets the value directly.
 
 The same logic (`crates/daemon/src/controller.rs`) serves the real device and
 the virtual one (`controller.press`, `controller.knob`, the UI's Block mirror),

@@ -78,16 +78,15 @@
     },
     "patterns": {},
     "controller": {
-      "target": "drums",
-      "knob_mode": "volume",
       "follow": true
-    }
+    },
+    "seats": {}
   },
   "entries": [
     {
-      "seq": 1,
-      "time": 1791339490.545464,
-      "user": "samuelt",
+      "seq": 2,
+      "time": 1791569333.723382,
+      "user": "e2e",
       "origin": "cli",
       "method": "param.set",
       "params": {
@@ -97,7 +96,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -110,9 +110,9 @@
       "error": null
     },
     {
-      "seq": 2,
-      "time": 1791339490.549845,
-      "user": "samuelt",
+      "seq": 3,
+      "time": 1791569333.723576,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
       "params": {
@@ -140,7 +140,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -173,9 +174,9 @@
       "error": null
     },
     {
-      "seq": 3,
-      "time": 1791339490.553872,
-      "user": "samuelt",
+      "seq": 4,
+      "time": 1791569333.723757,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
       "params": {
@@ -203,7 +204,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -231,9 +233,9 @@
       "error": null
     },
     {
-      "seq": 4,
-      "time": 1791339490.557634,
-      "user": "samuelt",
+      "seq": 5,
+      "time": 1791569333.72393,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_step",
       "params": {
@@ -245,7 +247,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -258,9 +261,9 @@
       "error": null
     },
     {
-      "seq": 5,
-      "time": 1791339490.561405,
-      "user": "samuelt",
+      "seq": 6,
+      "time": 1791569333.724181,
+      "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
       "params": {
@@ -273,7 +276,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -309,9 +313,9 @@
       "error": null
     },
     {
-      "seq": 6,
-      "time": 1791339490.565229,
-      "user": "samuelt",
+      "seq": 7,
+      "time": 1791569333.724723,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
       "params": {
@@ -642,7 +646,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -695,9 +700,9 @@
       "error": null
     },
     {
-      "seq": 7,
-      "time": 1791339490.569299,
-      "user": "samuelt",
+      "seq": 8,
+      "time": 1791569333.725233,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_note",
       "params": {
@@ -712,7 +717,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -729,9 +735,9 @@
       "error": null
     },
     {
-      "seq": 8,
-      "time": 1791339490.572869,
-      "user": "samuelt",
+      "seq": 9,
+      "time": 1791569333.725606,
+      "user": "e2e",
       "origin": "cli",
       "method": "param.set",
       "params": {
@@ -741,7 +747,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -754,9 +761,9 @@
       "error": null
     },
     {
-      "seq": 9,
-      "time": 1791339490.577709,
-      "user": "samuelt",
+      "seq": 10,
+      "time": 1791569333.725798,
+      "user": "e2e",
       "origin": "cli",
       "method": "param.set",
       "params": {
@@ -766,7 +773,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -779,9 +787,9 @@
       "error": null
     },
     {
-      "seq": 10,
-      "time": 1791339490.580859,
-      "user": "samuelt",
+      "seq": 11,
+      "time": 1791569333.726164,
+      "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
       "params": {
@@ -792,7 +800,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -805,9 +814,9 @@
       "error": null
     },
     {
-      "seq": 11,
-      "time": 1791339490.583962,
-      "user": "samuelt",
+      "seq": 12,
+      "time": 1791569333.726519,
+      "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
       "params": {
@@ -818,37 +827,49 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [],
       "reverts": null,
       "error": "row and col must be 0..7"
     },
     {
-      "seq": 12,
-      "time": 1791339490.586702,
-      "user": "samuelt",
+      "seq": 13,
+      "time": 1791569333.726754,
+      "user": "e2e",
       "origin": "cli",
-      "method": "controller.set_mode",
+      "method": "seat.page",
       "params": {
-        "follow": null,
-        "knob_mode": "decay",
-        "page": null,
-        "target": null
+        "page": "decay",
+        "seat": null
       },
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
-      "changes": [],
+      "changes": [
+        {
+          "key": "seat:e2e",
+          "before": null,
+          "after": {
+            "bindings": [],
+            "cc": [],
+            "focus": null,
+            "knob_page": "decay",
+            "knobs": []
+          }
+        }
+      ],
       "reverts": null,
       "error": null
     },
     {
-      "seq": 13,
-      "time": 1791339490.589491,
-      "user": "samuelt",
+      "seq": 14,
+      "time": 1791569333.727132,
+      "user": "e2e",
       "origin": "cli",
       "method": "controller.knob",
       "params": {
@@ -858,7 +879,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -871,9 +893,9 @@
       "error": null
     },
     {
-      "seq": 14,
-      "time": 1791339490.592668,
-      "user": "samuelt",
+      "seq": 15,
+      "time": 1791569333.727421,
+      "user": "e2e",
       "origin": "cli",
       "method": "channel.add",
       "params": {
@@ -882,7 +904,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -907,9 +930,9 @@
       "error": null
     },
     {
-      "seq": 15,
-      "time": 1791339490.595692,
-      "user": "samuelt",
+      "seq": 16,
+      "time": 1791569333.727681,
+      "user": "e2e",
       "origin": "cli",
       "method": "route.set",
       "params": {
@@ -920,7 +943,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -933,9 +957,9 @@
       "error": null
     },
     {
-      "seq": 16,
-      "time": 1791339490.598919,
-      "user": "samuelt",
+      "seq": 17,
+      "time": 1791569333.727999,
+      "user": "e2e",
       "origin": "cli",
       "method": "route.set",
       "params": {
@@ -946,7 +970,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -964,9 +989,9 @@
       "error": null
     },
     {
-      "seq": 17,
-      "time": 1791339490.601826,
-      "user": "samuelt",
+      "seq": 18,
+      "time": 1791569333.728316,
+      "user": "e2e",
       "origin": "cli",
       "method": "channel.move",
       "params": {
@@ -976,7 +1001,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -997,8 +1023,8 @@
       "error": null
     },
     {
-      "seq": 18,
-      "time": 1791339490.604804,
+      "seq": 19,
+      "time": 1791569333.728927,
       "user": "alice",
       "origin": "cli",
       "method": "param.set",
@@ -1009,7 +1035,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [
         {
@@ -1022,8 +1049,8 @@
       "error": null
     },
     {
-      "seq": 19,
-      "time": 1791339490.60757,
+      "seq": 20,
+      "time": 1791569333.729482,
       "user": "bob",
       "origin": "cli",
       "method": "param.set",
@@ -1034,7 +1061,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [
         {
@@ -1047,8 +1075,8 @@
       "error": null
     },
     {
-      "seq": 20,
-      "time": 1791339490.610649,
+      "seq": 21,
+      "time": 1791569333.729665,
       "user": "alice",
       "origin": "cli",
       "method": "history.undo",
@@ -1056,15 +1084,16 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [],
-      "reverts": 18,
+      "reverts": 19,
       "error": null
     },
     {
-      "seq": 21,
-      "time": 1791339490.613561,
+      "seq": 22,
+      "time": 1791569333.72987,
       "user": "bob",
       "origin": "cli",
       "method": "history.undo",
@@ -1072,7 +1101,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [
         {
@@ -1081,12 +1111,12 @@
           "after": 0.4
         }
       ],
-      "reverts": 19,
+      "reverts": 20,
       "error": null
     },
     {
-      "seq": 22,
-      "time": 1791339490.616384,
+      "seq": 23,
+      "time": 1791569333.730087,
       "user": "bob",
       "origin": "cli",
       "method": "history.redo",
@@ -1094,7 +1124,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [
         {
@@ -1103,13 +1134,13 @@
           "after": -0.4
         }
       ],
-      "reverts": 21,
+      "reverts": 22,
       "error": null
     },
     {
-      "seq": 23,
-      "time": 1791339490.619275,
-      "user": "samuelt",
+      "seq": 24,
+      "time": 1791569333.730383,
+      "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
       "params": {
@@ -1122,7 +1153,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1138,9 +1170,9 @@
       "error": null
     },
     {
-      "seq": 24,
-      "time": 1791339490.622255,
-      "user": "samuelt",
+      "seq": 25,
+      "time": 1791569333.730937,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
       "params": {
@@ -1471,7 +1503,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1506,9 +1539,9 @@
       "error": null
     },
     {
-      "seq": 25,
-      "time": 1791339490.625697,
-      "user": "samuelt",
+      "seq": 26,
+      "time": 1791569333.731488,
+      "user": "e2e",
       "origin": "cli",
       "method": "instrument.remove",
       "params": {
@@ -1518,7 +1551,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1561,16 +1595,17 @@
       "error": null
     },
     {
-      "seq": 26,
-      "time": 1791339490.62891,
-      "user": "samuelt",
+      "seq": 27,
+      "time": 1791569333.731892,
+      "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
       "params": {},
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1609,13 +1644,13 @@
           }
         }
       ],
-      "reverts": 25,
+      "reverts": 26,
       "error": null
     },
     {
-      "seq": 27,
-      "time": 1791339490.631705,
-      "user": "samuelt",
+      "seq": 28,
+      "time": 1791569333.732094,
+      "user": "e2e",
       "origin": "cli",
       "method": "param.set",
       "params": {
@@ -1625,16 +1660,17 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [],
       "reverts": null,
       "error": "unknown parameter 'nope.param' (see param.list)"
     },
     {
-      "seq": 28,
-      "time": 1791339490.634353,
-      "user": "samuelt",
+      "seq": 29,
+      "time": 1791569333.732288,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.clear",
       "params": {
@@ -1644,7 +1680,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1662,16 +1699,17 @@
       "error": null
     },
     {
-      "seq": 29,
-      "time": 1791339490.637087,
-      "user": "samuelt",
+      "seq": 30,
+      "time": 1791569333.732485,
+      "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
       "params": {},
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1685,9 +1723,9 @@
           "after": 1
         }
       ],
-      "reverts": 28,
+      "reverts": 29,
       "error": null
     }
   ],
-  "digest": "dfa7a969a130ef38"
+  "digest": "eeb90b3bed0ea6b1"
 }

@@ -34,20 +34,30 @@ pub async fn serve(core: Shared, listener: TcpListener, token: Option<String>, i
         };
         let id = ids.fetch_add(1, Ordering::Relaxed);
         tracing::debug!("connection {id} from {addr}");
-        tokio::spawn(handle_connection(core.clone(), daemon.clone(), stream, id, token.clone()));
+        let local = addr.ip().to_canonical().is_loopback();
+        tokio::spawn(handle_connection(core.clone(), daemon.clone(), stream, id, local, token.clone()));
     }
 }
 
 struct Conn {
     id: u64,
     name: String,
+    /// Connected from the engine host itself.
+    local: bool,
     /// Owner of this connection's undo history (None: the host user).
     user: Option<String>,
     authed: bool,
     subscription: Option<JoinHandle<()>>,
 }
 
-async fn handle_connection(core: Shared, daemon: Arc<Daemon>, stream: TcpStream, id: u64, token: Option<String>) {
+async fn handle_connection(
+    core: Shared,
+    daemon: Arc<Daemon>,
+    stream: TcpStream,
+    id: u64,
+    local: bool,
+    token: Option<String>,
+) {
     let ws = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
         Err(e) => {
@@ -65,7 +75,8 @@ async fn handle_connection(core: Shared, daemon: Arc<Daemon>, stream: TcpStream,
         }
     });
 
-    let mut conn = Conn { id, name: format!("client-{id}"), user: None, authed: token.is_none(), subscription: None };
+    let mut conn =
+        Conn { id, name: format!("client-{id}"), local, user: None, authed: token.is_none(), subscription: None };
     while let Some(msg) = source.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -86,8 +97,8 @@ async fn handle_connection(core: Shared, daemon: Arc<Daemon>, stream: TcpStream,
     if let Some(h) = conn.subscription.take() {
         h.abort();
     }
-    // Notes this connection was holding end with it.
-    core.lock().unwrap().release_held_by(&format!("conn:{}", conn.id));
+    // Notes this connection was holding end with it, and it leaves its seat.
+    core.lock().unwrap().client_gone(&format!("conn:{}", conn.id));
     drop(tx);
     let _ = writer.await;
     tracing::debug!("connection {id} closed");
@@ -134,7 +145,7 @@ async fn handle_text(
     let shutdown = matches!(req, Request::DaemonShutdown(_));
 
     let result = match req {
-        Request::Hello(p) => hello(conn, token, p),
+        Request::Hello(p) => hello(core, conn, token, p),
         Request::EventsSubscribe(p) => Ok(subscribe(core, conn, tx, p)),
         Request::EventsUnsubscribe(_) => {
             if let Some(h) = conn.subscription.take() {
@@ -162,7 +173,7 @@ async fn handle_text(
     (reply(result), shutdown)
 }
 
-fn hello(conn: &mut Conn, token: Option<&str>, p: HelloParams) -> Result<Value, RpcError> {
+fn hello(core: &Shared, conn: &mut Conn, token: Option<&str>, p: HelloParams) -> Result<Value, RpcError> {
     if p.protocol_version != PROTOCOL_VERSION {
         return Err(RpcError::failed(format!(
             "protocol version mismatch: client {} vs daemon {PROTOCOL_VERSION}",
@@ -178,12 +189,24 @@ fn hello(conn: &mut Conn, token: Option<&str>, p: HelloParams) -> Result<Value, 
     if !p.client_name.trim().is_empty() {
         conn.name = p.client_name.trim().to_string();
     }
-    conn.user = p.user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    conn.user = p.user.clone().map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    let client_id = format!("{}#{}", conn.name, conn.id);
+    let (seat, choose_seat) = core.lock().unwrap().client_hello(
+        &format!("conn:{}", conn.id),
+        &client_id,
+        p.user,
+        p.seat,
+        p.auto_seat.unwrap_or(true),
+        conn.local,
+        &conn.name,
+    )?;
     Ok(serde_json::to_value(HelloResult {
         protocol_version: PROTOCOL_VERSION,
         server_version: env!("CARGO_PKG_VERSION").into(),
-        client_id: format!("{}#{}", conn.name, conn.id),
+        client_id,
         role: Role::Engine,
+        seat,
+        choose_seat,
     })
     .unwrap())
 }

@@ -10,7 +10,7 @@
 use crate::dsp::{lerp_exp, semitones_to_ratio, soft_clip};
 use crate::instrument::{Hit, Instrument, MAX_BLOCK};
 use crate::params::{cont, toggle};
-use fours_protocol::{MAX_STEPS, NoteStep, OutputWidth, ParamInfo};
+use fours_protocol::{KnobPage, MAX_STEPS, NoteStep, OutputWidth, ParamInfo};
 
 pub const TUNE: usize = 0;
 pub const WAVEFORM: usize = 1;
@@ -24,6 +24,8 @@ pub const NUM_PARAMS: usize = 7;
 const VELOCITY_ON: f32 = 0.7;
 const VELOCITY_ACCENT: f32 = 1.0;
 const GLIDE_SECS: f32 = 0.06;
+/// Most keys held at once; pressing more forgets the oldest.
+const MAX_KEYS: usize = 16;
 
 fn midi_hz(note: f32) -> f32 {
     440.0 * ((note - 69.0) / 12.0).exp2()
@@ -72,6 +74,9 @@ pub struct Tb303 {
     /// The current note is held by a keyboard (until its note-off), so the
     /// sequencer's rests and stop do not cut it; a sequenced note takes over.
     held_by_key: bool,
+    /// Held keys, oldest first; the last one sounds (last-note priority).
+    keys: [u8; MAX_KEYS],
+    num_keys: usize,
     buf: Vec<f32>,
 }
 
@@ -103,6 +108,8 @@ impl Tb303 {
             ladder: [0.0; 4],
             slide_pending: false,
             held_by_key: false,
+            keys: [0; MAX_KEYS],
+            num_keys: 0,
             buf: vec![0.0; MAX_BLOCK * 2],
         }
     }
@@ -134,6 +141,24 @@ impl Tb303 {
     fn release(&mut self) {
         self.gate = false;
         self.gate_left = None;
+    }
+
+    /// Forget a held key. Returns true if it was the sounding (last) one.
+    fn remove_key(&mut self, note: u8) -> bool {
+        let Some(i) = self.keys[..self.num_keys].iter().position(|k| *k == note) else { return false };
+        let was_top = i + 1 == self.num_keys;
+        self.keys.copy_within(i + 1..self.num_keys, i);
+        self.num_keys -= 1;
+        was_top
+    }
+
+    pub fn knob_pages(id: &str) -> Vec<KnobPage> {
+        let params = ["cutoff", "resonance", "env_mod", "decay", "accent", "tune", "waveform"];
+        vec![KnobPage {
+            id: "main".into(),
+            label: "Main".into(),
+            params: params.iter().map(|p| format!("{id}.{p}")).collect(),
+        }]
     }
 }
 
@@ -181,22 +206,40 @@ impl Instrument for Tb303 {
         self.slide_pending = false;
     }
 
-    fn note_on(&mut self, note: u8, velocity: f32, gate_samples: Option<f64>) -> bool {
+    fn note_on(&mut self, note: u8, velocity: f32, gate_samples: Option<f64>) -> Option<Hit> {
         // Overlapping keyboard notes glide, like playing legato on a 303.
-        let glide = self.gate && gate_samples.is_none();
-        self.held_by_key = gate_samples.is_none();
+        let held = gate_samples.is_none();
+        let glide = self.gate && held;
+        if held {
+            self.remove_key(note);
+            if self.num_keys == MAX_KEYS {
+                self.remove_key(self.keys[0]);
+            }
+            self.keys[self.num_keys] = note;
+            self.num_keys += 1;
+        }
+        self.held_by_key = held;
         self.start(note, velocity >= 0.95, glide, gate_samples);
-        true
+        Some(Hit { voice: None, note: Some(note), velocity })
     }
 
-    fn note_off(&mut self) {
-        // A sequenced note that took over a held key is not the key's to end.
-        if !self.held_by_key {
+    fn note_off(&mut self, note: u8) {
+        let was_top = self.remove_key(note);
+        // A sequenced note that took over a held key is not the key's to end,
+        // and releasing a key under the sounding one changes nothing.
+        if !self.held_by_key || !was_top {
             return;
         }
-        self.held_by_key = false;
-        self.release();
+        match self.num_keys {
+            // Back to the key still held below, gliding (last-note priority).
+            n if n > 0 => self.start(self.keys[n - 1], self.accent, true, None),
+            _ => {
+                self.held_by_key = false;
+                self.release();
+            }
+        }
     }
+
 
     fn render(&mut self, frames: usize) {
         let frames = frames.min(MAX_BLOCK);
@@ -275,5 +318,27 @@ impl Instrument for Tb303 {
 
     fn output(&self, _output: usize) -> &[f32] {
         &self.buf
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Last-note priority: releasing the sounding key glides back to the key
+    /// still held; releasing a key under it changes nothing.
+    #[test]
+    fn held_keys_fall_back_to_the_last_one_still_held() {
+        let mut b = Tb303::new(48000.0);
+        b.note_on(36, 0.7, None);
+        b.note_on(43, 0.7, None);
+        b.note_on(48, 0.7, None);
+        assert_eq!(b.target, 48.0);
+        b.note_off(43);
+        assert_eq!((b.target, b.gate), (48.0, true), "a key under the sounding one");
+        b.note_off(48);
+        assert_eq!((b.target, b.gate), (36.0, true), "back to the key still held");
+        b.note_off(36);
+        assert!(!b.gate, "last key up releases");
     }
 }

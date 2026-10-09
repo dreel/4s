@@ -83,10 +83,18 @@ pub struct HelloParams {
     /// Required when the daemon was started with `--token`.
     #[serde(default)]
     pub token: Option<String>,
-    /// Who is editing: owns this connection's undo history. Defaults to the
-    /// daemon host's user, so local clients share one history.
+    /// The person using this client: owns this connection's undo history
+    /// (default: the daemon host's user, so local clients share one). A
+    /// seat with this name (any case) is joined automatically if it is the
+    /// only match; in a project without seats, one is created for them.
     #[serde(default)]
     pub user: Option<String>,
+    /// Join this existing seat instead of matching by `user`.
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// Match a seat by `user` (default true). False stays unseated.
+    #[serde(default)]
+    pub auto_seat: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -95,6 +103,12 @@ pub struct HelloResult {
     pub server_version: String,
     pub client_id: String,
     pub role: Role,
+    /// The seat this client joined, if any.
+    pub seat: Option<String>,
+    /// No seat matched unambiguously: ask the user to join a seat
+    /// (`seat.claim`), create one (`seat.create`), or ignore
+    /// (`seat.create` with `saved: false`).
+    pub choose_seat: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -149,6 +163,8 @@ pub struct InstrumentTypeInfo {
     pub outputs: Vec<OutputInfo>,
     /// Parameters of an instance with the default id.
     pub params: Vec<ParamInfo>,
+    /// Knob pages of an instance with the default id.
+    pub knob_pages: Vec<KnobPage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -387,14 +403,15 @@ pub struct PatternClearParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct TriggerParams {
-    /// Defaults to the first `tr808` when `voice` is given, else the first
-    /// `tb303`.
+    /// Defaults to the seat's focus (for `voice`, the first `tr808` unless
+    /// the focus is one).
     #[serde(default)]
     pub instrument: Option<String>,
     /// Drum voice to play (drum instruments).
     #[serde(default)]
     pub voice: Option<Voice>,
-    /// MIDI note to play for half a step (note instruments).
+    /// MIDI note to play for half a step (a drum machine plays the voice
+    /// on that GM note).
     #[serde(default)]
     pub note: Option<u8>,
     /// 0..1, defaults to 1.
@@ -404,10 +421,11 @@ pub struct TriggerParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct NoteParams {
-    /// Note instrument id; defaults to the first `tb303`.
+    /// Instrument id; defaults to the caller's seat focus (or the host
+    /// seat's, for a client without a seat).
     #[serde(default)]
     pub instrument: Option<String>,
-    /// MIDI note (12..108).
+    /// MIDI note (0..127; a drum machine plays the voice on that GM note).
     pub note: u8,
     /// 0..1, defaults to 1 (0.95 and up plays accented). Ignored by note-off.
     #[serde(default)]
@@ -437,11 +455,7 @@ pub struct KnobParams {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ControllerModeParams {
-    /// Drum instrument the controller drives.
-    #[serde(default)]
-    pub target: Option<String>,
-    #[serde(default)]
-    pub knob_mode: Option<KnobMode>,
+    /// Which 8-step page the grid shows (0-based).
     #[serde(default)]
     pub page: Option<u32>,
     #[serde(default)]
@@ -455,24 +469,162 @@ pub struct MidiPortsResult {
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub connections: Vec<MidiConnection>,
+    /// This machine's hardware entries (`midi-devices.json`).
+    pub devices: Vec<MidiDevice>,
+    /// Seat the engine host's devices use.
+    pub seat: String,
+    /// Seat pinned with `midi.set_seat`, if any.
+    pub pinned_seat: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct MidiConnectParams {
     /// Input port name (exact or case-insensitive substring).
     pub input: String,
-    /// Output port for feedback (LEDs). Defaults to the output matching the input.
+    /// Output port for feedback (LEDs). Defaults to the output matching the
+    /// input for a Livid Block.
     #[serde(default)]
     pub output: Option<String>,
-    pub kind: DeviceKind,
-    /// For `keyboard`: the instrument to play (default: the first `tb303`).
+    /// Logical device name. Default: the saved one, else made from the port
+    /// name.
     #[serde(default)]
-    pub instrument: Option<String>,
+    pub name: Option<String>,
+    /// Default: the saved one, else `livid_block` for ports named like a
+    /// Block, else `generic`.
+    #[serde(default)]
+    pub profile: Option<DeviceProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct MidiDisconnectParams {
     pub input: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct MidiRenameParams {
+    /// Port name or current logical name (exact or case-insensitive
+    /// substring of a port).
+    pub device: String,
+    /// New logical name.
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct MidiSetSeatParams {
+    /// Seat for this machine's devices; omit to unpin (they then follow
+    /// the local user).
+    #[serde(default)]
+    pub seat: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct MidiInputParams {
+    /// Logical device name the input comes from.
+    pub device: String,
+    /// Raw MIDI bytes of one message, e.g. `[144, 60, 100]`.
+    pub data: Vec<u8>,
+    /// Seat to apply; default: the caller's, else the host seat. A Livid
+    /// Block only edits the host seat (its LEDs show that one).
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// How to read the bytes; default: the connected device's profile, else
+    /// generic. Input from a device on the engine host carries it, so the
+    /// journal replays it the same way where that device is not connected.
+    #[serde(default)]
+    pub profile: Option<DeviceProfile>,
+}
+
+// ---- seats ---------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatListResult {
+    pub seats: Vec<Seat>,
+    /// The caller's seat.
+    pub you: Option<String>,
+    /// Seat the engine host's devices use.
+    pub host: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatNameParams {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatCreateParams {
+    /// Default: the caller's user name (numbered if taken).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Save with the project (default true). False = "ignore": a seat for
+    /// this session only.
+    #[serde(default)]
+    pub saved: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatFocusParams {
+    /// Default: the caller's seat.
+    #[serde(default)]
+    pub seat: Option<String>,
+    pub instrument: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatPageParams {
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// Knob page id of the focused instrument, e.g. `decay`.
+    pub page: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatBindParams {
+    #[serde(default)]
+    pub seat: Option<String>,
+    pub binding: NoteBinding,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatUnbindParams {
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// 0-based index into the seat's bindings.
+    pub index: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatMapCcParams {
+    #[serde(default)]
+    pub seat: Option<String>,
+    pub map: CcMap,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatUnmapCcParams {
+    #[serde(default)]
+    pub seat: Option<String>,
+    pub device: String,
+    pub cc: u8,
+    /// Only the map on this channel; maps on any channel if omitted.
+    #[serde(default)]
+    pub channel: Option<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatLearnCcParams {
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// Parameter the next CC moved maps to; omit to cancel learning.
+    #[serde(default)]
+    pub param: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatFollowKnobsParams {
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// Replaces the device's entry; empty `ccs` removes it.
+    pub follow: KnobFollow,
 }
 
 // ---- project -------------------------------------------------------------
@@ -615,21 +767,57 @@ api! {
     /// Release a note this caller is holding (like a key up).
     VoiceNoteOff = "voice.note_off" (NoteParams) -> Empty;
 
-    /// Controller state (mode, page, LEDs, device).
+    /// Controller state (focus, knob page, grid page, LEDs, device).
     ControllerGet = "controller.get" (Empty) -> ControllerState;
     /// Press/release a grid pad, as if on the Livid Block.
     ControllerPress = "controller.press" (PadParams) -> ControllerState;
-    /// Turn a knob, as if on the Livid Block.
+    /// Set a knob's parameter to a position, as if on the Livid Block (no
+    /// pickup).
     ControllerKnob = "controller.knob" (KnobParams) -> ControllerState;
-    /// Change target instrument, knob mode, page, or follow.
+    /// Change the grid page or follow.
     ControllerSetMode = "controller.set_mode" (ControllerModeParams) -> ControllerState;
 
-    /// List MIDI ports and active connections.
+    /// List MIDI ports, connections, and this machine's device names.
     MidiPorts = "midi.ports" (Empty) -> MidiPortsResult;
-    /// Connect a MIDI input (and optional output) as a device.
+    /// Connect a MIDI input (and optional output) as a named device.
     MidiConnect = "midi.connect" (MidiConnectParams) -> MidiPortsResult;
     /// Disconnect a MIDI input.
     MidiDisconnect = "midi.disconnect" (MidiDisconnectParams) -> MidiPortsResult;
+    /// Rename a device (the logical name seats bind to).
+    MidiRename = "midi.rename" (MidiRenameParams) -> MidiPortsResult;
+    /// Pin the seat this machine's devices use, or unpin it.
+    MidiSetSeat = "midi.set_seat" (MidiSetSeatParams) -> MidiPortsResult;
+    /// Feed one raw MIDI message from a logical device (as a bridge does).
+    MidiInput = "midi.input" (MidiInputParams) -> Empty;
+
+    /// Seats, who sits where, and the host seat.
+    SeatList = "seat.list" (Empty) -> SeatListResult;
+    /// Join an existing seat.
+    SeatClaim = "seat.claim" (SeatNameParams) -> SeatListResult;
+    /// Create a seat and join it.
+    SeatCreate = "seat.create" (SeatCreateParams) -> SeatListResult;
+    /// Leave your seat.
+    SeatLeave = "seat.leave" (Empty) -> SeatListResult;
+    /// Delete a seat; its occupants become unseated. In a project with no
+    /// other saved seats, the host user's seat is recreated at once.
+    SeatRemove = "seat.remove" (SeatNameParams) -> SeatListResult;
+    /// Focus an instrument: `focus` bindings, the Block, and following
+    /// knobs play it.
+    SeatFocus = "seat.focus" (SeatFocusParams) -> Seat;
+    /// Choose the knob page of the focused instrument.
+    SeatPage = "seat.page" (SeatPageParams) -> Seat;
+    /// Add a note binding.
+    SeatBind = "seat.bind" (SeatBindParams) -> Seat;
+    /// Remove a note binding.
+    SeatUnbind = "seat.unbind" (SeatUnbindParams) -> Seat;
+    /// Map a CC to a parameter.
+    SeatMapCc = "seat.map_cc" (SeatMapCcParams) -> Seat;
+    /// Remove CC maps.
+    SeatUnmapCc = "seat.unmap_cc" (SeatUnmapCcParams) -> Seat;
+    /// Map the next CC moved on this seat's devices to a parameter.
+    SeatLearnCc = "seat.learn_cc" (SeatLearnCcParams) -> Seat;
+    /// Make a device's CCs control the focused instrument's knob page.
+    SeatFollowKnobs = "seat.follow_knobs" (SeatFollowKnobsParams) -> Seat;
 
     /// Reset to a fresh default project.
     ProjectNew = "project.new" (Empty) -> ProjectInfo;

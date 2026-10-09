@@ -11,6 +11,8 @@ TMP=$(mktemp -d)
 # The daemon is found through the runtime file in this data dir; no URL needed.
 export FOURS_DATA_DIR="$TMP/data"
 unset FOURS_URL
+# The daemon's host seat and the CLI's seat are matched by this user name.
+export FOURS_USER=e2e
 trap '"$BIN/4s" daemon stop --force >/dev/null 2>&1 || true; rm -rf "$TMP"' EXIT
 s() { "$BIN/4s" "$@"; }
 pass=0
@@ -58,8 +60,8 @@ check "voice by alias" "closed_hat  " s pattern show ch
 check "voice by 1-based track number" "cowbell     " s pattern show 8
 check "virtual pad" "#" s controller press 2 1
 check "pad edited pattern" "snare       x--- x---" s pattern show snare
-check "controller targets the 808" "target: drums  knobs: Volume" s controller
-check "knob mode" "knobs: Decay" s controller mode --knobs decay
+check "controller follows the seat's focus: the 808" "focus: drums  knobs: volume" s controller
+check "knob page" "knobs: decay" s knobs page decay
 check "knob" "page: 1" s controller knob 1 100%
 check "knob set param" "drums.kick.decay = 1" s get drums.kick.decay
 # MIDI hotplug: a virtual device that appears after the daemon started must be
@@ -72,24 +74,34 @@ for _ in $(seq 50); do grep -q ready "$TMP/vdev.out" && break; sleep 0.1; done
 # CoreMIDI announces new devices asynchronously; give it a moment.
 for _ in $(seq 30); do s midi ports | grep -q "$VDEV" && break; sleep 0.1; done
 check "hotplugged device listed" "$VDEV" s midi ports
-check "connect virtual block" "$VDEV (LividBlock)" s midi connect "$VDEV" --kind block
+check "connect virtual block" "$VDEV as pad (LividBlock)" s midi connect "$VDEV" --name pad --profile block
 s pattern clear kick >/dev/null
 echo "pad 0 2" >&7
 echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
 sleep 0.5
 check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
-check "device input is journaled as its RPC" "midi:$VDEV  controller.press {\"col\":2,\"pressed\":true,\"row\":0} -> step:drums.kick.2" s journal
+check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","profile":"livid_block","seat":"e2e"} -> step:drums.kick.2' s journal
 check "undo takes back a device pad press (the host user's)" "kick        ---- ---- ---- ----" bash -c "$BIN/4s undo >/dev/null && $BIN/4s pattern show kick"
 check "redo" "kick        --x- ---- ---- ----" bash -c "$BIN/4s redo >/dev/null && $BIN/4s pattern show kick"
-# Knob 2 (CC 2) in decay mode -> snare decay. 127 -> 1.0, which the default
-# (0.4) cannot match.
+# Input that can do nothing is not journaled, from a device or over RPC:
+# clock, active sensing, pitch bend, a pad release, an unmapped CC.
+last_seq() { echo "seq=$("$BIN/4s" --json journal --limit 1 | python3 -c "import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])")"; }
+BEFORE=$(last_seq)
+for m in "F8" "FE" "E0 00 40" "80 10 00"; do echo "raw $m" >&7; done
+s midi send knobs F8 >/dev/null; s midi send knobs E0 00 40 >/dev/null; s midi send knobs B0 63 40 >/dev/null
+sleep 0.5
+check "input that can do nothing is not journaled" "$BEFORE" last_seq
+# Knob 2 (CC 2) on the decay page -> snare decay. Knobs pick up: one far
+# from the current value does nothing until it passes it.
+echo "knob 1 0" >&7; sleep 0.5
+check "a knob far from the value does not jump it (pickup)" "drums.snare.decay = 0.4" s get drums.snare.decay
 echo "knob 1 127" >&7; sleep 0.5
-check "knob turn from device sets its parameter" "drums.snare.decay = 1" s get drums.snare.decay
-s controller mode --knobs volume >/dev/null
-echo "knob 2 0" >&7; sleep 0.5
-check "volume knob moves the voice level in the 808" "drums.clap.level = 0" s get drums.clap.level
+check "passing the value picks it up" "drums.snare.decay = 1" s get drums.snare.decay
+s knobs page volume >/dev/null
+echo "knob 2 127" >&7; echo "knob 2 0" >&7; sleep 0.5
+check "volume page moves the voice level in the 808" "drums.clap.level = 0" s get drums.clap.level
 s set drums.clap.level 0.8 >/dev/null
-s controller mode --knobs decay >/dev/null
+s knobs page decay >/dev/null
 check "device receives LED updates (row 1, step 3 = note 16: notes run down columns)" "recv 90 10 7F" cat "$TMP/vdev.out"
 exec 7>&-; sleep 3
 check "unplugged device pruned" "(none)" s midi ports
@@ -132,20 +144,20 @@ s note bass 2 C3 >/dev/null
 wait $WATCH
 s note bass 2 "C2!" >/dev/null
 check "note events carry the instrument" '"type":"notes_changed","instrument":"bass"' cat "$TMP/notes.json"
-# A MIDI keyboard plays the 303: key down starts a held note, key up releases it.
+# A MIDI keyboard without bindings plays the seat's focus: key down starts a
+# held note, key up releases it.
 KDEV="4S E2E Keys $$"
 mkfifo "$TMP/kdev.in"
 target/debug/examples/virtual_block "$KDEV" < "$TMP/kdev.in" > "$TMP/kdev.out" 2>&1 &
 exec 8> "$TMP/kdev.in"
 for _ in $(seq 50); do grep -q ready "$TMP/kdev.out" && break; sleep 0.1; done
 for _ in $(seq 30); do s midi ports | grep -q "$KDEV" && break; sleep 0.1; done
-check "instrument only applies to keyboards" "only applies to --kind keyboard" s midi connect "$KDEV" --kind drums --instrument bass
-check "a keyboard plays a tb303 only" "is a tr808, not a tb303" s midi connect "$KDEV" --kind keyboard --instrument drums
-s instrument add tb303 --id keys --no-channel >/dev/null
-s midi connect "$KDEV" --kind keyboard --instrument keys >/dev/null
-check "removing a keyboard's instrument clears it" "(Keyboard) out: -" bash -c "$BIN/4s instrument rm keys >/dev/null && $BIN/4s midi ports | grep '$KDEV' | grep -v plays"
-s midi disconnect "$KDEV" >/dev/null
-check "connect a keyboard to the bass" "$KDEV (Keyboard) out: - plays: bass" s midi connect "$KDEV" --kind keyboard --instrument bass
+s instrument add tb303 --id lead2 --no-channel >/dev/null
+s focus lead2 >/dev/null
+check "a seat focused on a removed instrument falls back to the first" "focus: drums " bash -c "$BIN/4s instrument rm lead2 >/dev/null && $BIN/4s controller"
+check "focus the bass" "focus: bass" s focus bass
+check "connect a keyboard as a named device" "$KDEV as keys (Generic) out: -" s midi connect "$KDEV" --name keys
+check "the name is saved for this machine" '"name": "keys"' cat "$FOURS_DATA_DIR/midi-devices.json"
 "$BIN/4s" watch --type trigger --count 1 --json > "$TMP/key.json" &
 WATCH=$!; sleep 0.5
 echo "raw 90 24 64" >&8   # note on, C2 (36)
@@ -170,14 +182,57 @@ import json
 levels = [c['left'] for l in open('$TMP/key-meters2.json') if l.strip()
           for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
 print('released' if levels and max(levels) > 0.01 and levels[-1] < 1e-4 else f'levels {levels}')"
-# The same device as GM drums plays the controller target's voices.
-check "connect as GM drums" "$KDEV (GenericDrums)" s midi connect "$KDEV" --kind drums
-"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/gm.json" &
+# Bindings (RFC 0007): channel 10 plays the drums' GM voices, and the upper
+# keys play the bass an octave down. Once a device has bindings, notes no
+# binding matches do nothing.
+check "reconnecting keeps the saved name" "$KDEV as keys (Generic)" s midi connect "$KDEV"
+# Last-note priority on the 303: releasing the sounding key falls back to
+# the key still held (the note keeps sounding); releasing that one ends it.
+"$BIN/4s" watch --type meters --json > "$TMP/legato1.json" &
+WATCH=$!; sleep 0.2
+echo "raw 90 24 64" >&8; sleep 0.2; echo "raw 90 2B 64" >&8; sleep 0.2
+echo "raw 80 2B 00" >&8; sleep 0.6
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+"$BIN/4s" watch --type meters --json > "$TMP/legato2.json" &
+WATCH=$!; sleep 0.2
+echo "raw 80 24 00" >&8; sleep 0.8
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "releasing the top key keeps the lower one sounding" "still sounding" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/legato1.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('still sounding' if levels and levels[-1] > 0.01 else f'levels {levels}')"
+check "releasing the last key ends the note" "released" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/legato2.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('released' if levels and levels[-1] < 1e-4 else f'levels {levels}')"
+check "bind channel 10 to the drums" "bind 1: keys ch 10 all notes -> drums" s bind keys --channel 10 --to drums
+check "bind a split with transpose" "bind 2: keys any ch C3..C8 -12 st -> bass" s bind keys --notes C3..C8 --transpose -12 --to bass
+"$BIN/4s" watch --type trigger --count 2 --json > "$TMP/gm.json" &
 WATCH=$!; sleep 0.5
-echo "raw 99 26 64" >&8   # GM 38 = snare, on channel 10
+echo "raw 99 26 64" >&8   # GM 38 = snare, on channel 10 (below the split)
+echo "raw 80 26 00" >&8
+echo "raw 90 18 64" >&8   # C1: no binding matches
+echo "raw 80 18 00" >&8
+echo "raw 90 3C 64" >&8   # C4 -> C3 on the bass
+echo "raw 80 3C 00" >&8
 wait $WATCH
-check "GM drum note plays the target's voice" '"instrument":"drums","voice":"snare"' cat "$TMP/gm.json"
-s midi disconnect "$KDEV" >/dev/null
+check "channel 10 plays the drum voice" '"instrument":"drums","voice":"snare"' cat "$TMP/gm.json"
+check "the split plays the bass transposed" '"instrument":"bass","voice":null,"note":48' cat "$TMP/gm.json"
+check "nothing else played" "2 triggers" bash -c "echo \$(wc -l < '$TMP/gm.json' | tr -d ' ') triggers"
+# Bindings name the logical device: renamed, the port has no bindings in
+# this seat, so it plays the focus (the bass).
+check "rename a device" "$KDEV as keyz (Generic)" s midi rename keys keyz
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/renamed.json" &
+WATCH=$!; sleep 0.5
+echo "raw 99 26 64" >&8; echo "raw 89 26 00" >&8
+wait $WATCH
+check "a renamed device no longer uses the old name's bindings" '"instrument":"bass","voice":null,"note":38' cat "$TMP/renamed.json"
+s midi rename keyz keys >/dev/null
+check "unbind removes one binding" "bind 1: keys ch 10 all notes -> drums" s unbind 2
+s unbind 1 >/dev/null
+s midi disconnect keys >/dev/null
 exec 8>&-
 BASS_RMS=$(s --json render --bars 1 --out renders/b1.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
 s set mixer.2.mute on >/dev/null
@@ -347,8 +402,9 @@ WATCH=$!; sleep 0.5
 check "audition a note" "ok" s trigger --note C2
 wait $WATCH
 check "the audition plays the bass" '"instrument":"bass","voice":null,"note":36' cat "$TMP/audition.json"
-check "controller can target the second 808" "target: drums2" s controller mode --target drums2
-check "removing the target retargets the controller" "target: drums " bash -c "$BIN/4s instrument rm drums2 >/dev/null && $BIN/4s controller"
+check "focus the second 808" "focus: drums2" bash -c "$BIN/4s focus drums2 >/dev/null && $BIN/4s controller"
+check "removing the focus refocuses the first instrument" "focus: drums " bash -c "$BIN/4s instrument rm drums2 >/dev/null && $BIN/4s controller"
+s focus bass >/dev/null
 check "removing an instrument removes its empty channel" "ch 1  Drums        <- drums" s instrument rm bass
 check "drums render unaffected after removing the bass" "triggers: 9 (drums 9)" s render --bars 1 --out renders/after-rm.wav
 check "its params are gone" "bass params: 0" bash -c "echo bass params: \$($BIN/4s params bass | wc -l | tr -d ' ')"
@@ -359,10 +415,10 @@ s pattern step clap 2 on >/dev/null
 wait $WATCH
 check "step events carry the instrument" '"instrument":"drums"' cat "$TMP/events.json"
 check "no 808 left: calls without instrument explain" "no tr808 instrument" bash -c "$BIN/4s instrument rm drums >/dev/null && $BIN/4s pattern show kick"
-check "no 303 left: note calls without instrument explain" "no tb303 instrument" s trigger --note C2
-check "controller has no target" "target: (none)" s controller
-check "no target: grid is dark" "dark" bash -c "$BIN/4s controller | grep -q '#' && echo lit || echo dark"
-check "adding an 808 makes it the target" "target: drums " bash -c "$BIN/4s instrument add tr808 >/dev/null && $BIN/4s controller"
+check "no instruments left: note calls explain" "no instruments" s trigger --note C2
+check "controller has no focus" "focus: (none)" s controller
+check "no focus: grid is dark" "dark" bash -c "$BIN/4s controller | grep -q '#' && echo lit || echo dark"
+check "an added 808 is the focus" "focus: drums " bash -c "$BIN/4s instrument add tr808 >/dev/null && $BIN/4s controller"
 s pattern set kick "X---x---X---x---" >/dev/null
 s pattern set snare "----x-------x---" >/dev/null
 s pattern step clap 13 on >/dev/null
@@ -378,6 +434,59 @@ rm -rf "$FOURS_DATA_DIR/projects/old.4s"
 s instrument add tb303 >/dev/null
 s notes bass "C2 - G1! C3~" >/dev/null
 s set bass.cutoff 0.25 >/dev/null
+# Seats (RFC 0007): each performer has a focus and bindings; the CLI joins
+# the seat matching its user, and the host's devices play in the host seat.
+check "the CLI joins the seat matching its user" "you: e2e" s seat
+check "it is this engine's devices' seat" "e2e: cli#" s seat
+check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 3, "user": "bob"}'
+check "and stays unseated" "you: (no seat)" s --user bob seat
+check "seat edits need a seat" "you have no seat" s --user bob focus drums
+check "create a seat for bob" "you: bob" s --user bob --new-seat seat
+check "bob focuses the drums" "focus: drums" s --seat bob focus drums
+check "e2e focuses the bass" "focus: bass" s focus bass
+"$BIN/4s" watch --type trigger --count 2 --json > "$TMP/seats.json" &
+WATCH=$!; sleep 0.5
+s --seat bob midi send pads 90 24 64 >/dev/null   # C2 in bob's seat: the 808's kick
+s midi send pads 90 24 64 >/dev/null              # C2 in e2e's seat: the bass
+wait $WATCH
+check "bob's device plays bob's focus" '"instrument":"drums","voice":"kick"' cat "$TMP/seats.json"
+check "the same device name in another seat plays that seat's focus" '"instrument":"bass","voice":null,"note":36' cat "$TMP/seats.json"
+check "ignore: a seat for this session only" "carol: cli#" bash -c "$BIN/4s --user carol seat create --ignore | grep carol"
+check "an empty session-only seat goes away" "no carol" bash -c "$BIN/4s seat | grep -q carol && echo carol || echo no carol"
+check "pin this machine's devices to bob's seat" "devices play in seat: bob (pinned)" s midi seat bob
+check "the Block follows bob's focus" "focus: drums" s controller
+check "unpin" "devices play in seat: e2e" s midi seat
+check "midi.input rejects data bytes of 0x80 and up" "data bytes (0..0x7F)" s midi send knobs B0 C8 40
+# CC maps: a device's CC sets a parameter over its range, picking up.
+check "map a CC" "cc: knobs any ch cc 21 -> bass.cutoff" s cc map knobs 21 bass.cutoff
+s midi send knobs B0 15 7F >/dev/null
+check "a CC far from the value does not jump it" "bass.cutoff = 0.25" s get bass.cutoff
+s midi send knobs B0 15 00 >/dev/null; s midi send knobs B0 15 7F >/dev/null
+check "passing the value takes over" "bass.cutoff = 1" s get bass.cutoff
+s cc unmap knobs 21 >/dev/null
+s midi send knobs B0 15 00 >/dev/null
+check "an unmapped CC does nothing" "bass.cutoff = 1" s get bass.cutoff
+check "learn a CC" "learning a CC for bass.resonance" s cc learn bass.resonance
+s midi send knobs B2 16 40 >/dev/null   # CC 22 on channel 3
+check "the next CC moved is mapped, on its channel" "cc: knobs ch 3 cc 22 -> bass.resonance" s seat
+s midi send knobs B0 16 7F >/dev/null
+check "the same CC on another channel is not mapped" "bass.resonance = 0.5" s get bass.resonance
+s cc unmap knobs 22 >/dev/null
+# Following knobs control the focused instrument's knob page.
+check "knobs follow the focus" "knobs: knobs cc 1 2 follow focus" s knobs follow knobs 1 2
+s midi send knobs B0 02 00 >/dev/null; s midi send knobs B0 02 7F >/dev/null
+check "knob 2 on the bass's main page is resonance" "bass.resonance = 1" s get bass.resonance
+s focus drums >/dev/null; s knobs page decay >/dev/null
+s midi send knobs B0 02 7F >/dev/null; s midi send knobs B0 02 00 >/dev/null
+check "after a focus change the same knob drives the new focus" "drums.snare.decay = 0" s get drums.snare.decay
+s set drums.snare.decay 0.4 >/dev/null; s focus bass >/dev/null
+check "stop following" "focus: bass" s knobs follow knobs
+s set bass.cutoff 0.25 >/dev/null; s set bass.resonance 0.5 >/dev/null
+s bind pads --to drums >/dev/null
+check "undo takes back a seat edit" "no pads binding" bash -c "$BIN/4s undo >/dev/null; $BIN/4s seat | grep -q 'bind 1: pads' && echo still bound || echo no pads binding"
+check "and redo brings it back" "bind 1: pads any ch all notes -> drums" bash -c "$BIN/4s redo >/dev/null; $BIN/4s seat"
+s unbind 1 >/dev/null
+s --seat bob bind keys --notes C1..B2 --to bass >/dev/null
 check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e
 check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project reveal --no-open
@@ -410,11 +519,13 @@ FOURS_DATA_DIR=$B_DIR s daemon stop >/dev/null
 check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
 check "new is the default graph" "ch 1  Drums        vol 100%  pan C          <- drums" s mixer
 check "a new project starts a fresh history" "undo: (empty)" s history
-check "undoing the only 808's removal gives the Block its target back" "target: drums" bash -c "$BIN/4s instrument rm drums >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s controller"
+check "undoing the only 808's removal makes it the focus again" "focus: drums" bash -c "$BIN/4s instrument rm drums >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s controller"
 check "load restores" "kick        X--- x--- X--- x---" bash -c "$BIN/4s project load e2e >/dev/null && $BIN/4s pattern show kick"
 check "load restores the 303 and its channel" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
 check "load restores notes" "bass: C2 - G1! C3~" s notes bass
 check "load restores instrument params" "bass.cutoff = 0.25" s get bass.cutoff
+check "load restores seats and their bindings" "bind 1: keys any ch C1..B2 -> bass" bash -c "$BIN/4s seat | grep -A3 '^bob'"
+check "and focus" "focus: bass" bash -c "$BIN/4s seat | grep -A1 '^e2e'"
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
 check "daemon logs" "listening on ws://" s daemon logs

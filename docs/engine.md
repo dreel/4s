@@ -103,7 +103,9 @@ resonant ladder lowpass (24 dB/oct, tanh stages), and a VCA.
   envelopes.
 - Played from a MIDI keyboard (or `voice.note_on`, or `4s key C2 --for 1`), a note
   holds until its key is released (a played note's velocity only selects
-  accent, at 0.95 and up, as on the 303);
+  accent, at 0.95 and up, as on the 303). Overlapping keys glide; releasing
+  the sounding key glides back to the last key still held (last-note
+  priority);
   while held, the sequencer's rest steps and stopping the transport do not
   cut it (a sequenced note on a later step takes over).
 - Output: one mono main.

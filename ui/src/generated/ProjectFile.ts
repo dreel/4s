@@ -3,6 +3,7 @@ import type { ChannelInfo } from "./ChannelInfo";
 import type { ProjectController } from "./ProjectController";
 import type { ProjectInstrument } from "./ProjectInstrument";
 import type { ProjectPattern } from "./ProjectPattern";
+import type { SeatConfig } from "./SeatConfig";
 
 export type ProjectFile = { format_version: number, 
 /**
@@ -27,4 +28,9 @@ params: { [key in string]: number },
  * (`{"kick": "x---x---x---x---"}`) or a note string (`"C2 C2! D#2~ -"`).
  * Instruments with an empty pattern are omitted.
  */
-patterns: { [key in string]: ProjectPattern }, controller: ProjectController, };
+patterns: { [key in string]: ProjectPattern }, controller: ProjectController, 
+/**
+ * Performer setups by seat name (RFC 0007): focus, knob page, note
+ * bindings, CC maps.
+ */
+seats: { [key in string]: SeatConfig }, };

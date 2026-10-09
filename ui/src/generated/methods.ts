@@ -24,7 +24,10 @@ import type { JournalGetResult } from "./JournalGetResult";
 import type { KnobParams } from "./KnobParams";
 import type { MidiConnectParams } from "./MidiConnectParams";
 import type { MidiDisconnectParams } from "./MidiDisconnectParams";
+import type { MidiInputParams } from "./MidiInputParams";
 import type { MidiPortsResult } from "./MidiPortsResult";
+import type { MidiRenameParams } from "./MidiRenameParams";
+import type { MidiSetSeatParams } from "./MidiSetSeatParams";
 import type { NoteParams } from "./NoteParams";
 import type { NoteSetParams } from "./NoteSetParams";
 import type { NotesGetParams } from "./NotesGetParams";
@@ -49,6 +52,18 @@ import type { Recording } from "./Recording";
 import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
 import type { RouteSetParams } from "./RouteSetParams";
+import type { Seat } from "./Seat";
+import type { SeatBindParams } from "./SeatBindParams";
+import type { SeatCreateParams } from "./SeatCreateParams";
+import type { SeatFocusParams } from "./SeatFocusParams";
+import type { SeatFollowKnobsParams } from "./SeatFollowKnobsParams";
+import type { SeatLearnCcParams } from "./SeatLearnCcParams";
+import type { SeatListResult } from "./SeatListResult";
+import type { SeatMapCcParams } from "./SeatMapCcParams";
+import type { SeatNameParams } from "./SeatNameParams";
+import type { SeatPageParams } from "./SeatPageParams";
+import type { SeatUnbindParams } from "./SeatUnbindParams";
+import type { SeatUnmapCcParams } from "./SeatUnmapCcParams";
 import type { SetStepParams } from "./SetStepParams";
 import type { Snapshot } from "./Snapshot";
 import type { StepResult } from "./StepResult";
@@ -101,6 +116,22 @@ export interface Methods {
   "midi.ports": { params: Empty; result: MidiPortsResult };
   "midi.connect": { params: MidiConnectParams; result: MidiPortsResult };
   "midi.disconnect": { params: MidiDisconnectParams; result: MidiPortsResult };
+  "midi.rename": { params: MidiRenameParams; result: MidiPortsResult };
+  "midi.set_seat": { params: MidiSetSeatParams; result: MidiPortsResult };
+  "midi.input": { params: MidiInputParams; result: Empty };
+  "seat.list": { params: Empty; result: SeatListResult };
+  "seat.claim": { params: SeatNameParams; result: SeatListResult };
+  "seat.create": { params: SeatCreateParams; result: SeatListResult };
+  "seat.leave": { params: Empty; result: SeatListResult };
+  "seat.remove": { params: SeatNameParams; result: SeatListResult };
+  "seat.focus": { params: SeatFocusParams; result: Seat };
+  "seat.page": { params: SeatPageParams; result: Seat };
+  "seat.bind": { params: SeatBindParams; result: Seat };
+  "seat.unbind": { params: SeatUnbindParams; result: Seat };
+  "seat.map_cc": { params: SeatMapCcParams; result: Seat };
+  "seat.unmap_cc": { params: SeatUnmapCcParams; result: Seat };
+  "seat.learn_cc": { params: SeatLearnCcParams; result: Seat };
+  "seat.follow_knobs": { params: SeatFollowKnobsParams; result: Seat };
   "project.new": { params: Empty; result: ProjectInfo };
   "project.save": { params: ProjectSaveParams; result: ProjectInfo };
   "project.load": { params: ProjectLoadParams; result: ProjectInfo };
@@ -156,6 +187,22 @@ export const METHODS: MethodName[] = [
   "midi.ports",
   "midi.connect",
   "midi.disconnect",
+  "midi.rename",
+  "midi.set_seat",
+  "midi.input",
+  "seat.list",
+  "seat.claim",
+  "seat.create",
+  "seat.leave",
+  "seat.remove",
+  "seat.focus",
+  "seat.page",
+  "seat.bind",
+  "seat.unbind",
+  "seat.map_cc",
+  "seat.unmap_cc",
+  "seat.learn_cc",
+  "seat.follow_knobs",
   "project.new",
   "project.save",
   "project.load",

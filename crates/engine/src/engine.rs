@@ -35,10 +35,9 @@ pub enum Command {
     SetDrumStep { slot: u8, track: u8, step: u8, level: u8 },
     SetDrumTrack { slot: u8, track: u8, steps: [u8; MAX_STEPS] },
     SetNotes { slot: u8, steps: [NoteStep; MAX_STEPS] },
-    Trigger { slot: u8, voice: u8, velocity: f32 },
     /// A note; with `gate` it releases after half a step at the current tempo.
     NoteOn { slot: u8, note: u8, velocity: f32, gate: bool },
-    NoteOff { slot: u8 },
+    NoteOff { slot: u8, note: u8 },
     Play,
     Stop,
 }
@@ -56,9 +55,8 @@ impl std::fmt::Debug for Command {
             }
             Command::SetDrumTrack { slot, track, .. } => write!(f, "SetDrumTrack({slot}, {track})"),
             Command::SetNotes { slot, .. } => write!(f, "SetNotes({slot})"),
-            Command::Trigger { slot, voice, .. } => write!(f, "Trigger({slot}, {voice})"),
             Command::NoteOn { slot, note, .. } => write!(f, "NoteOn({slot}, {note})"),
-            Command::NoteOff { slot } => write!(f, "NoteOff({slot})"),
+            Command::NoteOff { slot, note } => write!(f, "NoteOff({slot}, {note})"),
             Command::Play => write!(f, "Play"),
             Command::Stop => write!(f, "Stop"),
         }
@@ -268,26 +266,18 @@ impl Engine {
                     s.instrument.set_notes(&steps);
                 }
             }
-            Command::Trigger { slot, voice, velocity } => {
-                let time = self.time();
-                if let Some(Some(s)) = self.slots.get_mut(slot as usize)
-                    && s.instrument.trigger(voice as usize, velocity)
-                {
-                    emit(Feedback::Trigger { slot, voice: Some(voice), note: None, velocity, time, step: None });
-                }
-            }
             Command::NoteOn { slot, note, velocity, gate } => {
                 let time = self.time();
                 let gate = gate.then(|| self.sixteenth() * 0.5);
                 if let Some(Some(s)) = self.slots.get_mut(slot as usize)
-                    && s.instrument.note_on(note, velocity, gate)
+                    && let Some(h) = s.instrument.note_on(note, velocity, gate)
                 {
-                    emit(Feedback::Trigger { slot, voice: None, note: Some(note), velocity, time, step: None });
+                    emit(Feedback::Trigger { slot, voice: h.voice, note: h.note, velocity: h.velocity, time, step: None });
                 }
             }
-            Command::NoteOff { slot } => {
+            Command::NoteOff { slot, note } => {
                 if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
-                    s.instrument.note_off();
+                    s.instrument.note_off(note);
                 }
             }
             Command::Play => {
@@ -495,7 +485,7 @@ pub(crate) mod tests {
         for v in Voice::ALL {
             let mut e = drum_engine();
             let mut fb = vec![];
-            let _ = e.apply(Command::Trigger { slot: 0, voice: v.index() as u8, velocity: 1.0 }, &mut |f| fb.push(f));
+            let _ = e.apply(Command::NoteOn { slot: 0, note: v.gm_note(), velocity: 1.0, gate: false }, &mut |f| fb.push(f));
             let out = render_secs(&mut e, 0.2, &mut fb);
             let peak = out.iter().fold(0.0f32, |a, x| a.max(x.abs()));
             assert!(peak > 0.02, "{v:?} too quiet: {peak}");

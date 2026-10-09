@@ -3,8 +3,8 @@ import type { Voice } from "./Voice";
 
 export type TriggerParams = { 
 /**
- * Defaults to the first `tr808` when `voice` is given, else the first
- * `tb303`.
+ * Defaults to the seat's focus (for `voice`, the first `tr808` unless
+ * the focus is one).
  */
 instrument: string | null, 
 /**
@@ -12,7 +12,8 @@ instrument: string | null,
  */
 voice: Voice | null, 
 /**
- * MIDI note to play for half a step (note instruments).
+ * MIDI note to play for half a step (a drum machine plays the voice
+ * on that GM note).
  */
 note: number | null, 
 /**

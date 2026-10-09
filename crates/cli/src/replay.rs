@@ -5,7 +5,7 @@
 //! final digest) or a raw journal file from `<data-dir>/journal/*.jsonl`
 //! (`{"segment": {seq, time, base}}` lines followed by entries).
 
-use crate::client::Client;
+use crate::client::{Client, Seating};
 use anyhow::{Context, Result, anyhow, bail};
 use fours_protocol::*;
 use serde_json::Value;
@@ -16,7 +16,8 @@ use std::path::Path;
 /// disk or real MIDI ports and never change the undoable state. (A
 /// successful `project.load` starts a new segment and is not part of it, so
 /// one inside a segment is a failed load.)
-pub const NOT_REPLAYED: &[&str] = &["project.save", "project.load", "midi.connect", "midi.disconnect"];
+pub const NOT_REPLAYED: &[&str] =
+    &["project.save", "project.load", "midi.connect", "midi.disconnect", "midi.rename", "midi.set_seat"];
 
 /// The client name of the replay's own connection; its entries (the import,
 /// controller page fixes) are left out of the comparison.
@@ -83,12 +84,29 @@ fn short(changes: &[Change]) -> String {
     }
 }
 
+/// A connection for `e`'s user and origin, in the seat it was recorded in.
+/// A seat the client was put in at hello (auto-created for a user, so not
+/// journaled) is not there yet, and a recording from before seats names
+/// none: auto-seat as the CLI does (a user with no seat to match stays
+/// unseated).
+async fn connect_seated(o: &Options<'_>, e: &JournalEntry) -> Result<Client> {
+    let user = Some(e.user.clone());
+    if let Some(seat) = &e.context.seat {
+        let seating = Seating { user: user.clone(), seat: Some(seat.clone()), auto: false };
+        if let Ok(c) = Client::connect(o.url, o.token.clone(), &e.origin, &seating).await {
+            return Ok(c);
+        }
+    }
+    let seating = Seating { user, seat: None, auto: true };
+    Client::connect(o.url, o.token.clone(), &e.origin, &seating).await
+}
+
 pub async fn run(o: Options<'_>) -> Result<()> {
     let rec = load(o.file, o.segment)?;
     if o.accept && serde_json::from_str::<Recording>(&std::fs::read_to_string(o.file)?).is_err() {
         bail!("--accept rewrites a recording (.json from `4s journal export`), not a journal file");
     }
-    let mut main = Client::connect(o.url, o.token.clone(), REPLAY, Some(REPLAY.into())).await?;
+    let mut main = Client::connect(o.url, o.token.clone(), REPLAY, &Seating::unseated(Some(REPLAY.into()))).await?;
     let snap: Snapshot = serde_json::from_value(main.call(&Request::StateGet(Empty {})).await?)?;
     if snap.project.dirty && !o.force {
         bail!(
@@ -104,9 +122,9 @@ pub async fn run(o: Options<'_>) -> Result<()> {
         .iter()
         .filter(|e| !NOT_REPLAYED.contains(&e.method.as_str()) && e.origin != REPLAY)
         .collect();
-    // One connection per recorded (user, origin), so per-user undo and held
-    // notes behave as they did.
-    let mut conns: HashMap<(String, String), Client> = HashMap::new();
+    // One connection per recorded (user, origin, seat), so per-user undo,
+    // held notes, and seat-relative requests behave as they did.
+    let mut conns: HashMap<(String, String, Option<String>), Client> = HashMap::new();
     let mut last_time = expected.first().map(|e| e.time);
     for e in &expected {
         if o.realtime && let Some(t) = last_time {
@@ -131,9 +149,9 @@ pub async fn run(o: Options<'_>) -> Result<()> {
         }
         let req = parse_request(&e.method, Some(e.params.clone()))
             .map_err(|err| anyhow!("entry {} ({}): {err}", e.seq, e.method))?;
-        let key = (e.user.clone(), e.origin.clone());
+        let key = (e.user.clone(), e.origin.clone(), e.context.seat.clone());
         if !conns.contains_key(&key) {
-            let c = Client::connect(o.url, o.token.clone(), &e.origin, Some(e.user.clone())).await?;
+            let c = connect_seated(&o, e).await?;
             conns.insert(key.clone(), c);
         }
         // Errors are compared below, with everything else.

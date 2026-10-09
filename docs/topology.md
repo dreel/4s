@@ -63,17 +63,27 @@ clients use `external` mode and never start or stop it. See
 
 ## Controller bridge
 
-- The bridge reads local MIDI devices and sends their input upstream as RPC
-  events; it applies LED and state events coming back to the device.
+- The bridge reads local MIDI devices and forwards their raw input upstream
+  with `midi.input {device, data, seat}` (RFC 0007): the logical device
+  name from its own `midi-devices.json`, and the seat of its user. The
+  engine resolves the seat's bindings and CC maps, so bindings live in one
+  place (the project) and everyone sees them. The bridge applies LED and
+  state events coming back to the device.
+- **Seats** (RFC 0007): each performer's focus, bindings, and CC maps,
+  saved in the project. A client joins the seat matching its user name if
+  exactly one does; otherwise its UI asks (join, create, or ignore for a
+  session-only seat). Remote input plays a fixed delay (default 20 ms)
+  after its timestamp to absorb jitter; recording uses the timestamp. (The
+  bridge and the delay are not built yet.)
 - Real, bridged, and virtual (simulated) controllers look the same to the
   engine.
 - **Held notes** (`voice.note_on` / `voice.note_off`, RFC 0004) belong to
   the connection that started them, and the engine releases them when that
   connection closes. A bridge is one upstream connection for all its local
-  clients and keyboards, so it must track holders per local client and per
-  keyboard, and send `voice.note_off` upstream for their notes when they
-  disconnect or are unplugged. If the bridge drops, the engine releases all
-  its notes.
+  clients and keyboards. Notes started through `midi.input` are held per
+  (connection, device), and a device's note-off releases them; the bridge
+  sends a note-off upstream for a device that is unplugged. If the bridge
+  drops, the engine releases all its notes.
 - **Local feedback**: the bridge lights LEDs immediately on press and then
   reconciles with authoritative state, so the device feels instant despite
   network latency.

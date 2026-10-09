@@ -6,6 +6,8 @@
 - Created: 2026-10-06
 - Discussion: the PR that introduces this RFC (build phase, RFC 0005: a
   design note, not a gate)
+- Amended: 2026-10-08, for RFC 0007 (seats); see "Amendment: seats and
+  `midi.input`" at the end. Where it differs, the amendment wins.
 
 ## Summary
 
@@ -44,6 +46,7 @@ for them and "absent" for everything else.
 | `channel:<n>` | name |
 | `channels:order` | `[n, ...]` (display order) |
 | `route:<source>` | channel number |
+| `seat:<name>` | seat config (RFC 0007; see the amendment) |
 
 Steps are keyed per step, so two people editing different steps of one
 track never conflict. Transport, the playhead, MIDI connections, and the
@@ -73,6 +76,9 @@ decodes to:
 - Block pads and knobs become `controller.press` and `controller.knob`;
 - keyboards become `voice.note_on` and `voice.note_off`;
 - GM drums become `voice.trigger`.
+
+(Superseded by the amendment: all device input is journaled as
+`midi.input`.)
 
 The origin is `midi:<port>`, and the user is the host user.
 
@@ -124,6 +130,9 @@ accounts are a later change.
   - Undoing an instrument's removal restores everything in the doc, but not
     what lives outside it. If the restored instrument was the Block's target
     or a keyboard's instrument, those stay on the fallback they moved to.
+    (With RFC 0007, a seat focused on the removed instrument falls back to
+    the first one; the seat's saved focus is in the doc, so undo restores
+    it.)
   - Skipped keys are reported (`skipped`). A step whose keys were all
     skipped is dropped from the stack.
 - **The entry it writes:** an undo is journaled as `history.undo` with
@@ -231,3 +240,25 @@ older client simply ignores the new events.
   it, at the cost of a second file line per request.
 - Whether history should survive `daemon start --restart-if-stale`. Today it
   does not; the session's state carries over, but its history doesn't.
+
+## Amendment: seats and `midi.input` (2026-10-08)
+
+RFC 0007 replaced the fixed MIDI device kinds with seats and bindings. For
+the journal this means:
+
+- **MIDI input is journaled as `midi.input {device, data, seat}`**: the
+  raw message, the logical device name, and the seat it played in, from the
+  host user with origin `midi:<port>`. The engine resolves it through the
+  seat's bindings and CC maps, as for a remote bridge. A replay therefore
+  re-sends the same raw input. A Block pad release does nothing and is not
+  journaled.
+- Note messages from a generic device do not build the doc (they only
+  play); CCs and Block input do, since they set parameters and steps.
+- **Seat configs are undoable**: `seat:<name>` holds a saved seat's focus,
+  knob page, bindings, CC maps, and following knobs (what the project
+  saves; seats with nothing set are left out). Undoing a `seat.bind`
+  restores the previous config. Who sits where, CC learning, device names,
+  and the host seat pin are not in the doc.
+- Seat changes are journaled like any other request; `seat.list` is read
+  only.
+

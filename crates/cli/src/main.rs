@@ -10,7 +10,7 @@ mod replay;
 
 use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
-use client::Client;
+use client::{Client, Seating};
 use daemon_ctl::StartArgs;
 use std::path::PathBuf;
 use fours_protocol::*;
@@ -32,16 +32,29 @@ struct Cli {
     /// Print raw JSON results.
     #[arg(long, global = true)]
     json: bool,
-    /// Who you are, for undo history. Default: $USER.
+    /// Who you are: owns your undo history, and the seat with this name is
+    /// joined automatically. Default: $USER.
     #[arg(long, env = "FOURS_USER", global = true)]
     user: Option<String>,
+    /// Join this seat (seat commands then act on it).
+    #[arg(long, global = true)]
+    seat: Option<String>,
+    /// Create a new seat, named after --user, and join it.
+    #[arg(long, global = true, conflicts_with = "seat")]
+    new_seat: bool,
+    /// Do not join a seat.
+    #[arg(long, global = true, conflicts_with_all = ["seat", "new_seat"])]
+    no_seat: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
 
 impl Cli {
     fn user(&self) -> Option<String> {
-        self.user.clone().or_else(|| std::env::var("USER").ok()).filter(|u| !u.trim().is_empty())
+        self.user
+            .clone()
+            .or_else(|| ["USER", "USERNAME"].iter().find_map(|k| std::env::var(k).ok()))
+            .filter(|u| !u.trim().is_empty())
     }
 }
 
@@ -96,24 +109,26 @@ enum Cmd {
     /// Play a drum voice (`4s trigger kick`) or a note (`4s trigger --note C2`) now.
     Trigger {
         voice: Option<String>,
-        /// Note to play on a note instrument, e.g. C2.
+        /// Note to play, e.g. C2 (a drum machine plays the voice on that GM
+        /// note).
         #[arg(long)]
         note: Option<String>,
-        /// Instrument (default: the first tr808 for voices, tb303 for notes).
+        /// Instrument (default: your seat's focus; for a voice, the first
+        /// tr808 unless the focus is one).
         #[arg(long)]
         instrument: Option<String>,
         #[arg(long)]
         velocity: Option<f32>,
     },
-    /// Hold a note on a note instrument like a keyboard key, then release
-    /// it: `4s key C2 --for 0.5`. (A held note belongs to its connection, so
+    /// Hold a note like a keyboard key, then release it:
+    /// `4s key C2 --for 0.5`. (A held note belongs to its connection, so
     /// it is released when this command exits.)
     Key {
         note: String,
         /// Seconds to hold the note (default 1).
         #[arg(long = "for", default_value_t = 1.0)]
         secs: f64,
-        /// Note instrument (default: the first tb303).
+        /// Instrument (default: your seat's focus).
         #[arg(long)]
         instrument: Option<String>,
         /// 0..1 (default 1; 0.95 and up is accented).
@@ -177,6 +192,46 @@ enum Cmd {
     Controller {
         #[command(subcommand)]
         cmd: Option<ControllerCmd>,
+    },
+    /// Seats: each performer's focus, bindings, and CC maps (RFC 0007).
+    /// `4s seat` lists them.
+    Seat {
+        #[command(subcommand)]
+        cmd: Option<SeatCmd>,
+    },
+    /// Focus an instrument for your seat: devices without bindings, `focus`
+    /// bindings, the Block, and following knobs play it.
+    Focus { instrument: String },
+    /// Route a device's notes to an instrument for your seat, e.g.
+    /// `4s bind keys --notes C1..B2 --to bass`. A device with no bindings
+    /// plays your focus.
+    Bind {
+        /// Logical device name (see `4s midi ports`).
+        device: String,
+        /// MIDI channel 1-16 (default: any).
+        #[arg(long)]
+        channel: Option<u8>,
+        /// Input note range, e.g. C1..B2 or 36..47 (default: all).
+        #[arg(long)]
+        notes: Option<String>,
+        /// Semitones to add.
+        #[arg(long, allow_hyphen_values = true)]
+        transpose: Option<i8>,
+        /// Instrument id, or `focus`.
+        #[arg(long, default_value = "focus")]
+        to: String,
+    },
+    /// Remove one of your seat's bindings (1-based, as `4s seat` lists them).
+    Unbind { n: u32 },
+    /// Map CCs to parameters for your seat.
+    Cc {
+        #[command(subcommand)]
+        cmd: CcCmd,
+    },
+    /// Knobs that follow your seat's focus.
+    Knobs {
+        #[command(subcommand)]
+        cmd: KnobsCmd,
     },
     /// Start, stop, and inspect the background daemon.
     Daemon {
@@ -368,21 +423,41 @@ enum ProjectCmd {
 
 #[derive(Subcommand, Debug, Clone)]
 enum MidiCmd {
-    /// List ports and connections.
+    /// List ports, connections, and this machine's device names.
     Ports,
-    /// Connect a MIDI input as a device.
+    /// Connect a MIDI input as a named device.
     Connect {
         input: String,
         #[arg(long)]
         output: Option<String>,
-        #[arg(long, value_enum, default_value = "block")]
-        kind: Kind,
-        /// For --kind keyboard: the instrument to play (default: first tb303).
+        /// Logical name seats bind to (default: the saved one, else from
+        /// the port name).
         #[arg(long)]
-        instrument: Option<String>,
+        name: Option<String>,
+        /// Default: the saved one, else `block` for ports named like a
+        /// Block, else `generic`.
+        #[arg(long, value_enum)]
+        profile: Option<ProfileArg>,
     },
-    /// Disconnect a MIDI input.
+    /// Disconnect a MIDI input (by port or device name).
     Disconnect { input: String },
+    /// Rename a device (the logical name seats bind to).
+    Rename { device: String, name: String },
+    /// Pin the seat this machine's devices play in; no seat unpins (they
+    /// follow the local user).
+    Seat { seat: Option<String> },
+    /// Send one raw MIDI message as if from a device, e.g.
+    /// `4s midi send keys 90 3C 64`.
+    Send {
+        device: String,
+        /// Hex bytes.
+        #[arg(required = true)]
+        bytes: Vec<String>,
+        /// Read the bytes as this kind of device (default: the connected
+        /// device's kind, else generic).
+        #[arg(long, value_enum)]
+        profile: Option<ProfileArg>,
+    },
     /// Print raw incoming MIDI (for discovering controller mappings).
     Monitor {
         #[arg(long)]
@@ -391,13 +466,79 @@ enum MidiCmd {
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
-enum Kind {
-    /// Livid Block: grid + knobs drive the controller target, LEDs lit.
+enum ProfileArg {
+    /// Notes and CCs, routed by seat bindings and CC maps.
+    Generic,
+    /// Livid Block: grid + knobs drive the seat's focus, LEDs lit.
     Block,
-    /// General MIDI drum notes trigger the controller target's voices.
-    Drums,
-    /// Note on/off plays a note instrument (--instrument, default: first tb303).
-    Keyboard,
+}
+
+fn device_profile(p: ProfileArg) -> DeviceProfile {
+    match p {
+        ProfileArg::Generic => DeviceProfile::Generic,
+        ProfileArg::Block => DeviceProfile::LividBlock,
+    }
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SeatCmd {
+    /// List seats, who sits where, and their bindings.
+    List,
+    /// Join an existing seat (for this command; use --seat for others).
+    Claim { name: String },
+    /// Create a seat (default name: --user) and join it.
+    Create {
+        name: Option<String>,
+        /// For this session only: not saved with the project.
+        #[arg(long)]
+        ignore: bool,
+    },
+    /// Leave your seat.
+    Leave,
+    /// Delete a seat. In a project with no other saved seats, the host
+    /// user's seat comes straight back: this machine's devices need one.
+    Rm { name: String },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum CcCmd {
+    /// Map a device's CC to a parameter, e.g. `4s cc map knobs 21 bass.cutoff`.
+    Map {
+        device: String,
+        cc: u8,
+        param: String,
+        /// MIDI channel 1-16 (default: any).
+        #[arg(long)]
+        channel: Option<u8>,
+        /// Jump to the knob's position instead of picking up.
+        #[arg(long)]
+        no_pickup: bool,
+    },
+    /// Remove a CC map.
+    Unmap {
+        device: String,
+        cc: u8,
+        #[arg(long)]
+        channel: Option<u8>,
+    },
+    /// Map the next CC you move to a parameter; no parameter cancels.
+    Learn { param: Option<String> },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum KnobsCmd {
+    /// Choose the knob page of your focused instrument, e.g. `decay`.
+    Page { page: String },
+    /// Make a device's CCs (knob 1 first) control the focused instrument's
+    /// page; no CCs stops it, e.g. `4s knobs follow knobs 21 22 23 24`.
+    Follow {
+        device: String,
+        ccs: Vec<u8>,
+        #[arg(long)]
+        channel: Option<u8>,
+        #[arg(long)]
+        no_pickup: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -418,13 +559,9 @@ enum ControllerCmd {
         #[arg(allow_hyphen_values = true)]
         value: String,
     },
-    /// Change target instrument, knob mode, page (1-based), or follow.
+    /// Change the grid page (1-based) or follow. Focus and knob page are
+    /// your seat's: `4s focus`, `4s knobs page`.
     Mode {
-        /// Drum instrument the controller drives.
-        #[arg(long)]
-        target: Option<String>,
-        #[arg(long, value_enum)]
-        knobs: Option<KnobArg>,
         #[arg(long)]
         page: Option<u32>,
         #[arg(long)]
@@ -438,13 +575,6 @@ enum PadEdge {
     Up,
 }
 
-#[derive(ValueEnum, Debug, Clone, Copy)]
-enum KnobArg {
-    Volume,
-    Tune,
-    Decay,
-    Tone,
-}
 
 // ---------------------------------------------------------------------------
 // Parsing helpers
@@ -462,6 +592,26 @@ fn instrument_type(s: &str) -> Result<InstrumentType> {
         let ids: Vec<_> = InstrumentType::ALL.iter().map(|t| t.id()).collect();
         anyhow!("unknown instrument type '{s}' (use {})", ids.join(", "))
     })
+}
+
+/// `C1..B2`, `36..47`, or one note.
+fn note_range(s: &str) -> Result<(u8, u8)> {
+    let one = |t: &str| -> Result<u8> {
+        let t = t.trim();
+        t.parse::<u8>().ok().filter(|n| *n <= 127).map(Ok).unwrap_or_else(|| parse_note(t).map_err(|e| anyhow!(e)))
+    };
+    let (lo, hi) = match s.split_once("..") {
+        Some((a, b)) => (one(a)?, one(b)?),
+        None => (one(s)?, one(s)?),
+    };
+    if lo > hi {
+        bail!("note range {s} is backwards");
+    }
+    Ok((lo, hi))
+}
+
+fn hex_bytes(bytes: &[String]) -> Result<Vec<u8>> {
+    bytes.iter().map(|b| u8::from_str_radix(b, 16).map_err(|_| anyhow!("not a hex byte: {b}"))).collect()
 }
 
 fn one_based(n: u32, what: &str) -> Result<u32> {
@@ -639,19 +789,25 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
         },
         Cmd::Midi { cmd } => match cmd {
             MidiCmd::Ports => vec![Request::MidiPorts(e)],
-            MidiCmd::Connect { input, output, kind, instrument } => vec![Request::MidiConnect(MidiConnectParams {
+            MidiCmd::Connect { input, output, name, profile } => vec![Request::MidiConnect(MidiConnectParams {
                 input: input.clone(),
                 output: output.clone(),
-                kind: match kind {
-                    Kind::Block => DeviceKind::LividBlock,
-                    Kind::Drums => DeviceKind::GenericDrums,
-                    Kind::Keyboard => DeviceKind::Keyboard,
-                },
-                instrument: instrument.clone(),
+                name: name.clone(),
+                profile: profile.map(device_profile),
             })],
             MidiCmd::Disconnect { input } => {
                 vec![Request::MidiDisconnect(MidiDisconnectParams { input: input.clone() })]
             }
+            MidiCmd::Rename { device, name } => {
+                vec![Request::MidiRename(MidiRenameParams { device: device.clone(), name: name.clone() })]
+            }
+            MidiCmd::Seat { seat } => vec![Request::MidiSetSeat(MidiSetSeatParams { seat: seat.clone() })],
+            MidiCmd::Send { device, bytes, profile } => vec![Request::MidiInput(MidiInputParams {
+                device: device.clone(),
+                data: hex_bytes(bytes)?,
+                seat: None,
+                profile: profile.map(device_profile),
+            })],
             MidiCmd::Monitor { .. } => vec![
                 Request::EventsSubscribe(SubscribeParams { types: Some(vec!["midi_in".into()]) }),
                 Request::EventsUnsubscribe(e),
@@ -668,18 +824,62 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 index: one_based(index, "knob")?,
                 value: parse_value(&value)?,
             })],
-            ControllerCmd::Mode { target, knobs, page, follow } => vec![Request::ControllerSetMode(ControllerModeParams {
-                target,
-                knob_mode: knobs.map(|k| match k {
-                    KnobArg::Volume => KnobMode::Volume,
-                    KnobArg::Tune => KnobMode::Tune,
-                    KnobArg::Decay => KnobMode::Decay,
-                    KnobArg::Tone => KnobMode::Tone,
-                }),
+            ControllerCmd::Mode { page, follow } => vec![Request::ControllerSetMode(ControllerModeParams {
                 page: page.map(|p| one_based(p, "page")).transpose()?,
                 follow,
             })],
         },
+        Cmd::Seat { cmd } => vec![match cmd.clone().unwrap_or(SeatCmd::List) {
+            SeatCmd::List => Request::SeatList(e),
+            SeatCmd::Claim { name } => Request::SeatClaim(SeatNameParams { name }),
+            SeatCmd::Create { name, ignore } => Request::SeatCreate(SeatCreateParams { name, saved: Some(!ignore) }),
+            SeatCmd::Leave => Request::SeatLeave(e),
+            SeatCmd::Rm { name } => Request::SeatRemove(SeatNameParams { name }),
+        }],
+        Cmd::Focus { instrument } => {
+            vec![Request::SeatFocus(SeatFocusParams { seat: None, instrument: instrument.clone() })]
+        }
+        Cmd::Bind { device, channel, notes, transpose, to } => {
+            let (low, high) = match notes {
+                Some(n) => {
+                    let (l, h) = note_range(n)?;
+                    (Some(l), Some(h))
+                }
+                None => (None, None),
+            };
+            vec![Request::SeatBind(SeatBindParams {
+                seat: None,
+                binding: NoteBinding {
+                    device: device.clone(),
+                    channel: *channel,
+                    low,
+                    high,
+                    transpose: transpose.unwrap_or(0),
+                    target: to.clone(),
+                },
+            })]
+        }
+        Cmd::Unbind { n } => vec![Request::SeatUnbind(SeatUnbindParams { seat: None, index: one_based(*n, "binding")? })],
+        Cmd::Cc { cmd } => vec![match cmd {
+            CcCmd::Map { device, cc, param, channel, no_pickup } => Request::SeatMapCc(SeatMapCcParams {
+                seat: None,
+                map: CcMap { device: device.clone(), channel: *channel, cc: *cc, param: param.clone(), pickup: !no_pickup },
+            }),
+            CcCmd::Unmap { device, cc, channel } => Request::SeatUnmapCc(SeatUnmapCcParams {
+                seat: None,
+                device: device.clone(),
+                cc: *cc,
+                channel: *channel,
+            }),
+            CcCmd::Learn { param } => Request::SeatLearnCc(SeatLearnCcParams { seat: None, param: param.clone() }),
+        }],
+        Cmd::Knobs { cmd } => vec![match cmd {
+            KnobsCmd::Page { page } => Request::SeatPage(SeatPageParams { seat: None, page: page.clone() }),
+            KnobsCmd::Follow { device, ccs, channel, no_pickup } => Request::SeatFollowKnobs(SeatFollowKnobsParams {
+                seat: None,
+                follow: KnobFollow { device: device.clone(), channel: *channel, ccs: ccs.clone(), pickup: !no_pickup },
+            }),
+        }],
         Cmd::Daemon { cmd } => match cmd {
             DaemonCmd::Status => vec![Request::DaemonInfo(e.clone()), Request::EngineStatus(e)],
             DaemonCmd::Stop { .. } => vec![Request::DaemonShutdown(e)],
@@ -729,11 +929,12 @@ fn print_pattern(p: &PatternResult) {
 fn print_leds(c: &ControllerState) {
     let page = c.page + 1;
     println!(
-        "target: {}  knobs: {:?}  page: {page}  follow: {}  device: {}",
-        c.target.as_deref().unwrap_or("(none)"),
-        c.knob_mode,
+        "focus: {}  knobs: {}  page: {page}  follow: {}  device: {}  seat: {}",
+        c.focus.as_deref().unwrap_or("(none)"),
+        c.knob_page.as_deref().unwrap_or("-"),
         c.follow,
-        c.device.as_deref().unwrap_or("(virtual only)")
+        c.device.as_deref().unwrap_or("(virtual only)"),
+        c.seat
     );
     for (r, row) in c.leds.iter().enumerate() {
         let cells: String = row.iter().map(|v| if *v != 0 { "# " } else { ". " }).collect();
@@ -843,13 +1044,56 @@ fn print_status_lines(s: &Snapshot) {
         println!("midi: no devices connected");
     }
     for m in &s.midi {
-        println!("midi: {} ({:?}) out: {}", m.input, m.kind, m.output.as_deref().unwrap_or("-"));
+        println!("midi: {} as {} ({:?}) out: {}", m.input, m.device, m.profile, m.output.as_deref().unwrap_or("-"));
     }
+    println!("devices on this engine play in seat: {}", s.seats.host);
     println!(
         "project: {}{}",
         s.project.path.as_deref().unwrap_or("(unsaved)"),
         if s.project.dirty { " *modified*" } else { "" }
     );
+}
+
+fn fmt_note_range(b: &NoteBinding) -> String {
+    match (b.low, b.high) {
+        (None, None) => "all notes".into(),
+        (l, h) => format!("{}..{}", note_name(l.unwrap_or(0)), note_name(h.unwrap_or(127))),
+    }
+}
+
+fn print_seat(s: &Seat, host: bool) {
+    let mut flags = Vec::new();
+    if !s.saved {
+        flags.push("this session only".to_string());
+    }
+    if host {
+        flags.push("this engine's devices".to_string());
+    }
+    if let Some(p) = &s.learning {
+        flags.push(format!("learning a CC for {p}"));
+    }
+    let flags = if flags.is_empty() { String::new() } else { format!("  ({})", flags.join(", ")) };
+    let who = if s.occupants.is_empty() { "nobody".into() } else { s.occupants.join(", ") };
+    println!("{}: {who}{flags}", s.name);
+    println!(
+        "  focus: {}  knobs: {}",
+        s.config.focus.as_deref().unwrap_or("(first instrument)"),
+        s.config.knob_page.as_deref().unwrap_or("(first page)")
+    );
+    for (i, b) in s.config.bindings.iter().enumerate() {
+        let ch = b.channel.map(|c| format!("ch {c}")).unwrap_or("any ch".into());
+        let tr = if b.transpose != 0 { format!(" {:+} st", b.transpose) } else { String::new() };
+        println!("  bind {}: {} {ch} {}{tr} -> {}", i + 1, b.device, fmt_note_range(b), b.target);
+    }
+    for m in &s.config.cc {
+        let ch = m.channel.map(|c| format!("ch {c}")).unwrap_or("any ch".into());
+        let pickup = if m.pickup { "" } else { " (no pickup)" };
+        println!("  cc: {} {ch} cc {} -> {}{pickup}", m.device, m.cc, m.param);
+    }
+    for k in &s.config.knobs {
+        let ccs: Vec<String> = k.ccs.iter().map(|c| c.to_string()).collect();
+        println!("  knobs: {} cc {} follow focus", k.device, ccs.join(" "));
+    }
 }
 
 fn print_event(e: &EventEnvelope, json: bool) {
@@ -1010,7 +1254,7 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             let last_note = n.steps.iter().rposition(|s| s.note.is_some()).map(|i| i + 1).unwrap_or(0);
             println!("{}: {}", n.instrument, format_notes(&n.steps, (n.length as usize).max(last_note)));
         }
-        Cmd::Trigger { .. } | Cmd::Key { .. } => println!("ok"),
+        Cmd::Trigger { .. } | Cmd::Key { .. } | Cmd::Midi { cmd: MidiCmd::Send { .. } } => println!("ok"),
         Cmd::Instrument { cmd: InstrumentCmd::Types } => {
             let r: InstrumentTypesResult = serde_json::from_value(last)?;
             for t in r.types {
@@ -1130,11 +1374,25 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
                 println!("  (none)");
             }
             for c in &r.connections {
-                let plays = c.instrument.as_deref().map(|i| format!(" plays: {i}")).unwrap_or_default();
-                println!("  {} ({:?}) out: {}{plays}", c.input, c.kind, c.output.as_deref().unwrap_or("-"));
+                println!("  {} as {} ({:?}) out: {}", c.input, c.device, c.profile, c.output.as_deref().unwrap_or("-"));
             }
+            let pinned = if r.pinned_seat.is_some() { " (pinned)" } else { "" };
+            println!("devices play in seat: {}{pinned}", r.seat);
         }
         Cmd::Controller { .. } => print_leds(&serde_json::from_value(last)?),
+        Cmd::Seat { .. } => {
+            let r: SeatListResult = serde_json::from_value(last)?;
+            if r.seats.is_empty() {
+                println!("(no seats)");
+            }
+            for s in &r.seats {
+                print_seat(s, s.name == r.host);
+            }
+            println!("you: {}", r.you.as_deref().unwrap_or("(no seat)"));
+        }
+        Cmd::Focus { .. } | Cmd::Bind { .. } | Cmd::Unbind { .. } | Cmd::Cc { .. } | Cmd::Knobs { .. } => {
+            print_seat(&serde_json::from_value(last)?, false)
+        }
         _ => println!("{}", serde_json::to_string_pretty(&last)?),
     }
     Ok(())
@@ -1213,14 +1471,24 @@ fn resolve_url(cli: &Cli, data_dir: &std::path::Path) -> Result<String> {
     }
 }
 
+/// Seat options from the command line. The user defaults to the OS user,
+/// as the daemon's host seat does.
+fn seating(cli: &Cli) -> Seating {
+    Seating { user: cli.user(), seat: cli.seat.clone(), auto: !cli.no_seat && !cli.new_seat }
+}
+
 async fn connect(cli: &Cli, url: &str) -> Result<Client> {
-    Client::connect(url, cli.token.clone(), "cli", cli.user()).await.map_err(|e| {
+    let mut c = Client::connect(url, cli.token.clone(), "cli", &seating(cli)).await.map_err(|e| {
         if cli.url.is_none() {
             anyhow!("{e:#}\nhint: start the daemon with `4s daemon start`")
         } else {
             e
         }
-    })
+    })?;
+    if cli.new_seat {
+        c.call(&Request::SeatCreate(SeatCreateParams { name: None, saved: Some(true) })).await?;
+    }
+    Ok(c)
 }
 
 async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> Result<()> {
@@ -1253,7 +1521,7 @@ async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> R
                 }
                 return Ok(());
             };
-            let graceful = match Client::connect(&info.url, cli.token.clone(), "cli", cli.user()).await {
+            let graceful = match Client::connect(&info.url, cli.token.clone(), "cli", &Seating::unseated(cli.user())).await {
                 Ok(mut c) => c.call(&Request::DaemonShutdown(Empty {})).await.is_ok(),
                 Err(_) => false,
             };
@@ -1290,7 +1558,7 @@ async fn run_daemon(cli: &Cli, cmd: &DaemonCmd, data_dir: &std::path::Path) -> R
         }
         DaemonCmd::Restart(args) => {
             if let Some(info) = daemon_ctl::live(data_dir) {
-                if let Ok(mut c) = Client::connect(&info.url, cli.token.clone(), "cli", cli.user()).await {
+                if let Ok(mut c) = Client::connect(&info.url, cli.token.clone(), "cli", &Seating::unseated(cli.user())).await {
                     let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
                 }
                 if !daemon_ctl::wait_exit(info.pid, std::time::Duration::from_secs(5)) {
@@ -1337,7 +1605,7 @@ async fn restart_stale(cli: &Cli, data_dir: &std::path::Path, args: &StartArgs, 
     // Talking to the old daemon at all is what fails when its build is
     // incompatible (a different protocol version). Only then is discarding
     // its session on the table; any later failure (e.g. saving) just stops.
-    let session = match Client::connect(&old.url, cli.token.clone(), "cli", cli.user()).await {
+    let session = match Client::connect(&old.url, cli.token.clone(), "cli", &Seating::unseated(cli.user())).await {
         Ok(mut c) => {
             let session = save_session(&mut c, data_dir).await?;
             let _ = c.call(&Request::DaemonShutdown(Empty {})).await;
@@ -1503,7 +1771,11 @@ mod tests {
             "pattern clear", "trigger kick", "watch", "render --bars 2", "project new",
             "project save beat", "project load beat", "project list", "midi ports",
             "midi connect Block", "midi disconnect Block", "midi monitor", "controller",
-            "controller press 1 1", "controller knob 1 50%", "controller mode --knobs tune",
+            "midi rename Block pads", "midi seat sam", "midi send keys 90 3C 64",
+            "controller press 1 1", "controller knob 1 50%", "controller mode --page 2",
+            "seat", "seat claim sam", "seat create --ignore", "seat leave", "seat rm sam",
+            "focus bass", "bind keys --notes C1..B2 --to bass", "unbind 1", "cc map knobs 21 bass.cutoff",
+            "cc unmap knobs 21", "cc learn bass.cutoff", "knobs page decay", "knobs follow knobs 21 22",
             "daemon status", "daemon stop", "undo", "redo", "history", "journal",
         ];
         let mut covered: BTreeSet<&str> = commands.iter().flat_map(|c| methods_for(c)).collect();
