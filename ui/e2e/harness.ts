@@ -68,7 +68,7 @@ export async function startHarness(): Promise<Harness> {
   const { url, proc } = await startDaemon();
   const app = await electron.launch({
     args: [path.join(ROOT, "ui", "electron", "main.cjs")],
-    env: { ...process.env, FOURS_URL: url } as Record<string, string>,
+    env: { ...process.env, FOURS_URL: url, FOURS_UI_BACKGROUND: "1" } as Record<string, string>,
   });
   const page = await app.firstWindow();
   await page.getByTestId("connection").and(page.locator('[data-state="open"]')).waitFor();
