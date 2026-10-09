@@ -98,6 +98,8 @@ pub enum Feedback {
     /// `gate` notes release by themselves after half a step.
     Live { slot: u8, note: u8, velocity: f32, on: bool, gate: bool, tick: Option<f64>, time: f64 },
     Trigger { slot: u8, voice: Option<u8>, note: Option<u8>, velocity: f32, time: f64, step: Option<u32> },
+    /// `Play` took effect: feedback after this counts from the new start.
+    Started { time: f64 },
     Stopped { time: f64 },
     /// Peak (left, right) per channel index since the last meter message.
     Meters { channels: [[f32; 2]; MAX_CHANNELS], master: [f32; 2] },
@@ -437,6 +439,7 @@ impl Engine {
                 self.count_in = (count_in as u64).div_ceil(TICKS_PER_BAR as u64) * TICKS_PER_BAR as u64;
                 self.next_tick_at = self.pos as f64;
                 self.tick_len = self.step_samples(0) / TICKS_PER_STEP as f64;
+                emit(Feedback::Started { time: self.time() });
             }
             Command::Stop => {
                 if self.playing {

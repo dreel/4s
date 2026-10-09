@@ -88,7 +88,8 @@ current parameter set.
   instrument an edit or hit belongs to. `clip_changed` carries a whole clip
   after any edit to it, `seats` the seats and who sits where, and `record`
   the recording state (a take running, and the next take's settings), which
-  is also in the snapshot.
+  is also in the snapshot. Record settings are shared by everyone on the
+  engine (session state, not saved), and one take runs at a time.
 - **Connection-scoped state: held notes and seats.** `voice.note_on` (and
   a note-on sent with `midi.input`) holds a note for the calling connection
   until it sends the note-off for that note, or until the connection closes

@@ -119,8 +119,10 @@ moved, resized, and duplicated through phase B's RPCs.
   applied in, so it can land up to one buffer late (a few ms at typical
   buffer sizes) on top of the latency correction. `offset_ms` covers a
   steady error.
-- Playing again during a take writes what was played and keeps recording
-  from the new start; removing the instrument (including by undo) ends the
+- The engine confirms `Play` (`Feedback::Started`); until then the daemon
+  ignores steps and live notes, which still count from the previous start.
+- Playing again during a take writes what was played (keys still held end
+  there) and keeps recording from the new start; removing the instrument (including by undo) ends the
   take without writing.
 - Live take progress (notes drawn while recording) waits for the piano roll
   (phase B).

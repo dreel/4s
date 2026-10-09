@@ -163,15 +163,20 @@ impl Take {
 
 /// The first pass end after `after`: one step before each loop end (for
 /// loops longer than two steps), so a pass is written before its first
-/// notes come round again.
+/// notes come round again. On a step's first tick, since writes happen as
+/// steps start (a loop of any tick length still writes before it wraps).
 fn next_flush(after: f64, length: u32) -> u64 {
-    let l = length.max(1) as u64;
-    let margin = if l > 2 * TICKS_PER_STEP as u64 { TICKS_PER_STEP as u64 } else { 0 };
-    let mut k = (after.max(0.0) as u64) / l + 1;
-    while k * l - margin <= after.max(0.0) as u64 {
+    let (l, step) = (length.max(1) as u64, TICKS_PER_STEP as u64);
+    let margin = if l > 2 * step { step } else { 0 };
+    let after = after.max(0.0) as u64;
+    let mut k = after / l + 1;
+    loop {
+        let at = (k * l - margin) / step * step;
+        if at > after {
+            return at;
+        }
         k += 1;
     }
-    k * l - margin
 }
 
 /// Ticks a delay of `ms` covers at `tempo` (swing aside).

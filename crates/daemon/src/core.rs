@@ -91,6 +91,9 @@ pub struct Core {
     playhead: Option<u32>,
     /// The song tick of the last step the engine started.
     song_tick: u64,
+    /// `Play` was sent and the engine has not confirmed it yet: steps and
+    /// live notes still count from the previous start.
+    starting: bool,
     /// Recording settings and the take in progress (RFC 0008).
     record: RecordSettings,
     take: Option<LiveTake>,
@@ -155,6 +158,7 @@ impl Core {
             playing: false,
             playhead: None,
             song_tick: 0,
+            starting: false,
             record: RecordSettings::default(),
             take: None,
             in_request: false,
@@ -820,6 +824,7 @@ impl Core {
         self.restart_take();
         self.send(Command::Play { count_in });
         self.song_tick = 0;
+        self.starting = true;
         if !self.playing {
             self.playing = true;
             self.emit(origin, Event::Transport { playing: true });
@@ -1123,7 +1128,7 @@ impl Core {
     pub fn handle_feedback(&mut self, fb: Feedback) {
         match fb {
             Feedback::Step { step, tick, time } => {
-                if !self.playing {
+                if !self.playing || self.starting {
                     return;
                 }
                 self.song_tick = tick;
@@ -1142,10 +1147,11 @@ impl Core {
                     self.emit("engine", Event::Trigger { instrument, voice, note, velocity, time });
                 }
             }
-            Feedback::Live { slot, note, velocity, on, gate, tick: Some(tick), .. } => {
+            Feedback::Live { slot, note, velocity, on, gate, tick: Some(tick), .. } if !self.starting => {
                 self.record_note(slot, note, velocity, on, gate, tick);
             }
-            Feedback::Live { tick: None, .. } | Feedback::Stopped { .. } => {}
+            Feedback::Started { .. } => self.starting = false,
+            Feedback::Live { .. } | Feedback::Stopped { .. } => {}
             Feedback::Meters { channels, master } => {
                 let levels: Vec<ChannelLevel> = self
                     .channels
