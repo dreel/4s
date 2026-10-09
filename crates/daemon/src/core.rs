@@ -129,6 +129,10 @@ pub struct Core {
     meters_silent: bool,
     journal: Journal,
     history: History,
+    /// Where the current history segment starts (daemon start, or the last
+    /// project new/load/import): the journal seq and the project then.
+    segment_seq: u64,
+    segment_base: ProjectFile,
 }
 
 impl Core {
@@ -176,10 +180,35 @@ impl Core {
             meters_silent: false,
             journal: Journal::new(journal_dir),
             history: History::default(),
+            segment_seq: 0,
+            segment_base: default_project(),
         };
         core.rebuild_params();
         core.apply_project_file(&default_project(), "engine").expect("default project applies");
+        core.start_segment();
         core
+    }
+
+    /// Start a history segment at the current state (see `journal.export`).
+    fn start_segment(&mut self) {
+        self.segment_seq = self.journal.seq();
+        self.segment_base = self.to_project_file();
+        self.journal.push_segment(&self.segment_base, unix_time());
+    }
+
+    fn journal_export(&self) -> Result<Recording, RpcError> {
+        let entries = self.journal.since(self.segment_seq).ok_or_else(|| {
+            RpcError::failed(
+                "the start of this session is no longer in memory (over 10000 entries); \
+                 replay the journal file under <data-dir>/journal instead",
+            )
+        })?;
+        Ok(Recording {
+            format_version: RECORDING_FORMAT_VERSION,
+            base: self.segment_base.clone(),
+            entries,
+            digest: journal::digest(&self.doc()),
+        })
     }
 
     // ---- infrastructure ----------------------------------------------------
@@ -1419,6 +1448,7 @@ impl Core {
 
     pub fn project_new(&mut self, origin: &str) -> Result<ProjectInfo, RpcError> {
         self.apply_project_file(&default_project(), origin)?;
+        self.start_segment();
         self.project = ProjectInfo { path: None, dirty: false };
         let info = self.project.clone();
         self.emit(origin, Event::Project { info: info.clone() });
@@ -1451,7 +1481,20 @@ impl Core {
         for w in self.apply_project_file(&project, origin)? {
             tracing::warn!("{}: {w}", file.display());
         }
+        self.start_segment();
         self.project = ProjectInfo { path: Some(bundle.to_string_lossy().into_owned()), dirty: false };
+        let info = self.project.clone();
+        self.emit(origin, Event::Project { info: info.clone() });
+        Ok(info)
+    }
+
+    /// Load a project sent inline. It is unsaved: no bundle path, dirty.
+    pub fn project_import(&mut self, file: &ProjectFile, origin: &str) -> Result<ProjectInfo, RpcError> {
+        for w in self.apply_project_file(file, origin)? {
+            tracing::warn!("project.import: {w}");
+        }
+        self.start_segment();
+        self.project = ProjectInfo { path: None, dirty: true };
         let info = self.project.clone();
         self.emit(origin, Event::Project { info: info.clone() });
         Ok(info)
@@ -1835,6 +1878,7 @@ impl Core {
             Request::HistoryRedo(_) => return ok(self.history_step(&user, origin, true)?),
             Request::HistoryGet(_) => return ok(self.history.info(&user)),
             Request::JournalGet(p) => return ok(JournalGetResult { entries: self.journal.get(p) }),
+            Request::JournalExport(_) => return ok(self.journal_export()?),
             _ => {}
         }
         if read_only(&req) {
@@ -1844,12 +1888,13 @@ impl Core {
         let params = serde_json::to_value(&req).ok().and_then(|mut v| v.get_mut("params").map(Value::take));
         let params = params.unwrap_or(Value::Null);
         // A project load or new replaces everything and starts a fresh history.
-        let fresh = matches!(req, Request::ProjectNew(_) | Request::ProjectLoad(_));
+        let fresh = matches!(req, Request::ProjectNew(_) | Request::ProjectLoad(_) | Request::ProjectImport(_));
         let context = self.journal_context();
         let before = (!fresh && self.changes_doc(&req)).then(|| self.doc());
+        // Taken first, so a segment this request starts begins after it.
+        let seq = self.journal.next_seq();
         let result = self.dispatch(req, origin, client);
         let changes = before.map(|b| journal::diff(&b, &self.doc())).unwrap_or_default();
-        let seq = self.journal.next_seq();
         if fresh && result.is_ok() {
             for u in self.history.clear() {
                 self.emit_history(&u, origin);
@@ -2025,6 +2070,7 @@ impl Core {
             Request::ProjectNew(_) => ok(self.project_new(origin)?),
             Request::ProjectSave(p) => ok(self.project_save(p.path, origin)?),
             Request::ProjectLoad(p) => ok(self.project_load(&p.path, origin)?),
+            Request::ProjectImport(p) => ok(self.project_import(&p.file, origin)?),
             Request::ProjectList(_) => ok(self.project_list()),
             Request::EngineStatus(_) => ok(self.audio.clone()),
             Request::Hello(_)
@@ -2033,7 +2079,11 @@ impl Core {
             | Request::RenderOffline(_)
             | Request::DaemonInfo(_)
             | Request::DaemonShutdown(_) => Err(RpcError::failed("handled by connection")),
-            Request::HistoryUndo(_) | Request::HistoryRedo(_) | Request::HistoryGet(_) | Request::JournalGet(_) => {
+            Request::HistoryUndo(_)
+            | Request::HistoryRedo(_)
+            | Request::HistoryGet(_)
+            | Request::JournalGet(_)
+            | Request::JournalExport(_) => {
                 Err(RpcError::failed("handled by Core::handle"))
             }
             Request::SeatList(_)
@@ -2060,16 +2110,16 @@ fn read_only(req: &Request) -> bool {
     match req {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
-        | JournalGet(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_) | EngineStatus(_)
-        | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) => true,
+        | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
+        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
         | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
         | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
         | PatternSetNote(_) | VoiceTrigger(_) | VoiceNoteOn(_) | VoiceNoteOff(_) | ControllerPress(_)
         | ControllerKnob(_) | ControllerSetMode(_) | MidiConnect(_) | MidiDisconnect(_) | ProjectNew(_)
-        | ProjectSave(_) | ProjectLoad(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_) | SeatClaim(_)
-        | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_) | SeatUnbind(_)
-        | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) => false,
+        | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
+        | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
+        | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) => false,
     }
 }
 

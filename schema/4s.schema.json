@@ -1512,6 +1512,24 @@
         },
         "type": "object"
       },
+      "ChannelInfo": {
+        "properties": {
+          "n": {
+            "description": "Stable channel number (1..=MAX_CHANNELS); paths are `mixer.<n>.*`.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "name"
+        ],
+        "type": "object"
+      },
       "ChannelMoveParams": {
         "properties": {
           "n": {
@@ -2250,6 +2268,117 @@
         ],
         "type": "object"
       },
+      "ProjectController": {
+        "properties": {
+          "follow": {
+            "description": "The grid page follows the playhead.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "follow"
+        ],
+        "type": "object"
+      },
+      "ProjectFile": {
+        "properties": {
+          "channels": {
+            "description": "In display order. `n` is the channel number in `mixer.<n>.*` paths.",
+            "items": {
+              "$ref": "#/$defs/ChannelInfo"
+            },
+            "type": "array"
+          },
+          "controller": {
+            "$ref": "#/$defs/ProjectController"
+          },
+          "format_version": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "instruments": {
+            "description": "In creation order.",
+            "items": {
+              "$ref": "#/$defs/ProjectInstrument"
+            },
+            "type": "array"
+          },
+          "params": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "description": "Parameter values by path. Unknown paths are ignored on load; missing\npaths take their defaults.",
+            "type": "object"
+          },
+          "patterns": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ProjectPattern"
+            },
+            "description": "Per instrument id: drum step strings per voice\n(`{\"kick\": \"x---x---x---x---\"}`) or a note string (`\"C2 C2! D#2~ -\"`).\nInstruments with an empty pattern are omitted.",
+            "type": "object"
+          },
+          "routes": {
+            "additionalProperties": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Source (`drums`, `drums.kick`) -> channel number.",
+            "type": "object"
+          },
+          "seats": {
+            "additionalProperties": {
+              "$ref": "#/$defs/SeatConfig"
+            },
+            "default": {},
+            "description": "Performer setups by seat name (RFC 0007): focus, knob page, note\nbindings, CC maps.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "format_version",
+          "instruments",
+          "channels",
+          "routes",
+          "params",
+          "patterns",
+          "controller"
+        ],
+        "type": "object"
+      },
+      "ProjectImportParams": {
+        "properties": {
+          "file": {
+            "$ref": "#/$defs/ProjectFile",
+            "description": "A project sent inline (the contents of a bundle's `project.json`)."
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "ProjectInstrument": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/$defs/InstrumentType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name"
+        ],
+        "type": "object"
+      },
       "ProjectLoadParams": {
         "properties": {
           "path": {
@@ -2260,6 +2389,43 @@
           "path"
         ],
         "type": "object"
+      },
+      "ProjectPattern": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "clap": {
+                "type": "string"
+              },
+              "closed_hat": {
+                "type": "string"
+              },
+              "cowbell": {
+                "type": "string"
+              },
+              "high_tom": {
+                "type": "string"
+              },
+              "kick": {
+                "type": "string"
+              },
+              "low_tom": {
+                "type": "string"
+              },
+              "open_hat": {
+                "type": "string"
+              },
+              "snare": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        ]
       },
       "ProjectSaveParams": {
         "properties": {
@@ -2357,6 +2523,49 @@
         "required": [
           "binding"
         ],
+        "type": "object"
+      },
+      "SeatConfig": {
+        "description": "One performer's setup: saved in the project.",
+        "properties": {
+          "bindings": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/NoteBinding"
+            },
+            "type": "array"
+          },
+          "cc": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/CcMap"
+            },
+            "type": "array"
+          },
+          "focus": {
+            "default": null,
+            "description": "Instrument that `focus` bindings, the Block, and following knobs\nplay. The first instrument if absent.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "knob_page": {
+            "default": null,
+            "description": "Knob page id; the focused instrument's first page if absent or not\none of its pages.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "knobs": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/KnobFollow"
+            },
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "SeatCreateParams": {
@@ -3056,6 +3265,23 @@
         "type": "object"
       },
       {
+        "description": "The current history segment as a replayable recording.",
+        "properties": {
+          "method": {
+            "const": "journal.export",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Read a drum pattern (one voice or all).",
         "properties": {
           "method": {
@@ -3676,6 +3902,23 @@
           },
           "params": {
             "$ref": "#/$defs/ProjectLoadParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Load a project sent inline (unsaved; no bundle path).",
+        "properties": {
+          "method": {
+            "const": "project.import",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ProjectImportParams"
           }
         },
         "required": [
