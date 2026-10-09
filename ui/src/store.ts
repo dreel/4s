@@ -13,7 +13,7 @@ import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
 import { RpcClient, type ConnectionState } from "./rpc";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export type AppState = {
   connection: ConnectionState;
@@ -127,6 +127,7 @@ const UI_EVENTS: EventEnvelope["event"]["type"][] = [
   "step_changed",
   "pattern_changed",
   "notes_changed",
+  "clip_changed",
   "graph",
   "transport",
   "playhead",
@@ -256,6 +257,11 @@ function apply(env: EventEnvelope) {
       patch(ev.instrument, (p) =>
         p.kind !== "drums" ? p : { ...p, tracks: p.tracks.map((t) => (t.voice === ev.voice ? { ...t, steps: ev.steps } : t)) },
       );
+      break;
+    case "clip_changed":
+      app.set({
+        snapshot: { ...s, clips: s.clips.map((c) => (c.instrument === ev.clip.instrument ? ev.clip : c)) },
+      });
       break;
     case "notes_changed":
       patch(ev.instrument, (p) => (p.kind !== "notes" ? p : { ...p, steps: ev.steps }));

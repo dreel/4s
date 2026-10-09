@@ -9,7 +9,7 @@ use ts_rs::TS;
 
 /// Current project format version. Bump and add a migration when the format
 /// changes incompatibly.
-pub const PROJECT_FORMAT_VERSION: u32 = 3;
+pub const PROJECT_FORMAT_VERSION: u32 = 4;
 /// Oldest version this build can load. Version 1 (the fixed 8-track kit)
 /// was dropped with RFC 0004, without a migration.
 pub const OLDEST_PROJECT_FORMAT_VERSION: u32 = 2;
@@ -32,6 +32,11 @@ pub struct ProjectFile {
     /// (`{"kick": "x---x---x---x---"}`) or a note string (`"C2 C2! D#2~ -"`).
     /// Instruments with an empty pattern are omitted.
     pub patterns: BTreeMap<String, ProjectPattern>,
+    /// Per instrument id (RFC 0007): clips that do not fit a step pattern
+    /// (off-grid events, other lengths or velocities) or have their own
+    /// length. An instrument is in `patterns` or here, not both.
+    #[serde(default)]
+    pub clips: BTreeMap<String, ProjectClip>,
     pub controller: ProjectController,
     /// Performer setups by seat name (RFC 0007): focus, knob page, note
     /// bindings, CC maps.
@@ -55,6 +60,15 @@ pub enum ProjectPattern {
     Drums(BTreeMap<Voice, String>),
 }
 
+/// A clip in a project file: events in text form (`tick:note:len:vel`, see
+/// `format_events`) and an optional length in ticks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ProjectClip {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<u32>,
+    pub events: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ProjectController {
     /// The grid page follows the playhead.
@@ -65,7 +79,15 @@ pub struct ProjectController {
 /// `MIGRATIONS[0]` upgrades `OLDEST_PROJECT_FORMAT_VERSION` to the next one,
 /// and so on.
 type Migration = fn(Value) -> Result<Value, String>;
-const MIGRATIONS: &[Migration] = &[v2_to_v3];
+const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4];
+
+/// v4 (RFC 0007 phase 2): sequences are clips. Step patterns still load as
+/// they are; clips that do not fit them are saved under `clips`.
+fn v3_to_v4(mut v: Value) -> Result<Value, String> {
+    v["clips"] = Value::Object(Default::default());
+    v["format_version"] = 4.into();
+    Ok(v)
+}
 
 /// v3 (RFC 0007): the controller's `target` and `knob_mode` became each
 /// seat's focus and knob page. A v2 project has no seats, so both are
@@ -138,7 +160,8 @@ mod tests {
     #[test]
     fn v2_fixture_loads() {
         let p = parse_project(V2_FIXTURE).unwrap();
-        assert_eq!(p.format_version, 3);
+        assert_eq!(p.format_version, 4);
+        assert!(p.clips.is_empty());
         assert!(p.seats.is_empty());
         assert!(p.controller.follow);
         let ProjectPattern::Drums(d) = &p.patterns["drums"] else { panic!("drums pattern") };

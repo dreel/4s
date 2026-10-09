@@ -1,7 +1,13 @@
-//! The engine: a shared step clock, a fixed table of instrument slots, and a
-//! fixed pool of stereo mixer channels. `Engine::render` and `Engine::apply`
-//! are called from the audio thread (or offline) and must not allocate, lock,
-//! or block. Instruments are built and dropped on the control side.
+//! The engine: a shared tick clock (`PPQ` ticks per quarter, swing applied
+//! per 16th), a fixed table of instrument slots each with a clip, and a fixed
+//! pool of stereo mixer channels. `Engine::render` and `Engine::apply` are
+//! called from the audio thread (or offline) and must not allocate, lock, or
+//! block. Instruments are built and dropped on the control side; clips live
+//! in storage preallocated here and are edited by small commands.
+//!
+//! Sequencing (RFC 0007): on every tick, each slot's clip releases the notes
+//! that end there, then starts the events that begin there. A clip loops at
+//! its own length (or `sequencer.length` steps).
 //!
 //! Signal flow per block: each instrument renders its outputs; each routed
 //! output is summed into its channel with its own pan law (constant-power pan
@@ -11,7 +17,10 @@
 use crate::dsp::{Smoother, soft_clip};
 use crate::instrument::{Instrument, MAX_BLOCK, MAX_OUTPUTS};
 use crate::params::*;
-use fours_protocol::{MAX_CHANNELS, MAX_INSTRUMENTS, MAX_STEPS, NoteStep, OutputWidth};
+use fours_protocol::{ClipEvent, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_EVENTS, MAX_INSTRUMENTS, MAX_STEPS, OutputWidth, TICKS_PER_STEP};
+
+/// Most notes a clip can hold sounding at once.
+const MAX_ACTIVE: usize = 64;
 
 /// Meter feedback rate.
 const METER_HZ: f32 = 30.0;
@@ -32,9 +41,13 @@ pub enum Command {
     RemoveInstrument { slot: u8 },
     SetRoute { slot: u8, output: u8, channel: Option<u8> },
     SetChannelActive { ch: u8, active: bool },
-    SetDrumStep { slot: u8, track: u8, step: u8, level: u8 },
-    SetDrumTrack { slot: u8, track: u8, steps: [u8; MAX_STEPS] },
-    SetNotes { slot: u8, steps: [NoteStep; MAX_STEPS] },
+    /// Remove every event from a slot's clip.
+    ClearClip { slot: u8 },
+    /// Add an event (replacing one at the same tick and note).
+    AddEvent { slot: u8, event: ClipEvent },
+    RemoveEvent { slot: u8, tick: u32, note: u8 },
+    /// Clip length in ticks; `None` follows `sequencer.length`.
+    SetClipLength { slot: u8, length: Option<u32> },
     /// A note; with `gate` it releases after half a step at the current tempo.
     NoteOn { slot: u8, note: u8, velocity: f32, gate: bool },
     NoteOff { slot: u8, note: u8 },
@@ -50,11 +63,10 @@ impl std::fmt::Debug for Command {
             Command::RemoveInstrument { slot } => write!(f, "RemoveInstrument({slot})"),
             Command::SetRoute { slot, output, channel } => write!(f, "SetRoute({slot}, {output}, {channel:?})"),
             Command::SetChannelActive { ch, active } => write!(f, "SetChannelActive({ch}, {active})"),
-            Command::SetDrumStep { slot, track, step, level } => {
-                write!(f, "SetDrumStep({slot}, {track}, {step}, {level})")
-            }
-            Command::SetDrumTrack { slot, track, .. } => write!(f, "SetDrumTrack({slot}, {track})"),
-            Command::SetNotes { slot, .. } => write!(f, "SetNotes({slot})"),
+            Command::ClearClip { slot } => write!(f, "ClearClip({slot})"),
+            Command::AddEvent { slot, event } => write!(f, "AddEvent({slot}, {event:?})"),
+            Command::RemoveEvent { slot, tick, note } => write!(f, "RemoveEvent({slot}, {tick}, {note})"),
+            Command::SetClipLength { slot, length } => write!(f, "SetClipLength({slot}, {length:?})"),
             Command::NoteOn { slot, note, .. } => write!(f, "NoteOn({slot}, {note})"),
             Command::NoteOff { slot, note } => write!(f, "NoteOff({slot}, {note})"),
             Command::Play => write!(f, "Play"),
@@ -66,7 +78,8 @@ impl std::fmt::Debug for Command {
 /// Messages out of the engine. Times are engine time in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Feedback {
-    Step { step: u32, time: f64 },
+    /// `step` of `sequencer.length`; `tick` counted from play.
+    Step { step: u32, tick: u64, time: f64 },
     Trigger { slot: u8, voice: Option<u8>, note: Option<u8>, velocity: f32, time: f64, step: Option<u32> },
     Stopped { time: f64 },
     /// Peak (left, right) per channel index since the last meter message.
@@ -76,6 +89,33 @@ pub enum Feedback {
 struct Slot {
     instrument: Box<dyn Instrument>,
     routes: [Option<u8>; MAX_OUTPUTS],
+}
+
+/// A slot's clip and the notes it is playing. Preallocated: edits insert
+/// into spare capacity and never allocate.
+struct Track {
+    /// Sorted by (tick, note); at most `MAX_EVENTS`.
+    events: Vec<ClipEvent>,
+    length: Option<u32>,
+    /// (absolute tick it ends at, note), for notes the clip started.
+    active: [(u64, u8); MAX_ACTIVE],
+    num_active: usize,
+}
+
+impl Track {
+    fn reset(&mut self) {
+        self.events.clear();
+        self.length = None;
+        self.num_active = 0;
+    }
+
+    fn new() -> Self {
+        Self { events: Vec::with_capacity(MAX_EVENTS), length: None, active: [(0, 0); MAX_ACTIVE], num_active: 0 }
+    }
+
+    fn position(&self, e: &ClipEvent) -> Result<usize, usize> {
+        self.events.binary_search_by_key(&e.key(), ClipEvent::key)
+    }
 }
 
 struct Channel {
@@ -135,15 +175,20 @@ pub struct Engine {
     sr: f32,
     globals: [f32; NUM_GLOBALS],
     slots: Vec<Option<Slot>>,
+    tracks: Vec<Track>,
     channels: Vec<Channel>,
     master: Smoother,
     master_bus: Vec<f32>,
     master_peak: [f32; 2],
     playing: bool,
-    /// Index of the next step to fire.
-    next_step: u32,
-    /// Absolute sample position at which the next step fires.
-    next_step_at: f64,
+    /// The next tick to fire, counted from play.
+    tick: u64,
+    /// Position of the next tick in the `sequencer.length` loop. It wraps
+    /// to the start when it runs past the end, so shortening the loop
+    /// while playing goes back to step 1 and lengthening it continues.
+    loop_tick: u32,
+    /// Absolute sample position at which it fires.
+    next_tick_at: f64,
     /// Total samples rendered.
     pos: u64,
     meter_countdown: u32,
@@ -158,13 +203,15 @@ impl Engine {
             sr,
             globals,
             slots: (0..MAX_INSTRUMENTS).map(|_| None).collect(),
+            tracks: (0..MAX_INSTRUMENTS).map(|_| Track::new()).collect(),
             channels: (0..MAX_CHANNELS).map(|_| Channel::new(sr)).collect(),
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
             master_peak: [0.0; 2],
             playing: false,
-            next_step: 0,
-            next_step_at: 0.0,
+            tick: 0,
+            loop_tick: 0,
+            next_tick_at: 0.0,
             pos: 0,
             meter_countdown: 0,
         }
@@ -227,9 +274,13 @@ impl Engine {
                 // Never drop an instrument here: an invalid slot hands it
                 // straight back to be freed on the control side.
                 let Some(s) = self.slots.get_mut(slot as usize) else { return Some(instrument) };
+                self.tracks[slot as usize].reset();
                 return s.replace(Slot { instrument, routes: [None; MAX_OUTPUTS] }).map(|s| s.instrument);
             }
             Command::RemoveInstrument { slot } => {
+                if let Some(t) = self.tracks.get_mut(slot as usize) {
+                    t.reset();
+                }
                 return self.slots.get_mut(slot as usize)?.take().map(|s| s.instrument);
             }
             Command::SetRoute { slot, output, channel } => {
@@ -251,19 +302,33 @@ impl Engine {
                     c.snap(any_solo);
                 }
             }
-            Command::SetDrumStep { slot, track, step, level } => {
-                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
-                    s.instrument.set_drum_step(track as usize, step as usize, level);
+            Command::ClearClip { slot } => {
+                if let Some(t) = self.tracks.get_mut(slot as usize) {
+                    t.events.clear();
                 }
             }
-            Command::SetDrumTrack { slot, track, steps } => {
-                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
-                    s.instrument.set_drum_track(track as usize, &steps);
+            Command::AddEvent { slot, event } => {
+                if let Some(t) = self.tracks.get_mut(slot as usize)
+                    && event.tick < MAX_CLIP_TICKS
+                {
+                    match t.position(&event) {
+                        Ok(i) => t.events[i] = event,
+                        // Within the preallocated capacity: no allocation.
+                        Err(i) if t.events.len() < MAX_EVENTS => t.events.insert(i, event),
+                        Err(_) => {}
+                    }
                 }
             }
-            Command::SetNotes { slot, steps } => {
-                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
-                    s.instrument.set_notes(&steps);
+            Command::RemoveEvent { slot, tick, note } => {
+                if let Some(t) = self.tracks.get_mut(slot as usize)
+                    && let Ok(i) = t.position(&ClipEvent { tick, note, ..Default::default() })
+                {
+                    t.events.remove(i);
+                }
+            }
+            Command::SetClipLength { slot, length } => {
+                if let Some(t) = self.tracks.get_mut(slot as usize) {
+                    t.length = length.map(|l| l.clamp(1, MAX_CLIP_TICKS));
                 }
             }
             Command::NoteOn { slot, note, velocity, gate } => {
@@ -281,16 +346,17 @@ impl Engine {
                 }
             }
             Command::Play => {
+                self.release_clip_notes(None);
                 self.playing = true;
-                self.next_step = 0;
-                self.next_step_at = self.pos as f64;
+                self.tick = 0;
+                self.loop_tick = 0;
+                self.next_tick_at = self.pos as f64;
             }
             Command::Stop => {
                 if self.playing {
                     self.playing = false;
-                    for s in self.slots.iter_mut().flatten() {
-                        s.instrument.on_stop();
-                    }
+                    // The clips' notes end; notes held by keys do not.
+                    self.release_clip_notes(None);
                     emit(Feedback::Stopped { time: self.time() });
                 }
             }
@@ -312,31 +378,79 @@ impl Engine {
         if index % 2 == 0 { 2.0 * sixteenth * ratio } else { 2.0 * sixteenth * (1.0 - ratio) }
     }
 
-    fn fire_step(&mut self, emit: &mut impl FnMut(Feedback)) {
-        let length = (self.globals[LENGTH].round() as u32).clamp(1, MAX_STEPS as u32);
-        if self.next_step >= length {
-            self.next_step = 0;
+    /// Release the notes clips are playing: all of them, or those that end
+    /// by tick `until`.
+    fn release_clip_notes(&mut self, until: Option<u64>) {
+        for (slot, t) in self.tracks.iter_mut().enumerate() {
+            let mut i = 0;
+            while i < t.num_active {
+                let (end, note) = t.active[i];
+                if until.is_none_or(|u| end <= u) {
+                    t.num_active -= 1;
+                    t.active[i] = t.active[t.num_active];
+                    // A later clip note on the same pitch is still sounding:
+                    // ending this one must not cut it short.
+                    let still = t.active[..t.num_active].iter().any(|(e, n)| *n == note && until.is_some_and(|u| *e > u));
+                    if !still && let Some(Some(s)) = self.slots.get_mut(slot) {
+                        s.instrument.note_off(note);
+                    }
+                } else {
+                    i += 1;
+                }
+            }
         }
-        let step = self.next_step;
+    }
+
+    /// Fire one tick: notes that end here are released, then each clip
+    /// starts its events at this position.
+    fn fire_tick(&mut self, emit: &mut impl FnMut(Feedback)) {
+        let tick = self.tick;
         let time = self.time();
-        let samples = self.step_samples(step);
-        emit(Feedback::Step { step, time });
-        for (slot, s) in self.slots.iter_mut().enumerate() {
-            if let Some(s) = s {
-                s.instrument.on_step(step as usize, samples, &mut |h| {
+        let steps = (self.globals[LENGTH].round() as u32).clamp(1, MAX_STEPS as u32);
+        if self.loop_tick >= steps * TICKS_PER_STEP {
+            self.loop_tick = 0;
+        }
+        let loop_tick = self.loop_tick;
+        let step = loop_tick / TICKS_PER_STEP;
+        if loop_tick % TICKS_PER_STEP == 0 {
+            emit(Feedback::Step { step, tick, time });
+        }
+        self.release_clip_notes(Some(tick));
+        for (slot, t) in self.tracks.iter_mut().enumerate() {
+            let Some(Some(s)) = self.slots.get_mut(slot) else { continue };
+            // A clip with its own length loops from play; the others follow
+            // the global loop.
+            let pos = match t.length {
+                Some(length) => (tick % length as u64) as u32,
+                None => loop_tick,
+            };
+            let first = t.events.partition_point(|e| e.tick < pos);
+            for e in t.events[first..].iter().take_while(|e| e.tick == pos) {
+                let velocity = e.velocity as f32 / 127.0;
+                if let Some(h) = s.instrument.note_on(e.note, velocity, None) {
                     emit(Feedback::Trigger {
                         slot: slot as u8,
                         voice: h.voice,
                         note: h.note,
                         velocity: h.velocity,
                         time,
-                        step: Some(step),
-                    })
-                });
+                        step: Some(pos / TICKS_PER_STEP),
+                    });
+                }
+                if t.num_active < MAX_ACTIVE {
+                    t.active[t.num_active] = (tick + e.len.max(1) as u64, e.note);
+                    t.num_active += 1;
+                } else {
+                    // Too many sounding: end this one at once rather than
+                    // leave it stuck.
+                    s.instrument.note_off(e.note);
+                }
             }
         }
-        self.next_step_at += samples;
-        self.next_step = step + 1;
+        // Swing pairs count from the pattern's first step, as the playhead does.
+        self.next_tick_at += self.step_samples(step) / TICKS_PER_STEP as f64;
+        self.tick = tick + 1;
+        self.loop_tick = loop_tick + 1;
     }
 
     /// Render interleaved audio into `out` (`channels` >= 1; channels beyond
@@ -348,9 +462,9 @@ impl Engine {
         while frame < frames {
             let mut n = (frames - frame).min(MAX_BLOCK);
             if self.playing {
-                let until = (self.next_step_at - self.pos as f64).ceil();
+                let until = (self.next_tick_at - self.pos as f64).ceil();
                 if until <= 0.0 {
-                    self.fire_step(emit);
+                    self.fire_tick(emit);
                     continue;
                 }
                 n = n.min(until as usize);
@@ -457,7 +571,19 @@ impl Engine {
 pub(crate) mod tests {
     use super::*;
     use crate::instrument;
-    use fours_protocol::{InstrumentType, STEP_OFF, STEP_ON, Voice};
+    use fours_protocol::{InstrumentType, NoteStep, STEP_ON, Voice, drum_event, note_event};
+
+    /// Load a clip into slot 0.
+    fn add_events(e: &mut Engine, events: impl IntoIterator<Item = ClipEvent>) {
+        for event in events {
+            let _ = e.apply(Command::AddEvent { slot: 0, event }, &mut |_| {});
+        }
+    }
+
+    /// Load 303 note steps into slot 0's clip.
+    fn add_notes(e: &mut Engine, steps: &[NoteStep]) {
+        add_events(e, steps.iter().enumerate().filter_map(|(i, s)| note_event(i, s)));
+    }
 
     /// An engine with a `tr808` in slot 0, its main out on channel index 0.
     pub(crate) fn drum_engine() -> Engine {
@@ -500,10 +626,7 @@ pub(crate) mod tests {
     fn sequencer_fires_on_time() {
         let mut e = drum_engine();
         let mut fb = vec![];
-        let mut steps = [STEP_OFF; MAX_STEPS];
-        steps[0] = STEP_ON;
-        steps[4] = STEP_ON;
-        let _ = e.apply(Command::SetDrumTrack { slot: 0, track: 0, steps }, &mut |_| {});
+        add_events(&mut e, [0, 4].into_iter().filter_map(|s| drum_event(Voice::Kick, s, STEP_ON)));
         let _ = e.apply(Command::Play, &mut |_| {});
         // 120 bpm: 16th = 0.125s, one 16-step bar = 2s.
         render_secs(&mut e, 4.0, &mut fb);
@@ -583,9 +706,7 @@ pub(crate) mod tests {
         let _ = e.apply(Command::AddInstrument { slot: 0, instrument }, &mut fb);
         let _ = e.apply(Command::SetRoute { slot: 0, output: 0, channel: Some(0) }, &mut fb);
         let notes = fours_protocol::parse_notes("D1~ D#1~ C1~ F#1~ A#3~ A#3 A#3 - - - - D#1 - C#1 - G1").unwrap();
-        let mut steps = [NoteStep::default(); MAX_STEPS];
-        steps.copy_from_slice(&notes);
-        let _ = e.apply(Command::SetNotes { slot: 0, steps }, &mut fb);
+        add_notes(&mut e, &notes);
         // Square wave, and the decay/accent the bug was found with.
         for (index, value) in [(1u16, 1.0f32), (3, 0.5), (4, 0.5), (5, 0.62), (6, 0.74)] {
             let _ = e.apply(Command::SetParam { target: ParamTarget::Instrument { slot: 0, index }, value }, &mut fb);
@@ -622,18 +743,38 @@ pub(crate) mod tests {
         assert_eq!(silent_bars, 0, "the bass went silent");
     }
 
+    /// A clip note that ends while a later one on the same pitch sounds must
+    /// not cut that one short (both are C2; the first ends at tick 30, the
+    /// second at 36 = 0.1875 s at 120 bpm).
+    #[test]
+    fn overlapping_same_note_is_not_cut_short() {
+        let level = |events: &[ClipEvent]| {
+            let mut e = note_engine();
+            add_events(&mut e, events.iter().copied());
+            let _ = e.apply(Command::Play, &mut |_| {});
+            let out = render_secs(&mut e, 0.2, &mut vec![]);
+            let (a, b) = ((0.165 * 48000.0) as usize * 2, (0.18 * 48000.0) as usize * 2);
+            out[a..b].iter().fold(0.0f32, |m, x| m.max(x.abs()))
+        };
+        let c2 = |tick, len| ClipEvent { tick, len, note: 36, velocity: 89 };
+        let overlapped = level(&[c2(0, 30), c2(24, 12)]);
+        let alone = level(&[c2(0, 30)]);
+        assert!(overlapped > 0.05, "the second C2 should still sound: {overlapped}");
+        assert!(alone < overlapped * 0.5, "without it the note has ended: {alone} vs {overlapped}");
+    }
+
     /// A slid note glides in without retriggering the filter envelope: the
     /// level stays continuous across the step boundary, and no gap opens.
     #[test]
     fn tb303_slide_holds_the_gate() {
-        let mut steps = [NoteStep::default(); MAX_STEPS];
+        let mut steps = [NoteStep::default(); 2];
         steps[0] = NoteStep { note: Some(36), accent: false, slide: true };
         steps[1] = NoteStep { note: Some(43), accent: false, slide: false };
         let mut slid = note_engine();
-        let _ = slid.apply(Command::SetNotes { slot: 0, steps }, &mut |_| {});
+        add_notes(&mut slid, &steps);
         steps[0].slide = false;
         let mut plain = note_engine();
-        let _ = plain.apply(Command::SetNotes { slot: 0, steps }, &mut |_| {});
+        add_notes(&mut plain, &steps);
         // Step 0 is 0..0.125s; without slide its gate closes at 0.0625s.
         let gap_level = |e: &mut Engine| {
             let _ = e.apply(Command::Play, &mut |_| {});

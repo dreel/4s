@@ -80,7 +80,7 @@ echo "pad 0 2" >&7
 echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
 sleep 0.5
 check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
-check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","profile":"livid_block","seat":"e2e"} -> step:drums.kick.2' s journal
+check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","profile":"livid_block","seat":"e2e"} -> event:drums.48.36' s journal
 check "undo takes back a device pad press (the host user's)" "kick        ---- ---- ---- ----" bash -c "$BIN/4s undo >/dev/null && $BIN/4s pattern show kick"
 check "redo" "kick        --x- ---- ---- ----" bash -c "$BIN/4s redo >/dev/null && $BIN/4s pattern show kick"
 # Input that can do nothing is not journaled, from a device or over RPC:
@@ -158,6 +158,9 @@ check "a seat focused on a removed instrument falls back to the first" "focus: d
 check "focus the bass" "focus: bass" s focus bass
 check "connect a keyboard as a named device" "$KDEV as keys (Generic) out: -" s midi connect "$KDEV" --name keys
 check "the name is saved for this machine" '"name": "keys"' cat "$FOURS_DATA_DIR/midi-devices.json"
+BEFORE=$(s --json journal --limit 10000 | python3 -c "import json,sys;print(len(json.load(sys.stdin)['entries']))")
+for _ in 1 2 3 4 5; do echo "raw F8" >&8; done; echo "raw FE" >&8; echo "raw E0 00 40" >&8; sleep 0.5
+check "clock, active sensing, and pitch bend are not journaled" "0 new entries" bash -c "echo \$(( \$($BIN/4s --json journal --limit 10000 | python3 -c \"import json,sys;print(len(json.load(sys.stdin)['entries']))\") - $BEFORE )) new entries"
 "$BIN/4s" watch --type trigger --count 1 --json > "$TMP/key.json" &
 WATCH=$!; sleep 0.5
 echo "raw 90 24 64" >&8   # note on, C2 (36)
@@ -438,7 +441,7 @@ s set bass.cutoff 0.25 >/dev/null
 # the seat matching its user, and the host's devices play in the host seat.
 check "the CLI joins the seat matching its user" "you: e2e" s seat
 check "it is this engine's devices' seat" "e2e: cli#" s seat
-check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 3, "user": "bob"}'
+check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 4, "user": "bob"}'
 check "and stays unseated" "you: (no seat)" s --user bob seat
 check "seat edits need a seat" "you have no seat" s --user bob focus drums
 check "create a seat for bob" "you: bob" s --user bob --new-seat seat
@@ -519,6 +522,7 @@ FOURS_DATA_DIR=$B_DIR s daemon stop >/dev/null
 check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
 check "new is the default graph" "ch 1  Drums        vol 100%  pan C          <- drums" s mixer
 check "a new project starts a fresh history" "undo: (empty)" s history
+check "a one-off command as another user on the host makes no seat" "no dave" bash -c "$BIN/4s --user dave status >/dev/null; $BIN/4s seat | grep -q '^dave' && echo dave || echo no dave"
 check "undoing the only 808's removal makes it the focus again" "focus: drums" bash -c "$BIN/4s instrument rm drums >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s controller"
 check "load restores" "kick        X--- x--- X--- x---" bash -c "$BIN/4s project load e2e >/dev/null && $BIN/4s pattern show kick"
 check "load restores the 303 and its channel" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
@@ -526,6 +530,73 @@ check "load restores notes" "bass: C2 - G1! C3~" s notes bass
 check "load restores instrument params" "bass.cutoff = 0.25" s get bass.cutoff
 check "load restores seats and their bindings" "bind 1: keys any ch C1..B2 -> bass" bash -c "$BIN/4s seat | grep -A3 '^bob'"
 check "and focus" "focus: bass" bash -c "$BIN/4s seat | grep -A1 '^e2e'"
+# Clips (RFC 0007 phase 2): sequences are timed note events; step patterns
+# are views over them.
+s instrument add tb303 --id seq --no-channel >/dev/null
+s notes seq "C2 - D#2~ G1" >/dev/null
+check "a note pattern is a clip: half-step notes, a slide overlaps the next" "0:C2:12:89 48:D#2:25:89 72:G1:12:89" s clip show seq
+check "add a note between steps" "36:C3:6:100" s clip add seq 36 C3 --len 6 --vel 100
+check "the step view leaves it out" "seq: C2 - D#2~ G1" s notes seq
+check "it plays at its tick (step 2 + half a step at 120 bpm)" "C3 at 0.1875" python3 -c "
+import json, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--bars', '1', '--out', 'renders/clip.wav']))
+t = [x['time'] for x in r['triggers'] if x['instrument'] == 'seq' and x['note'] == 48]
+print(f'C3 at {t[0]:.4f}' if len(t) == 1 else t)"
+check "a clip loops at its own length: 3 steps against 16 (3 notes x 6 loops, cut by the bar)" "16 notes" python3 -c "
+import json, subprocess
+subprocess.check_output(['$BIN/4s', 'clip', 'length', 'seq', '3'])
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--bars', '1', '--out', 'renders/poly.wav']))
+print(len([x for x in r['triggers'] if x['instrument'] == 'seq']), 'notes')"
+check "an off-grid clip saves as events and loads back" "36:C3:6:100" bash -c "$BIN/4s project save clips >/dev/null && grep -q '\"clips\"' '$FOURS_DATA_DIR/projects/clips.4s/project.json' && $BIN/4s project new >/dev/null && $BIN/4s project load clips >/dev/null && $BIN/4s clip show seq"
+check "its own length too" "length 3 steps" s clip show seq
+s clip length seq auto >/dev/null
+check "quantize moves it to the nearest 16th" "48:C3:6:100" s clip quantize seq 1/16
+check "undo takes back the quantize" "36:C3:6:100" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq"
+check "clip edits are journaled per event" "event:seq.36.48" s journal --limit 3
+check "quantize wraps a note at the loop's end to its start" "0:D2:6:89" bash -c "$BIN/4s clip set seq 70:D2:6 >/dev/null && $BIN/4s clip length seq 3 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
+s clip length seq auto >/dev/null; s clip set seq "0:C2:12:89 36:C3:6:100 48:D#2:25:89 72:G1:12:89" >/dev/null
+check "remove a note" "0:C2:12:89 48:D#2:25:89 72:G1:12:89" bash -c "$BIN/4s clip rm seq 36 C3 >/dev/null && $BIN/4s clip show seq | tail -1"
+s clip set seq "0:C2:12:100 0:G2:12:89 48:D#2:6:89" >/dev/null
+check "a step edit leaves chords, velocities, and lengths on other steps alone" "0:C2:12:100 0:G2:12:89 48:D#2:6:89 96:C3:12:89" bash -c "$BIN/4s note seq 5 C3 >/dev/null && $BIN/4s clip show seq | tail -1"
+s instrument add tr808 --id seqd --no-channel >/dev/null
+s clip set seqd "0:36:24:100 12:42:6:89" >/dev/null
+check "so does a drum step edit" "0:C2:24:100 12:F#2:6:89 96:D2:24:89" bash -c "$BIN/4s pattern --instrument seqd step snare 5 on >/dev/null && $BIN/4s clip show seqd | tail -1"
+s instrument rm seqd >/dev/null
+check "clip set replaces the events" "seq: 1 notes" s clip set seq "0:60:96:127"
+check "clear" "seq: 0 notes" s clip clear seq
+check "quantize keeps a note past the longest clip on the grid" "1512:C2:6:89" bash -c "$BIN/4s clip set seq 1535:C2:6 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
+s instrument rm seq >/dev/null
+# The loop while playing (at 30 bpm a step is 0.5 s): shortening it past
+# the playhead goes back to step 1, lengthening it continues, and the Block
+# grid's playhead follows a focus clip with its own length.
+cat > "$TMP/loop.py" <<PY
+import subprocess, sys
+def run(*a): return subprocess.check_output(['$BIN/4s', *a], text=True)
+# One stream, so no step is missed between reads; 0-based (watch shows
+# steps from 1).
+watch = subprocess.Popen(['$BIN/4s', 'watch', '--type', 'playhead'], stdout=subprocess.PIPE, text=True)
+def step(): return int(watch.stdout.readline().split('step ')[1].split()[0]) - 1
+def until(ok):
+    while not ok(s := step()): pass
+    return s
+run('tempo', '30'); run('set', 'sequencer.length', sys.argv[1]); run('play')
+try:
+    if sys.argv[2] == 'shorten':
+        until(lambda s: s >= 13); run('set', 'sequencer.length', '12'); print('next step', step())
+    elif sys.argv[2] == 'lengthen':
+        until(lambda s: s == 11); until(lambda s: s == 3); run('set', 'sequencer.length', '16'); print('next step', step())
+    else:
+        s = until(lambda s: s >= 4)
+        col = run('controller').splitlines()[8].split()[s % 3]
+        print('grid playhead at clip step' if col == '#' else run('controller'))
+finally:
+    watch.kill(); run('stop'); run('set', 'sequencer.length', '16'); run('tempo', '120')
+PY
+check "shortening the loop past the playhead goes back to step 1" "next step 0" python3 "$TMP/loop.py" 16 shorten
+check "lengthening it continues" "next step 4" python3 "$TMP/loop.py" 12 lengthen
+s instrument add tr808 --id gridd --no-channel >/dev/null; s focus gridd >/dev/null; s clip length gridd 3 >/dev/null
+check "the Block grid's playhead follows a focus clip with its own length" "grid playhead at clip step" python3 "$TMP/loop.py" 16 grid
+s instrument rm gridd >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
 check "daemon logs" "listening on ws://" s daemon logs

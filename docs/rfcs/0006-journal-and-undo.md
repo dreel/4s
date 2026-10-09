@@ -40,8 +40,8 @@ for them and "absent" for everything else.
 | Key | Value |
 |-----|-------|
 | `param:<path>` | number |
-| `step:<inst>.<voice>.<i>` | level (1, 2) |
-| `note:<inst>.<i>` | `{note, accent, slide}` |
+| `step:<inst>.<voice>.<i>` | level (1, 2) (replaced by `event:`, see the amendment) |
+| `note:<inst>.<i>` | `{note, accent, slide}` (replaced by `event:`) |
 | `instrument:<id>` | `{type, name}` |
 | `channel:<n>` | name |
 | `channels:order` | `[n, ...]` (display order) |
@@ -261,4 +261,8 @@ the journal this means:
   and the host seat pin are not in the doc.
 - Seat changes are journaled like any other request; `seat.list` is read
   only.
+- **Clips (RFC 0007 phase 2)** replace the `step:` and `note:` keys with one
+  key per event, `event:<inst>.<tick>.<note>` -> `{len, velocity}`, and
+  `clip:<inst>` for a clip's own length. Two people editing different notes
+  still never conflict; a step edit changes one event key.
 

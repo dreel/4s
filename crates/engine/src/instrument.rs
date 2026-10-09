@@ -1,11 +1,13 @@
 //! The instrument abstraction. An instrument is built on the control side
 //! (`make`), handed to the audio thread through the command ring, and
 //! dropped back on the control side after removal. Everything it does on the
-//! audio thread (`render`, `on_step`, the setters) must be allocation-free.
+//! audio thread (`render`, notes, the setters) must be allocation-free. An
+//! instrument only makes sound: the sequencer plays it with notes from its
+//! clip (RFC 0007).
 
 use crate::tb303::Tb303;
 use crate::tr808::Tr808;
-use fours_protocol::{InstrumentType, KnobPage, MAX_STEPS, NoteStep, OutputInfo, OutputWidth, ParamInfo};
+use fours_protocol::{InstrumentType, KnobPage, OutputInfo, OutputWidth, ParamInfo};
 
 /// Most frames rendered per call. The engine splits larger blocks.
 pub const MAX_BLOCK: usize = 256;
@@ -13,7 +15,7 @@ pub const MAX_BLOCK: usize = 256;
 /// Most outputs any instrument has (the 808: main + 8 direct outs).
 pub const MAX_OUTPUTS: usize = 9;
 
-/// Something an instrument played on a step: a drum voice or a note.
+/// Something an instrument played: a drum voice or a note.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
     pub voice: Option<u8>,
@@ -30,16 +32,6 @@ pub trait Instrument: Send {
 
     /// A routed direct out leaves the instrument's main mix.
     fn set_routed(&mut self, _output: usize, _routed: bool) {}
-
-    fn set_drum_step(&mut self, _track: usize, _step: usize, _level: u8) {}
-    fn set_drum_track(&mut self, _track: usize, _steps: &[u8; MAX_STEPS]) {}
-    fn set_notes(&mut self, _steps: &[NoteStep; MAX_STEPS]) {}
-
-    /// A sequencer step started. `step_samples` is its length (with swing).
-    fn on_step(&mut self, step: usize, step_samples: f64, emit: &mut dyn FnMut(Hit));
-
-    /// The transport stopped.
-    fn on_stop(&mut self) {}
 
     /// Start a note: the one input every instrument takes (RFC 0007). With
     /// `gate_samples`, it releases by itself after that long; otherwise it

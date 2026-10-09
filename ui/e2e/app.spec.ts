@@ -330,6 +330,19 @@ test("seats: joined automatically, chooser to ignore, rejoin, and re-ask when th
   await expect(page.getByTestId("seat")).toHaveAttribute("data-seat", "pwother");
 });
 
+test("clips: a note off the step grid shows as a note in the editor, and steps still edit the clip", async () => {
+  const { page, rpc } = h;
+  await page.getByTestId("step-kick-0").click();
+  await expect.poll(async () => (await rpc("clip.get", { instrument: "drums" })).events).toEqual([
+    { tick: 0, len: 24, note: 36, velocity: 89 },
+  ]);
+  await expect(page.getByTestId("clip-note-drums")).toHaveCount(0);
+  await rpc("clip.add", { instrument: "drums", events: [{ tick: 36, len: 6, note: 38, velocity: 100 }] });
+  await expect(page.getByTestId("clip-note-drums")).toHaveText("1 note off the step grid (not shown here)");
+  await rpc("clip.length", { instrument: "drums", length: 72 });
+  await expect(page.getByTestId("clip-note-drums")).toContainText("loops every 3 steps");
+});
+
 test("transport: play from UI, playhead moves, stop", async () => {
   const { page, rpc } = h;
   await page.getByTestId("transport-toggle").click();

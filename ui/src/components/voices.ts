@@ -24,3 +24,6 @@ const SHORT: Record<Voice, string> = {
 
 export const voiceLabel = (v: Voice) => LABELS[v];
 export const voiceShort = (v: Voice) => SHORT[v];
+
+/** GM drum notes the 808's voices play (the protocol's `Voice::gm_note`). */
+export const GM_NOTES = [36, 38, 39, 42, 46, 45, 50, 56];

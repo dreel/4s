@@ -98,6 +98,73 @@
         ],
         "type": "object"
       },
+      "Clip": {
+        "description": "An instrument's clip.",
+        "properties": {
+          "events": {
+            "description": "Sorted by (tick, note).",
+            "items": {
+              "$ref": "#/$defs/ClipEvent"
+            },
+            "type": "array"
+          },
+          "instrument": {
+            "type": "string"
+          },
+          "length": {
+            "description": "Length in ticks; `None` follows `sequencer.length`.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "instrument",
+          "events"
+        ],
+        "type": "object"
+      },
+      "ClipEvent": {
+        "description": "One note in a clip.",
+        "properties": {
+          "len": {
+            "description": "Length in ticks (at least 1).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "note": {
+            "description": "MIDI note; a drum machine plays the voice on that GM note.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tick": {
+            "description": "Start, in ticks from the clip's start (`PPQ` per quarter note).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "velocity": {
+            "description": "1..127.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tick",
+          "len",
+          "note",
+          "velocity"
+        ],
+        "type": "object"
+      },
       "ControllerState": {
         "properties": {
           "device": {
@@ -295,6 +362,23 @@
               "type",
               "instrument",
               "steps"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "An instrument's clip changed (any edit, including through a step\nview, which also sends the view's events).",
+            "properties": {
+              "clip": {
+                "$ref": "#/$defs/Clip"
+              },
+              "type": {
+                "const": "clip_changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "clip"
             ],
             "type": "object"
           },
@@ -1284,6 +1368,26 @@
         ],
         "type": "object"
       },
+      "ProjectClip": {
+        "description": "A clip in a project file: events in text form (`tick:note:len:vel`, see\n`format_events`) and an optional length in ticks.",
+        "properties": {
+          "events": {
+            "type": "string"
+          },
+          "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
       "ProjectController": {
         "properties": {
           "follow": {
@@ -1405,6 +1509,14 @@
         },
         "type": "array"
       },
+      "clips": {
+        "additionalProperties": {
+          "$ref": "#/$defs/ProjectClip"
+        },
+        "default": {},
+        "description": "Per instrument id (RFC 0007): clips that do not fit a step pattern\n(off-grid events, other lengths or velocities) or have their own\nlength. An instrument is in `patterns` or here, not both.",
+        "type": "object"
+      },
       "controller": {
         "$ref": "#/$defs/ProjectController"
       },
@@ -1465,8 +1577,8 @@
     "title": "ProjectFile",
     "type": "object"
   },
-  "project_format_version": 3,
-  "protocol_version": 3,
+  "project_format_version": 4,
+  "protocol_version": 4,
   "request": {
     "$defs": {
       "CcMap": {
@@ -1588,6 +1700,143 @@
         ],
         "type": "object"
       },
+      "ClipEvent": {
+        "description": "One note in a clip.",
+        "properties": {
+          "len": {
+            "description": "Length in ticks (at least 1).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "note": {
+            "description": "MIDI note; a drum machine plays the voice on that GM note.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tick": {
+            "description": "Start, in ticks from the clip's start (`PPQ` per quarter note).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "velocity": {
+            "description": "1..127.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tick",
+          "len",
+          "note",
+          "velocity"
+        ],
+        "type": "object"
+      },
+      "ClipEventsParams": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/$defs/ClipEvent"
+            },
+            "type": "array"
+          },
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
+      "ClipGetParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ClipLengthParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "length": {
+            "default": null,
+            "description": "Ticks (1..`MAX_CLIP_TICKS`); omit to follow `sequencer.length`.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ClipQuantizeParams": {
+        "properties": {
+          "grid": {
+            "description": "Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "grid"
+        ],
+        "type": "object"
+      },
+      "ClipRemoveParams": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/$defs/EventKey"
+            },
+            "type": "array"
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
       "ControllerModeParams": {
         "properties": {
           "follow": {
@@ -1627,6 +1876,27 @@
       },
       "Empty": {
         "description": "Params or result with no fields.",
+        "type": "object"
+      },
+      "EventKey": {
+        "description": "An event's identity in a clip.",
+        "properties": {
+          "note": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tick",
+          "note"
+        ],
         "type": "object"
       },
       "HelloParams": {
@@ -2288,6 +2558,26 @@
         ],
         "type": "object"
       },
+      "ProjectClip": {
+        "description": "A clip in a project file: events in text form (`tick:note:len:vel`, see\n`format_events`) and an optional length in ticks.",
+        "properties": {
+          "events": {
+            "type": "string"
+          },
+          "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
       "ProjectController": {
         "properties": {
           "follow": {
@@ -2308,6 +2598,14 @@
               "$ref": "#/$defs/ChannelInfo"
             },
             "type": "array"
+          },
+          "clips": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ProjectClip"
+            },
+            "default": {},
+            "description": "Per instrument id (RFC 0007): clips that do not fit a step pattern\n(off-grid events, other lengths or velocities) or have their own\nlength. An instrument is in `patterns` or here, not both.",
+            "type": "object"
           },
           "controller": {
             "$ref": "#/$defs/ProjectController"
@@ -3438,6 +3736,125 @@
         "type": "object"
       },
       {
+        "description": "An instrument's clip: timed note events (RFC 0007).",
+        "properties": {
+          "method": {
+            "const": "clip.get",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipGetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Replace a clip's events.",
+        "properties": {
+          "method": {
+            "const": "clip.set",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipEventsParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Add events (replacing any at the same tick and note).",
+        "properties": {
+          "method": {
+            "const": "clip.add",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipEventsParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove events by tick and note.",
+        "properties": {
+          "method": {
+            "const": "clip.remove",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipRemoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Set a clip's own length, or follow `sequencer.length`.",
+        "properties": {
+          "method": {
+            "const": "clip.length",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipLengthParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove every event.",
+        "properties": {
+          "method": {
+            "const": "clip.clear",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipGetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Move every event to the nearest grid line.",
+        "properties": {
+          "method": {
+            "const": "clip.quantize",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipQuantizeParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Play a drum voice or a note immediately (audition).",
         "properties": {
           "method": {
@@ -4134,6 +4551,73 @@
         ],
         "type": "object"
       },
+      "Clip": {
+        "description": "An instrument's clip.",
+        "properties": {
+          "events": {
+            "description": "Sorted by (tick, note).",
+            "items": {
+              "$ref": "#/$defs/ClipEvent"
+            },
+            "type": "array"
+          },
+          "instrument": {
+            "type": "string"
+          },
+          "length": {
+            "description": "Length in ticks; `None` follows `sequencer.length`.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "instrument",
+          "events"
+        ],
+        "type": "object"
+      },
+      "ClipEvent": {
+        "description": "One note in a clip.",
+        "properties": {
+          "len": {
+            "description": "Length in ticks (at least 1).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "note": {
+            "description": "MIDI note; a drum machine plays the voice on that GM note.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tick": {
+            "description": "Start, in ticks from the clip's start (`PPQ` per quarter note).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "velocity": {
+            "description": "1..127.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tick",
+          "len",
+          "note",
+          "velocity"
+        ],
+        "type": "object"
+      },
       "ControllerState": {
         "properties": {
           "device": {
@@ -4710,6 +5194,13 @@
       "audio": {
         "$ref": "#/$defs/AudioStatus"
       },
+      "clips": {
+        "description": "One clip per instrument, in instrument order (RFC 0007).",
+        "items": {
+          "$ref": "#/$defs/Clip"
+        },
+        "type": "array"
+      },
       "controller": {
         "$ref": "#/$defs/ControllerState"
       },
@@ -4730,7 +5221,7 @@
         "type": "object"
       },
       "patterns": {
-        "description": "One pattern per instrument, in instrument order.",
+        "description": "One step view per instrument, in instrument order.",
         "items": {
           "$ref": "#/$defs/InstrumentPattern"
         },
@@ -4757,6 +5248,7 @@
       "params",
       "graph",
       "patterns",
+      "clips",
       "controller",
       "midi",
       "seats",

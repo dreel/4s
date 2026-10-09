@@ -47,7 +47,8 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 
 Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop`), the instrument graph (`instrument.*`, `channel.*`,
-`route.set`), pattern edits (`pattern.*`, drum steps and note steps),
+`route.set`), clips (`clip.*`: timed note events, RFC 0007) and their step
+views (`pattern.*`, drum steps and note steps),
 auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
 seats and their bindings (`seat.*`, RFC 0007), undo and the journal
 (`history.*`, `journal.get`, `journal.export`), projects (`project.*`,

@@ -1,4 +1,4 @@
-//! `tr808`: eight drum voices with a step pattern per voice and an internal
+//! `tr808`: eight drum voices, played by GM drum notes, with an internal
 //! mix. Output 0 is the stereo main mix (each voice after level, mute, and
 //! constant-power pan). Outputs 1..=8 are mono direct outs, one per voice
 //! (after level and mute, before pan). A direct out that is routed leaves the
@@ -8,7 +8,7 @@ use crate::dsp::Smoother;
 use crate::instrument::{Hit, Instrument, MAX_BLOCK};
 use crate::params::{cont, mono_pan, toggle, volume_to_gain};
 use crate::voices::{DrumVoice, VoiceParams, default_decay, make_voice};
-use fours_protocol::{KnobPage, MAX_STEPS, NUM_TRACKS, OutputInfo, OutputWidth, ParamInfo, STEP_ACCENT, STEP_OFF, Voice};
+use fours_protocol::{KnobPage, NUM_TRACKS, OutputInfo, OutputWidth, ParamInfo, Voice};
 
 pub const VELOCITY_ON: f32 = 0.7;
 pub const VELOCITY_ACCENT: f32 = 1.0;
@@ -32,7 +32,6 @@ pub struct Tr808 {
     voices: Vec<Box<dyn DrumVoice>>,
     strips: Vec<Strip>,
     params: [f32; NUM_TRACKS * VOICE_PARAMS],
-    pattern: [[u8; MAX_STEPS]; NUM_TRACKS],
     routed: [bool; NUM_TRACKS],
     /// Output buffers: main, then one per voice. Interleaved stereo.
     bufs: Vec<Vec<f32>>,
@@ -58,7 +57,6 @@ impl Tr808 {
             voices: Voice::ALL.iter().map(|v| make_voice(*v, sr)).collect(),
             strips,
             params,
-            pattern: [[STEP_OFF; MAX_STEPS]; NUM_TRACKS],
             routed: [false; NUM_TRACKS],
             bufs: (0..=NUM_TRACKS).map(|_| vec![0.0; MAX_BLOCK * 2]).collect(),
         }
@@ -145,29 +143,6 @@ impl Instrument for Tr808 {
     fn set_routed(&mut self, output: usize, routed: bool) {
         if (1..=NUM_TRACKS).contains(&output) {
             self.routed[output - 1] = routed;
-        }
-    }
-
-    fn set_drum_step(&mut self, track: usize, step: usize, level: u8) {
-        if track < NUM_TRACKS && step < MAX_STEPS {
-            self.pattern[track][step] = level;
-        }
-    }
-
-    fn set_drum_track(&mut self, track: usize, steps: &[u8; MAX_STEPS]) {
-        if track < NUM_TRACKS {
-            self.pattern[track] = *steps;
-        }
-    }
-
-    fn on_step(&mut self, step: usize, _step_samples: f64, emit: &mut dyn FnMut(Hit)) {
-        for track in 0..NUM_TRACKS {
-            let level = self.pattern[track][step];
-            if level != STEP_OFF {
-                let velocity = if level == STEP_ACCENT { VELOCITY_ACCENT } else { VELOCITY_ON };
-                self.play(track, velocity);
-                emit(Hit { voice: Some(track as u8), note: None, velocity });
-            }
         }
     }
 

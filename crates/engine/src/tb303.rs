@@ -3,14 +3,14 @@
 //! Band-limited (PolyBLEP) saw or square -> 4-pole resonant ladder lowpass
 //! (24 dB/oct, tanh stages) -> VCA. A filter envelope decays from the
 //! `env_mod` depth. Accented notes play louder and add an accent sweep to the
-//! filter that builds up over consecutive accents. A step with slide glides
-//! into the next note (~60 ms) without retriggering, holding the gate.
-//! Gates last half a step otherwise.
+//! filter that builds up over consecutive accents. A note that starts while
+//! another is held glides into it (~60 ms) without retriggering (legato), as
+//! a 303 slide does; the sequencer plays a slide as overlapping notes.
 
 use crate::dsp::{lerp_exp, semitones_to_ratio, soft_clip};
 use crate::instrument::{Hit, Instrument, MAX_BLOCK};
 use crate::params::{cont, toggle};
-use fours_protocol::{KnobPage, MAX_STEPS, NoteStep, OutputWidth, ParamInfo};
+use fours_protocol::{KnobPage, OutputWidth, ParamInfo};
 
 pub const TUNE: usize = 0;
 pub const WAVEFORM: usize = 1;
@@ -47,7 +47,6 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
 pub struct Tb303 {
     sr: f32,
     params: [f32; NUM_PARAMS],
-    notes: [NoteStep; MAX_STEPS],
     phase: f32,
     /// Current pitch as a (fractional) MIDI note, gliding toward `target`.
     pitch: f32,
@@ -69,10 +68,7 @@ pub struct Tb303 {
     accent_cap: f32,
     accent_coef: f32,
     ladder: [f32; 4],
-    /// The previous step asked to slide into this one.
-    slide_pending: bool,
-    /// The current note is held by a keyboard (until its note-off), so the
-    /// sequencer's rests and stop do not cut it; a sequenced note takes over.
+    /// The current note is held (until its note-off) rather than timed.
     held_by_key: bool,
     /// Held keys, oldest first; the last one sounds (last-note priority).
     keys: [u8; MAX_KEYS],
@@ -90,7 +86,6 @@ impl Tb303 {
         Self {
             sr,
             params,
-            notes: [NoteStep::default(); MAX_STEPS],
             phase: 0.0,
             pitch: 36.0,
             target: 36.0,
@@ -106,7 +101,6 @@ impl Tb303 {
             accent_cap: 0.0,
             accent_coef: coef(0.08),
             ladder: [0.0; 4],
-            slide_pending: false,
             held_by_key: false,
             keys: [0; MAX_KEYS],
             num_keys: 0,
@@ -177,37 +171,8 @@ impl Instrument for Tb303 {
         }
     }
 
-    fn set_notes(&mut self, steps: &[NoteStep; MAX_STEPS]) {
-        self.notes = *steps;
-    }
-
-    fn on_step(&mut self, step: usize, step_samples: f64, emit: &mut dyn FnMut(Hit)) {
-        let s = self.notes[step];
-        let sliding_in = self.slide_pending && self.gate;
-        self.slide_pending = false;
-        let Some(note) = s.note else {
-            if !self.held_by_key {
-                self.release();
-            }
-            return;
-        };
-        self.held_by_key = false;
-        let gate = if s.slide { None } else { Some(step_samples * 0.5) };
-        self.start(note, s.accent, sliding_in, gate);
-        self.slide_pending = s.slide;
-        let velocity = if s.accent { VELOCITY_ACCENT } else { VELOCITY_ON };
-        emit(Hit { voice: None, note: Some(note), velocity });
-    }
-
-    fn on_stop(&mut self) {
-        if !self.held_by_key {
-            self.release();
-        }
-        self.slide_pending = false;
-    }
-
     fn note_on(&mut self, note: u8, velocity: f32, gate_samples: Option<f64>) -> Option<Hit> {
-        // Overlapping keyboard notes glide, like playing legato on a 303.
+        // Overlapping notes (keys, or a sequenced slide) glide: legato.
         let held = gate_samples.is_none();
         let glide = self.gate && held;
         if held {
@@ -225,7 +190,7 @@ impl Instrument for Tb303 {
 
     fn note_off(&mut self, note: u8) {
         let was_top = self.remove_key(note);
-        // A sequenced note that took over a held key is not the key's to end,
+        // A timed note (an audition) that took over is not the key's to end,
         // and releasing a key under the sounding one changes nothing.
         if !self.held_by_key || !was_top {
             return;

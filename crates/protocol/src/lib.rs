@@ -3,15 +3,17 @@
 //! and JSON Schema are generated from it (see `src/bin/gen_bindings.rs`).
 
 pub mod api;
+pub mod clip;
 pub mod project;
 pub mod types;
 
 pub use api::*;
+pub use clip::*;
 pub use project::*;
 pub use types::*;
 
 /// Bumped on any breaking change to the wire protocol.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Default address the daemon listens on.
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:4440";

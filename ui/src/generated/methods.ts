@@ -5,6 +5,12 @@ import type { ChannelInfo } from "./ChannelInfo";
 import type { ChannelMoveParams } from "./ChannelMoveParams";
 import type { ChannelRemoveParams } from "./ChannelRemoveParams";
 import type { ChannelRenameParams } from "./ChannelRenameParams";
+import type { Clip } from "./Clip";
+import type { ClipEventsParams } from "./ClipEventsParams";
+import type { ClipGetParams } from "./ClipGetParams";
+import type { ClipLengthParams } from "./ClipLengthParams";
+import type { ClipQuantizeParams } from "./ClipQuantizeParams";
+import type { ClipRemoveParams } from "./ClipRemoveParams";
 import type { ControllerModeParams } from "./ControllerModeParams";
 import type { ControllerState } from "./ControllerState";
 import type { DaemonInfo } from "./DaemonInfo";
@@ -106,6 +112,13 @@ export interface Methods {
   "pattern.get_notes": { params: NotesGetParams; result: NotesResult };
   "pattern.set_notes": { params: NotesSetParams; result: NotesResult };
   "pattern.set_note": { params: NoteSetParams; result: NotesResult };
+  "clip.get": { params: ClipGetParams; result: Clip };
+  "clip.set": { params: ClipEventsParams; result: Clip };
+  "clip.add": { params: ClipEventsParams; result: Clip };
+  "clip.remove": { params: ClipRemoveParams; result: Clip };
+  "clip.length": { params: ClipLengthParams; result: Clip };
+  "clip.clear": { params: ClipGetParams; result: Clip };
+  "clip.quantize": { params: ClipQuantizeParams; result: Clip };
   "voice.trigger": { params: TriggerParams; result: Empty };
   "voice.note_on": { params: NoteParams; result: Empty };
   "voice.note_off": { params: NoteParams; result: Empty };
@@ -177,6 +190,13 @@ export const METHODS: MethodName[] = [
   "pattern.get_notes",
   "pattern.set_notes",
   "pattern.set_note",
+  "clip.get",
+  "clip.set",
+  "clip.add",
+  "clip.remove",
+  "clip.length",
+  "clip.clear",
+  "clip.quantize",
   "voice.trigger",
   "voice.note_on",
   "voice.note_off",
