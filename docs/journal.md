@@ -245,6 +245,11 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
   engine host's disk or ports and never change the doc. MIDI input from a
   device is recorded as `midi.input` with the device's profile, so it
   replays the same way without the device.
+- **Replay into a daemon with the recording's host user.** Each entry
+  records its caller's seat, and replay joins it, but `controller.*` and a
+  Block act on the host seat, the daemon's own user (`FOURS_USER`, else the
+  OS user). Fixtures in `tests/journals/` are recorded as `e2e`, the user
+  `scripts/e2e-cli.sh` runs as.
 - **Export covers the current segment only.** If it is longer than the
   in-memory journal (10k entries), export fails; replay the `.jsonl` file
   instead.

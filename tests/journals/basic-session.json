@@ -85,8 +85,8 @@
   "entries": [
     {
       "seq": 2,
-      "time": 1791569228.499359,
-      "user": "samuelt",
+      "time": 1791569333.723382,
+      "user": "e2e",
       "origin": "cli",
       "method": "param.set",
       "params": {
@@ -97,7 +97,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -111,8 +111,8 @@
     },
     {
       "seq": 3,
-      "time": 1791569228.499565,
-      "user": "samuelt",
+      "time": 1791569333.723576,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
       "params": {
@@ -141,7 +141,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -175,8 +175,8 @@
     },
     {
       "seq": 4,
-      "time": 1791569228.49978,
-      "user": "samuelt",
+      "time": 1791569333.723757,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
       "params": {
@@ -205,7 +205,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -234,8 +234,8 @@
     },
     {
       "seq": 5,
-      "time": 1791569228.499991,
-      "user": "samuelt",
+      "time": 1791569333.72393,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_step",
       "params": {
@@ -248,7 +248,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -262,8 +262,8 @@
     },
     {
       "seq": 6,
-      "time": 1791569228.500259,
-      "user": "samuelt",
+      "time": 1791569333.724181,
+      "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
       "params": {
@@ -277,7 +277,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -314,8 +314,8 @@
     },
     {
       "seq": 7,
-      "time": 1791569228.500815,
-      "user": "samuelt",
+      "time": 1791569333.724723,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
       "params": {
@@ -647,7 +647,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -701,8 +701,8 @@
     },
     {
       "seq": 8,
-      "time": 1791569228.501327,
-      "user": "samuelt",
+      "time": 1791569333.725233,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_note",
       "params": {
@@ -718,7 +718,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -736,8 +736,8 @@
     },
     {
       "seq": 9,
-      "time": 1791569228.501698,
-      "user": "samuelt",
+      "time": 1791569333.725606,
+      "user": "e2e",
       "origin": "cli",
       "method": "param.set",
       "params": {
@@ -748,7 +748,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -762,8 +762,8 @@
     },
     {
       "seq": 10,
-      "time": 1791569228.501892,
-      "user": "samuelt",
+      "time": 1791569333.725798,
+      "user": "e2e",
       "origin": "cli",
       "method": "param.set",
       "params": {
@@ -774,7 +774,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -788,8 +788,8 @@
     },
     {
       "seq": 11,
-      "time": 1791569228.50225,
-      "user": "samuelt",
+      "time": 1791569333.726164,
+      "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
       "params": {
@@ -801,7 +801,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -815,8 +815,8 @@
     },
     {
       "seq": 12,
-      "time": 1791569228.50259,
-      "user": "samuelt",
+      "time": 1791569333.726519,
+      "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
       "params": {
@@ -828,7 +828,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [],
       "reverts": null,
@@ -836,8 +836,8 @@
     },
     {
       "seq": 13,
-      "time": 1791569228.502805,
-      "user": "samuelt",
+      "time": 1791569333.726754,
+      "user": "e2e",
       "origin": "cli",
       "method": "seat.page",
       "params": {
@@ -848,11 +848,11 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
-          "key": "seat:samuelt",
+          "key": "seat:e2e",
           "before": null,
           "after": {
             "bindings": [],
@@ -868,8 +868,8 @@
     },
     {
       "seq": 14,
-      "time": 1791569228.503166,
-      "user": "samuelt",
+      "time": 1791569333.727132,
+      "user": "e2e",
       "origin": "cli",
       "method": "controller.knob",
       "params": {
@@ -880,7 +880,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -894,8 +894,8 @@
     },
     {
       "seq": 15,
-      "time": 1791569228.503443,
-      "user": "samuelt",
+      "time": 1791569333.727421,
+      "user": "e2e",
       "origin": "cli",
       "method": "channel.add",
       "params": {
@@ -905,7 +905,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -931,8 +931,8 @@
     },
     {
       "seq": 16,
-      "time": 1791569228.503707,
-      "user": "samuelt",
+      "time": 1791569333.727681,
+      "user": "e2e",
       "origin": "cli",
       "method": "route.set",
       "params": {
@@ -944,7 +944,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -958,8 +958,8 @@
     },
     {
       "seq": 17,
-      "time": 1791569228.504025,
-      "user": "samuelt",
+      "time": 1791569333.727999,
+      "user": "e2e",
       "origin": "cli",
       "method": "route.set",
       "params": {
@@ -971,7 +971,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -990,8 +990,8 @@
     },
     {
       "seq": 18,
-      "time": 1791569228.504364,
-      "user": "samuelt",
+      "time": 1791569333.728316,
+      "user": "e2e",
       "origin": "cli",
       "method": "channel.move",
       "params": {
@@ -1002,7 +1002,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1024,7 +1024,7 @@
     },
     {
       "seq": 19,
-      "time": 1791569228.505054,
+      "time": 1791569333.728927,
       "user": "alice",
       "origin": "cli",
       "method": "param.set",
@@ -1050,7 +1050,7 @@
     },
     {
       "seq": 20,
-      "time": 1791569228.505587,
+      "time": 1791569333.729482,
       "user": "bob",
       "origin": "cli",
       "method": "param.set",
@@ -1076,7 +1076,7 @@
     },
     {
       "seq": 21,
-      "time": 1791569228.50578,
+      "time": 1791569333.729665,
       "user": "alice",
       "origin": "cli",
       "method": "history.undo",
@@ -1093,7 +1093,7 @@
     },
     {
       "seq": 22,
-      "time": 1791569228.505985,
+      "time": 1791569333.72987,
       "user": "bob",
       "origin": "cli",
       "method": "history.undo",
@@ -1116,7 +1116,7 @@
     },
     {
       "seq": 23,
-      "time": 1791569228.506196,
+      "time": 1791569333.730087,
       "user": "bob",
       "origin": "cli",
       "method": "history.redo",
@@ -1139,8 +1139,8 @@
     },
     {
       "seq": 24,
-      "time": 1791569228.506509,
-      "user": "samuelt",
+      "time": 1791569333.730383,
+      "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
       "params": {
@@ -1154,7 +1154,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1171,8 +1171,8 @@
     },
     {
       "seq": 25,
-      "time": 1791569228.507076,
-      "user": "samuelt",
+      "time": 1791569333.730937,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
       "params": {
@@ -1504,7 +1504,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1540,8 +1540,8 @@
     },
     {
       "seq": 26,
-      "time": 1791569228.507644,
-      "user": "samuelt",
+      "time": 1791569333.731488,
+      "user": "e2e",
       "origin": "cli",
       "method": "instrument.remove",
       "params": {
@@ -1552,7 +1552,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1596,8 +1596,8 @@
     },
     {
       "seq": 27,
-      "time": 1791569228.508054,
-      "user": "samuelt",
+      "time": 1791569333.731892,
+      "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
       "params": {},
@@ -1605,7 +1605,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1649,8 +1649,8 @@
     },
     {
       "seq": 28,
-      "time": 1791569228.508271,
-      "user": "samuelt",
+      "time": 1791569333.732094,
+      "user": "e2e",
       "origin": "cli",
       "method": "param.set",
       "params": {
@@ -1661,7 +1661,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [],
       "reverts": null,
@@ -1669,8 +1669,8 @@
     },
     {
       "seq": 29,
-      "time": 1791569228.508486,
-      "user": "samuelt",
+      "time": 1791569333.732288,
+      "user": "e2e",
       "origin": "cli",
       "method": "pattern.clear",
       "params": {
@@ -1681,7 +1681,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1700,8 +1700,8 @@
     },
     {
       "seq": 30,
-      "time": 1791569228.508704,
-      "user": "samuelt",
+      "time": 1791569333.732485,
+      "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
       "params": {},
@@ -1709,7 +1709,7 @@
         "playing": false,
         "step": null,
         "page": 0,
-        "seat": "samuelt"
+        "seat": "e2e"
       },
       "changes": [
         {
@@ -1727,5 +1727,5 @@
       "error": null
     }
   ],
-  "digest": "31ce0223f0578612"
+  "digest": "eeb90b3bed0ea6b1"
 }
