@@ -78,15 +78,14 @@
     },
     "patterns": {},
     "controller": {
-      "target": "drums",
-      "knob_mode": "volume",
       "follow": true
-    }
+    },
+    "seats": {}
   },
   "entries": [
     {
-      "seq": 1,
-      "time": 1791339490.545464,
+      "seq": 2,
+      "time": 1791569228.499359,
       "user": "samuelt",
       "origin": "cli",
       "method": "param.set",
@@ -97,7 +96,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -110,8 +110,8 @@
       "error": null
     },
     {
-      "seq": 2,
-      "time": 1791339490.549845,
+      "seq": 3,
+      "time": 1791569228.499565,
       "user": "samuelt",
       "origin": "cli",
       "method": "pattern.set",
@@ -140,7 +140,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -173,8 +174,8 @@
       "error": null
     },
     {
-      "seq": 3,
-      "time": 1791339490.553872,
+      "seq": 4,
+      "time": 1791569228.49978,
       "user": "samuelt",
       "origin": "cli",
       "method": "pattern.set",
@@ -203,7 +204,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -231,8 +233,8 @@
       "error": null
     },
     {
-      "seq": 4,
-      "time": 1791339490.557634,
+      "seq": 5,
+      "time": 1791569228.499991,
       "user": "samuelt",
       "origin": "cli",
       "method": "pattern.set_step",
@@ -245,7 +247,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -258,8 +261,8 @@
       "error": null
     },
     {
-      "seq": 5,
-      "time": 1791339490.561405,
+      "seq": 6,
+      "time": 1791569228.500259,
       "user": "samuelt",
       "origin": "cli",
       "method": "instrument.add",
@@ -273,7 +276,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -309,8 +313,8 @@
       "error": null
     },
     {
-      "seq": 6,
-      "time": 1791339490.565229,
+      "seq": 7,
+      "time": 1791569228.500815,
       "user": "samuelt",
       "origin": "cli",
       "method": "pattern.set_notes",
@@ -642,7 +646,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -695,8 +700,8 @@
       "error": null
     },
     {
-      "seq": 7,
-      "time": 1791339490.569299,
+      "seq": 8,
+      "time": 1791569228.501327,
       "user": "samuelt",
       "origin": "cli",
       "method": "pattern.set_note",
@@ -712,7 +717,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -729,8 +735,8 @@
       "error": null
     },
     {
-      "seq": 8,
-      "time": 1791339490.572869,
+      "seq": 9,
+      "time": 1791569228.501698,
       "user": "samuelt",
       "origin": "cli",
       "method": "param.set",
@@ -741,7 +747,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -754,8 +761,8 @@
       "error": null
     },
     {
-      "seq": 9,
-      "time": 1791339490.577709,
+      "seq": 10,
+      "time": 1791569228.501892,
       "user": "samuelt",
       "origin": "cli",
       "method": "param.set",
@@ -766,7 +773,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -779,8 +787,8 @@
       "error": null
     },
     {
-      "seq": 10,
-      "time": 1791339490.580859,
+      "seq": 11,
+      "time": 1791569228.50225,
       "user": "samuelt",
       "origin": "cli",
       "method": "controller.press",
@@ -792,7 +800,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -805,8 +814,8 @@
       "error": null
     },
     {
-      "seq": 11,
-      "time": 1791339490.583962,
+      "seq": 12,
+      "time": 1791569228.50259,
       "user": "samuelt",
       "origin": "cli",
       "method": "controller.press",
@@ -818,36 +827,48 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [],
       "reverts": null,
       "error": "row and col must be 0..7"
     },
     {
-      "seq": 12,
-      "time": 1791339490.586702,
+      "seq": 13,
+      "time": 1791569228.502805,
       "user": "samuelt",
       "origin": "cli",
-      "method": "controller.set_mode",
+      "method": "seat.page",
       "params": {
-        "follow": null,
-        "knob_mode": "decay",
-        "page": null,
-        "target": null
+        "page": "decay",
+        "seat": null
       },
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
-      "changes": [],
+      "changes": [
+        {
+          "key": "seat:samuelt",
+          "before": null,
+          "after": {
+            "bindings": [],
+            "cc": [],
+            "focus": null,
+            "knob_page": "decay",
+            "knobs": []
+          }
+        }
+      ],
       "reverts": null,
       "error": null
     },
     {
-      "seq": 13,
-      "time": 1791339490.589491,
+      "seq": 14,
+      "time": 1791569228.503166,
       "user": "samuelt",
       "origin": "cli",
       "method": "controller.knob",
@@ -858,7 +879,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -871,8 +893,8 @@
       "error": null
     },
     {
-      "seq": 14,
-      "time": 1791339490.592668,
+      "seq": 15,
+      "time": 1791569228.503443,
       "user": "samuelt",
       "origin": "cli",
       "method": "channel.add",
@@ -882,7 +904,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -907,8 +930,8 @@
       "error": null
     },
     {
-      "seq": 15,
-      "time": 1791339490.595692,
+      "seq": 16,
+      "time": 1791569228.503707,
       "user": "samuelt",
       "origin": "cli",
       "method": "route.set",
@@ -920,7 +943,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -933,8 +957,8 @@
       "error": null
     },
     {
-      "seq": 16,
-      "time": 1791339490.598919,
+      "seq": 17,
+      "time": 1791569228.504025,
       "user": "samuelt",
       "origin": "cli",
       "method": "route.set",
@@ -946,7 +970,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -964,8 +989,8 @@
       "error": null
     },
     {
-      "seq": 17,
-      "time": 1791339490.601826,
+      "seq": 18,
+      "time": 1791569228.504364,
       "user": "samuelt",
       "origin": "cli",
       "method": "channel.move",
@@ -976,7 +1001,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -997,8 +1023,8 @@
       "error": null
     },
     {
-      "seq": 18,
-      "time": 1791339490.604804,
+      "seq": 19,
+      "time": 1791569228.505054,
       "user": "alice",
       "origin": "cli",
       "method": "param.set",
@@ -1009,7 +1035,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [
         {
@@ -1022,8 +1049,8 @@
       "error": null
     },
     {
-      "seq": 19,
-      "time": 1791339490.60757,
+      "seq": 20,
+      "time": 1791569228.505587,
       "user": "bob",
       "origin": "cli",
       "method": "param.set",
@@ -1034,7 +1061,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [
         {
@@ -1047,8 +1075,8 @@
       "error": null
     },
     {
-      "seq": 20,
-      "time": 1791339490.610649,
+      "seq": 21,
+      "time": 1791569228.50578,
       "user": "alice",
       "origin": "cli",
       "method": "history.undo",
@@ -1056,15 +1084,16 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [],
-      "reverts": 18,
+      "reverts": 19,
       "error": null
     },
     {
-      "seq": 21,
-      "time": 1791339490.613561,
+      "seq": 22,
+      "time": 1791569228.505985,
       "user": "bob",
       "origin": "cli",
       "method": "history.undo",
@@ -1072,7 +1101,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [
         {
@@ -1081,12 +1111,12 @@
           "after": 0.4
         }
       ],
-      "reverts": 19,
+      "reverts": 20,
       "error": null
     },
     {
-      "seq": 22,
-      "time": 1791339490.616384,
+      "seq": 23,
+      "time": 1791569228.506196,
       "user": "bob",
       "origin": "cli",
       "method": "history.redo",
@@ -1094,7 +1124,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": null
       },
       "changes": [
         {
@@ -1103,12 +1134,12 @@
           "after": -0.4
         }
       ],
-      "reverts": 21,
+      "reverts": 22,
       "error": null
     },
     {
-      "seq": 23,
-      "time": 1791339490.619275,
+      "seq": 24,
+      "time": 1791569228.506509,
       "user": "samuelt",
       "origin": "cli",
       "method": "instrument.add",
@@ -1122,7 +1153,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -1138,8 +1170,8 @@
       "error": null
     },
     {
-      "seq": 24,
-      "time": 1791339490.622255,
+      "seq": 25,
+      "time": 1791569228.507076,
       "user": "samuelt",
       "origin": "cli",
       "method": "pattern.set_notes",
@@ -1471,7 +1503,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -1506,8 +1539,8 @@
       "error": null
     },
     {
-      "seq": 25,
-      "time": 1791339490.625697,
+      "seq": 26,
+      "time": 1791569228.507644,
       "user": "samuelt",
       "origin": "cli",
       "method": "instrument.remove",
@@ -1518,7 +1551,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -1561,8 +1595,8 @@
       "error": null
     },
     {
-      "seq": 26,
-      "time": 1791339490.62891,
+      "seq": 27,
+      "time": 1791569228.508054,
       "user": "samuelt",
       "origin": "cli",
       "method": "history.undo",
@@ -1570,7 +1604,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -1609,12 +1644,12 @@
           }
         }
       ],
-      "reverts": 25,
+      "reverts": 26,
       "error": null
     },
     {
-      "seq": 27,
-      "time": 1791339490.631705,
+      "seq": 28,
+      "time": 1791569228.508271,
       "user": "samuelt",
       "origin": "cli",
       "method": "param.set",
@@ -1625,15 +1660,16 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [],
       "reverts": null,
       "error": "unknown parameter 'nope.param' (see param.list)"
     },
     {
-      "seq": 28,
-      "time": 1791339490.634353,
+      "seq": 29,
+      "time": 1791569228.508486,
       "user": "samuelt",
       "origin": "cli",
       "method": "pattern.clear",
@@ -1644,7 +1680,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -1662,8 +1699,8 @@
       "error": null
     },
     {
-      "seq": 29,
-      "time": 1791339490.637087,
+      "seq": 30,
+      "time": 1791569228.508704,
       "user": "samuelt",
       "origin": "cli",
       "method": "history.undo",
@@ -1671,7 +1708,8 @@
       "context": {
         "playing": false,
         "step": null,
-        "page": 0
+        "page": 0,
+        "seat": "samuelt"
       },
       "changes": [
         {
@@ -1685,9 +1723,9 @@
           "after": 1
         }
       ],
-      "reverts": 28,
+      "reverts": 29,
       "error": null
     }
   ],
-  "digest": "dfa7a969a130ef38"
+  "digest": "31ce0223f0578612"
 }
