@@ -822,9 +822,12 @@ impl Core {
         // Playing again during a take writes what was played and carries on
         // recording from the new start.
         self.restart_take();
-        self.send(Command::Play { count_in });
+        // Wait for the engine's confirmation only if the command got there.
+        match self.commands.push(Command::Play { count_in }) {
+            Ok(()) => self.starting = true,
+            Err(_) => tracing::warn!("engine command queue full; dropped Play"),
+        }
         self.song_tick = 0;
-        self.starting = true;
         if !self.playing {
             self.playing = true;
             self.emit(origin, Event::Transport { playing: true });

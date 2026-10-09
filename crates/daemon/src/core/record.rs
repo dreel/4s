@@ -399,7 +399,11 @@ impl Core {
             let result = self.journaled(&t.user, &origin, "record.take", params, |c| c.edit_clip(&id, events, None, &origin));
             if let Err(e) = result {
                 tracing::warn!("recording into {id}: {}", e.message);
-                t.take = unwritten;
+                // A busy engine may take it next pass; an invalid clip (too
+                // many events) never will.
+                if e.code != RpcError::invalid("").code {
+                    t.take = unwritten;
+                }
             }
         }
         self.take = Some(t);
