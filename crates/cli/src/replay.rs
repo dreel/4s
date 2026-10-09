@@ -86,7 +86,9 @@ fn short(changes: &[Change]) -> String {
 
 /// A connection for `e`'s user and origin, in the seat it was recorded in.
 /// A seat the client was put in at hello (auto-created for a user, so not
-/// journaled) is not there yet: auto-seat as the client did.
+/// journaled) is not there yet, and a recording from before seats names
+/// none: auto-seat as the CLI does (a user with no seat to match stays
+/// unseated).
 async fn connect_seated(o: &Options<'_>, e: &JournalEntry) -> Result<Client> {
     let user = Some(e.user.clone());
     if let Some(seat) = &e.context.seat {
@@ -95,7 +97,7 @@ async fn connect_seated(o: &Options<'_>, e: &JournalEntry) -> Result<Client> {
             return Ok(c);
         }
     }
-    let seating = Seating { user, seat: None, auto: e.context.seat.is_some() };
+    let seating = Seating { user, seat: None, auto: true };
     Client::connect(o.url, o.token.clone(), &e.origin, &seating).await
 }
 
