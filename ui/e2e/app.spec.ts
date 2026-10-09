@@ -402,7 +402,7 @@ test("record: settings and the take from the UI; notes played elsewhere land qua
   await expect(page.getByTestId("record-toggle")).toHaveAttribute("data-recording", "true");
   expect((await rpc("state.get", {})).transport.playing).toBe(true);
   await page.waitForTimeout(150);
-  await rpc("voice.trigger", { voice: "snare" });
+  await rpc("voice.trigger", { voice: "snare", instrument: null, note: null, velocity: null });
   // Written one step before the loop's end, so it plays in the next pass.
   await expect
     .poll(async () => (await rpc("clip.get", { instrument: "drums" })).events, { timeout: 3000 })
@@ -415,7 +415,15 @@ test("record: settings and the take from the UI; notes played elsewhere land qua
   expect((await rpc("state.get", {})).transport.playing).toBe(true);
   await rpc("transport.stop", {});
   await rpc("param.set", { path: "metronome.on", value: 0 });
-  await rpc("transport.record", { quantize: 0, count_in: 1 });
+  await rpc("transport.record", {
+    arm: null,
+    instrument: null,
+    mode: null,
+    quantize: 0,
+    strength: null,
+    count_in: 1,
+    offset_ms: null,
+  });
 });
 
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
