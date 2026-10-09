@@ -69,6 +69,7 @@ impl RecordSettings {
 const EARLY: f64 = TICKS_PER_STEP as f64;
 
 /// One recording, by song tick.
+#[derive(Clone)]
 pub struct Take {
     /// Held notes: (note, start, velocity).
     open: Vec<(u8, f64, u8)>,
@@ -76,15 +77,12 @@ pub struct Take {
     closed: Vec<(f64, f64, u8, u8)>,
     /// Start of the span not written yet.
     from: f64,
-    /// Song tick at which the next pass is written.
-    next_flush: u64,
 }
 
 impl Take {
-    /// A take starting at song tick `from` in a loop of `length` ticks.
-    pub fn new(from: f64, length: u32) -> Self {
-        let from = from.max(0.0);
-        Self { open: Vec::new(), closed: Vec::new(), from, next_flush: next_flush(from, length) }
+    /// A take starting at song tick `from`.
+    pub fn new(from: f64) -> Self {
+        Self { open: Vec::new(), closed: Vec::new(), from: from.max(0.0) }
     }
 
     /// A live note at song tick `tick` (already moved earlier by the
@@ -113,9 +111,10 @@ impl Take {
         }
     }
 
-    /// Whether a pass is due to be written at song tick `tick`.
-    pub fn due(&self, tick: u64) -> bool {
-        tick >= self.next_flush
+    /// Whether a pass is due to be written at song tick `tick`, in a loop
+    /// of `length` ticks (as long as it is now).
+    pub fn due(&self, tick: u64, length: u32) -> bool {
+        tick >= next_flush(self.from, length)
     }
 
     /// Write what was played up to song tick `upto` (with `end`, also the
@@ -137,7 +136,6 @@ impl Take {
         let length = length.max(1);
         let (a, b) = (self.from, upto.max(self.from));
         self.from = b;
-        self.next_flush = next_flush(b, length);
         let mut events = existing.to_vec();
         if s.mode == RecordMode::Replace && b > a {
             let l = length as f64;
@@ -192,7 +190,7 @@ pub fn record_feedback(
     existing: &[ClipEvent],
 ) -> Vec<ClipEvent> {
     let offset = ms_to_ticks(s.offset_ms, tempo);
-    let mut take = Take::new(0.0, length);
+    let mut take = Take::new(0.0);
     let mut events = existing.to_vec();
     let mut last = 0u64;
     for f in feedback {
@@ -202,7 +200,7 @@ pub fn record_feedback(
             }
             Feedback::Step { tick, .. } => {
                 last = tick;
-                if take.due(tick)
+                if take.due(tick, length)
                     && let Some(e) = take.flush(tick as f64, false, s, length, &events)
                 {
                     events = e;
@@ -343,7 +341,7 @@ impl Core {
                 if self.take.is_none() {
                     let slot = self.slot(&id)?;
                     let from = if self.playing { self.song_tick as f64 } else { 0.0 };
-                    let take = Take::new(from, self.loop_len(&id));
+                    let take = Take::new(from);
                     self.take =
                         Some(LiveTake { take, instrument: id, slot, user: user.to_string(), origin: origin.to_string() });
                     if !self.playing {
@@ -369,7 +367,8 @@ impl Core {
 
     /// A step started at song tick `tick`: write a pass when one is due.
     pub(super) fn record_step(&mut self, tick: u64) {
-        if self.take.as_ref().is_some_and(|t| t.take.due(tick)) {
+        let due = self.take.as_ref().is_some_and(|t| t.take.due(tick, self.loop_len(&t.instrument)));
+        if due {
             self.write_take(tick as f64, false);
         }
     }
@@ -386,12 +385,16 @@ impl Core {
         let Some(mut t) = self.take.take() else { return };
         let (length, settings) = (self.loop_len(&t.instrument), self.record.clone());
         let existing = self.clips.get(&t.instrument).map(|c| c.events.clone()).unwrap_or_default();
+        // Kept so a write that fails (a full command queue) is tried again
+        // with the next pass instead of losing these notes.
+        let unwritten = t.take.clone();
         if let Some(events) = t.take.flush(upto, end, &settings, length, &existing) {
             let (id, origin) = (t.instrument.clone(), t.origin.clone());
             let params = json!({ "instrument": id, "mode": settings.mode, "quantize": settings.quantize });
             let result = self.journaled(&t.user, &origin, "record.take", params, |c| c.edit_clip(&id, events, None, &origin));
             if let Err(e) = result {
                 tracing::warn!("recording into {id}: {}", e.message);
+                t.take = unwritten;
             }
         }
         self.take = Some(t);
