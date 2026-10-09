@@ -1573,8 +1573,13 @@ impl Core {
         d
     }
 
-    fn journal_context(&self) -> JournalContext {
-        JournalContext { playing: self.playing, step: self.playhead, page: self.controller.page }
+    fn journal_context(&self, client: &str) -> JournalContext {
+        JournalContext {
+            playing: self.playing,
+            step: self.playhead,
+            page: self.controller.page,
+            seat: self.client_seat(client),
+        }
     }
 
     fn journal_push(&mut self, entry: JournalEntry, origin: &str) {
@@ -1598,7 +1603,13 @@ impl Core {
 
     /// Undo (or redo) the user's last step, leaving keys another user
     /// changed since. Journaled as its own entry that `reverts` the step.
-    fn history_step(&mut self, user: &str, origin: &str, redo: bool) -> Result<HistoryStepResult, RpcError> {
+    fn history_step(
+        &mut self,
+        user: &str,
+        origin: &str,
+        client: &str,
+        redo: bool,
+    ) -> Result<HistoryStepResult, RpcError> {
         let Some(plan) = self.history.plan(user, redo) else {
             return Ok(HistoryStepResult {
                 label: None,
@@ -1607,7 +1618,7 @@ impl Core {
                 history: self.history.info(user),
             });
         };
-        let context = self.journal_context();
+        let context = self.journal_context(client);
         let before = self.doc();
         let mut skipped = plan.skipped;
         let applied = self.apply_sets(&plan.sets, origin);
@@ -1883,8 +1894,8 @@ impl Core {
     pub fn handle(&mut self, req: Request, origin: &str, client: &str, user: Option<&str>) -> RpcResult {
         let user = user.unwrap_or(&self.host_user).to_string();
         match &req {
-            Request::HistoryUndo(_) => return ok(self.history_step(&user, origin, false)?),
-            Request::HistoryRedo(_) => return ok(self.history_step(&user, origin, true)?),
+            Request::HistoryUndo(_) => return ok(self.history_step(&user, origin, client, false)?),
+            Request::HistoryRedo(_) => return ok(self.history_step(&user, origin, client, true)?),
             Request::HistoryGet(_) => return ok(self.history.info(&user)),
             Request::JournalGet(p) => return ok(JournalGetResult { entries: self.journal.get(p) }),
             Request::JournalExport(_) => return ok(self.journal_export()?),
@@ -1898,7 +1909,7 @@ impl Core {
         let params = params.unwrap_or(Value::Null);
         // A project load or new replaces everything and starts a fresh history.
         let fresh = matches!(req, Request::ProjectNew(_) | Request::ProjectLoad(_) | Request::ProjectImport(_));
-        let context = self.journal_context();
+        let context = self.journal_context(client);
         let before = (!fresh && self.changes_doc(&req)).then(|| self.doc());
         // Taken first, so a segment this request starts begins after it.
         let seq = self.journal.next_seq();

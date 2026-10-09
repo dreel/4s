@@ -704,6 +704,14 @@
           "playing": {
             "type": "boolean"
           },
+          "seat": {
+            "default": null,
+            "description": "The caller's seat, which seat-relative requests apply to.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "step": {
             "format": "uint32",
             "minimum": 0,

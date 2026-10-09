@@ -7,4 +7,8 @@ export type JournalContext = { playing: boolean, step: number | null,
 /**
  * Controller page (pad columns map to steps through it).
  */
-page: number, };
+page: number, 
+/**
+ * The caller's seat, which seat-relative requests apply to.
+ */
+seat: string | null, };

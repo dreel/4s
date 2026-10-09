@@ -84,6 +84,21 @@ fn short(changes: &[Change]) -> String {
     }
 }
 
+/// A connection for `e`'s user and origin, in the seat it was recorded in.
+/// A seat the client was put in at hello (auto-created for a user, so not
+/// journaled) is not there yet: auto-seat as the client did.
+async fn connect_seated(o: &Options<'_>, e: &JournalEntry) -> Result<Client> {
+    let user = Some(e.user.clone());
+    if let Some(seat) = &e.context.seat {
+        let seating = Seating { user: user.clone(), seat: Some(seat.clone()), auto: false };
+        if let Ok(c) = Client::connect(o.url, o.token.clone(), &e.origin, &seating).await {
+            return Ok(c);
+        }
+    }
+    let seating = Seating { user, seat: None, auto: e.context.seat.is_some() };
+    Client::connect(o.url, o.token.clone(), &e.origin, &seating).await
+}
+
 pub async fn run(o: Options<'_>) -> Result<()> {
     let rec = load(o.file, o.segment)?;
     if o.accept && serde_json::from_str::<Recording>(&std::fs::read_to_string(o.file)?).is_err() {
@@ -105,9 +120,9 @@ pub async fn run(o: Options<'_>) -> Result<()> {
         .iter()
         .filter(|e| !NOT_REPLAYED.contains(&e.method.as_str()) && e.origin != REPLAY)
         .collect();
-    // One connection per recorded (user, origin), so per-user undo and held
-    // notes behave as they did.
-    let mut conns: HashMap<(String, String), Client> = HashMap::new();
+    // One connection per recorded (user, origin, seat), so per-user undo,
+    // held notes, and seat-relative requests behave as they did.
+    let mut conns: HashMap<(String, String, Option<String>), Client> = HashMap::new();
     let mut last_time = expected.first().map(|e| e.time);
     for e in &expected {
         if o.realtime && let Some(t) = last_time {
@@ -132,12 +147,9 @@ pub async fn run(o: Options<'_>) -> Result<()> {
         }
         let req = parse_request(&e.method, Some(e.params.clone()))
             .map_err(|err| anyhow!("entry {} ({}): {err}", e.seq, e.method))?;
-        let key = (e.user.clone(), e.origin.clone());
+        let key = (e.user.clone(), e.origin.clone(), e.context.seat.clone());
         if !conns.contains_key(&key) {
-            // Seated as the CLI seats by default, so seat-relative requests
-            // (pads, focus) land as they did.
-            let seating = Seating { user: Some(e.user.clone()), seat: None, auto: true };
-            let c = Client::connect(o.url, o.token.clone(), &e.origin, &seating).await?;
+            let c = connect_seated(&o, e).await?;
             conns.insert(key.clone(), c);
         }
         // Errors are compared below, with everything else.
