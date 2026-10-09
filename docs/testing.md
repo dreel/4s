@@ -19,6 +19,11 @@ matches the interface:
 
 Always use an isolated data dir and a random port (`FOURS_DATA_DIR`,
 `--listen 127.0.0.1:0`), so tests never touch a daemon someone is running.
+The Electron tests launch the app with `FOURS_UI_BACKGROUND=1`: its window
+is never shown (it still renders, with no background throttling, so
+screenshots work) and on macOS it has no Dock icon and never activates, so
+`scripts/gates.sh` can run while you work. (`showInactive` is not enough:
+macOS still raises the window above other apps.)
 
 Mute and solo are a good example of the default. They are checked by
 rendering with a track muted and asserting the hit disappears from the
@@ -77,6 +82,14 @@ or UI e2e check, a render, or a `virtual_block` scenario. Watch it fail,
 then fix it. Add a unit test as well only if the root cause is complex
 logic. Examples: the MIDI hotplug bug got a `virtual_block` e2e check; the
 onset false positive got a render test with long tails.
+
+A bug that shows up as wrong state after a sequence of edits (from the app,
+a controller, or several users) can be pinned by a **recording**: a session
+exported from the journal and kept in `tests/journals/`. `scripts/e2e-cli.sh`
+replays each one into a fresh daemon and fails if any step's changes differ.
+See [journal.md](journal.md#turn-a-bug-into-a-regression-test). Recordings
+check state, not audio, so pair one with a render check when the bug is
+audible.
 
 ## When no harness fits
 

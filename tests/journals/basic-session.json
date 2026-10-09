@@ -1,0 +1,1762 @@
+{
+  "format_version": 1,
+  "base": {
+    "format_version": 2,
+    "instruments": [
+      {
+        "id": "drums",
+        "type": "tr808",
+        "name": "Drums"
+      }
+    ],
+    "channels": [
+      {
+        "n": 1,
+        "name": "Drums"
+      }
+    ],
+    "routes": {
+      "drums": 1
+    },
+    "params": {
+      "drums.clap.decay": 0.4,
+      "drums.clap.level": 0.8,
+      "drums.clap.mute": 0.0,
+      "drums.clap.pan": 0.0,
+      "drums.clap.tone": 0.5,
+      "drums.clap.tune": 0.0,
+      "drums.closed_hat.decay": 0.3,
+      "drums.closed_hat.level": 0.8,
+      "drums.closed_hat.mute": 0.0,
+      "drums.closed_hat.pan": 0.0,
+      "drums.closed_hat.tone": 0.5,
+      "drums.closed_hat.tune": 0.0,
+      "drums.cowbell.decay": 0.4,
+      "drums.cowbell.level": 0.8,
+      "drums.cowbell.mute": 0.0,
+      "drums.cowbell.pan": 0.0,
+      "drums.cowbell.tone": 0.5,
+      "drums.cowbell.tune": 0.0,
+      "drums.high_tom.decay": 0.5,
+      "drums.high_tom.level": 0.8,
+      "drums.high_tom.mute": 0.0,
+      "drums.high_tom.pan": 0.0,
+      "drums.high_tom.tone": 0.5,
+      "drums.high_tom.tune": 0.0,
+      "drums.kick.decay": 0.5,
+      "drums.kick.level": 0.8,
+      "drums.kick.mute": 0.0,
+      "drums.kick.pan": 0.0,
+      "drums.kick.tone": 0.5,
+      "drums.kick.tune": 0.0,
+      "drums.low_tom.decay": 0.5,
+      "drums.low_tom.level": 0.8,
+      "drums.low_tom.mute": 0.0,
+      "drums.low_tom.pan": 0.0,
+      "drums.low_tom.tone": 0.5,
+      "drums.low_tom.tune": 0.0,
+      "drums.open_hat.decay": 0.5,
+      "drums.open_hat.level": 0.8,
+      "drums.open_hat.mute": 0.0,
+      "drums.open_hat.pan": 0.0,
+      "drums.open_hat.tone": 0.5,
+      "drums.open_hat.tune": 0.0,
+      "drums.snare.decay": 0.4,
+      "drums.snare.level": 0.8,
+      "drums.snare.mute": 0.0,
+      "drums.snare.pan": 0.0,
+      "drums.snare.tone": 0.5,
+      "drums.snare.tune": 0.0,
+      "mixer.1.mute": 0.0,
+      "mixer.1.pan": 0.0,
+      "mixer.1.solo": 0.0,
+      "mixer.1.volume": 1.0,
+      "mixer.master.volume": 0.8,
+      "sequencer.length": 16.0,
+      "transport.swing": 0.0,
+      "transport.tempo": 120.0
+    },
+    "patterns": {},
+    "clips": {},
+    "controller": {
+      "follow": true
+    },
+    "seats": {}
+  },
+  "entries": [
+    {
+      "seq": 2,
+      "time": 1791575501.653708,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "transport.tempo",
+        "value": 124.0
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "param:transport.tempo",
+          "before": null,
+          "after": 124.0
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 3,
+      "time": 1791575501.65393,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "pattern.set",
+      "params": {
+        "instrument": null,
+        "steps": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0
+        ],
+        "voice": "kick"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:drums.0.36",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:drums.192.36",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:drums.288.36",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:drums.336.36",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:drums.96.36",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 4,
+      "time": 1791575501.654166,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "pattern.set",
+      "params": {
+        "instrument": null,
+        "steps": [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        "voice": "closed_hat"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:drums.144.42",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:drums.240.42",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:drums.336.42",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:drums.48.42",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 5,
+      "time": 1791575501.654421,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "pattern.set_step",
+      "params": {
+        "instrument": null,
+        "level": 2,
+        "step": 4,
+        "voice": "snare"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:drums.96.38",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 127
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 6,
+      "time": 1791575501.654695,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "instrument.add",
+      "params": {
+        "channel": null,
+        "id": null,
+        "name": null,
+        "no_channel": false,
+        "type": "tb303"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "channel:2",
+          "before": null,
+          "after": "Bass"
+        },
+        {
+          "key": "channels:order",
+          "before": [
+            1
+          ],
+          "after": [
+            1,
+            2
+          ]
+        },
+        {
+          "key": "instrument:bass",
+          "before": null,
+          "after": {
+            "name": "Bass",
+            "type": "tb303"
+          }
+        },
+        {
+          "key": "route:bass",
+          "before": null,
+          "after": 2
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 7,
+      "time": 1791575501.655227,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "pattern.set_notes",
+      "params": {
+        "instrument": "bass",
+        "steps": [
+          {
+            "accent": false,
+            "note": 36,
+            "slide": false
+          },
+          {
+            "accent": true,
+            "note": 36,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 39,
+            "slide": true
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 31,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 48,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          }
+        ]
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:bass.0.36",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:bass.144.48",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:bass.24.36",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 127
+          }
+        },
+        {
+          "key": "event:bass.48.39",
+          "before": null,
+          "after": {
+            "len": 25,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:bass.96.31",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 8,
+      "time": 1791575501.655756,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "pattern.set_note",
+      "params": {
+        "instrument": "bass",
+        "note": {
+          "accent": true,
+          "note": 43,
+          "slide": true
+        },
+        "step": 15
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:bass.360.43",
+          "before": null,
+          "after": {
+            "len": 25,
+            "velocity": 127
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 9,
+      "time": 1791575501.656099,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "bass.cutoff",
+        "value": 0.3
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "param:bass.cutoff",
+          "before": null,
+          "after": 0.3
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 10,
+      "time": 1791575501.65629,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "bass.cutoff",
+        "value": 0.35
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "param:bass.cutoff",
+          "before": 0.3,
+          "after": 0.35
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 11,
+      "time": 1791575501.656723,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "controller.press",
+      "params": {
+        "col": 6,
+        "pressed": null,
+        "row": 1
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:drums.144.38",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 12,
+      "time": 1791575501.657084,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "controller.press",
+      "params": {
+        "col": 8,
+        "pressed": null,
+        "row": 1
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [],
+      "reverts": null,
+      "error": "row and col must be 0..7"
+    },
+    {
+      "seq": 13,
+      "time": 1791575501.65733,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "seat.page",
+      "params": {
+        "page": "decay",
+        "seat": null
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "seat:e2e",
+          "before": null,
+          "after": {
+            "bindings": [],
+            "cc": [],
+            "focus": null,
+            "knob_page": "decay",
+            "knobs": []
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 14,
+      "time": 1791575501.657704,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "controller.knob",
+      "params": {
+        "index": 0,
+        "value": 0.8
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "param:drums.kick.decay",
+          "before": null,
+          "after": 0.8
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 15,
+      "time": 1791575501.657988,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "channel.add",
+      "params": {
+        "name": "Kick"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "channel:3",
+          "before": null,
+          "after": "Kick"
+        },
+        {
+          "key": "channels:order",
+          "before": [
+            1,
+            2
+          ],
+          "after": [
+            1,
+            2,
+            3
+          ]
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 16,
+      "time": 1791575501.658251,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "route.set",
+      "params": {
+        "channel": 3,
+        "source": "drums.kick",
+        "swap": false
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "route:drums.kick",
+          "before": null,
+          "after": 3
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 17,
+      "time": 1791575501.658583,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "route.set",
+      "params": {
+        "channel": 1,
+        "source": "bass",
+        "swap": true
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "route:bass",
+          "before": 2,
+          "after": 1
+        },
+        {
+          "key": "route:drums",
+          "before": 1,
+          "after": 2
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 18,
+      "time": 1791575501.658918,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "channel.move",
+      "params": {
+        "n": 3,
+        "position": 1
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "channels:order",
+          "before": [
+            1,
+            2,
+            3
+          ],
+          "after": [
+            3,
+            1,
+            2
+          ]
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 19,
+      "time": 1791575501.659554,
+      "user": "alice",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "mixer.2.pan",
+        "value": 0.4
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": null
+      },
+      "changes": [
+        {
+          "key": "param:mixer.2.pan",
+          "before": null,
+          "after": 0.4
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 20,
+      "time": 1791575501.660081,
+      "user": "bob",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "mixer.2.pan",
+        "value": -0.4
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": null
+      },
+      "changes": [
+        {
+          "key": "param:mixer.2.pan",
+          "before": 0.4,
+          "after": -0.4
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 21,
+      "time": 1791575501.660277,
+      "user": "alice",
+      "origin": "cli",
+      "method": "history.undo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": null
+      },
+      "changes": [],
+      "reverts": 19,
+      "error": null
+    },
+    {
+      "seq": 22,
+      "time": 1791575501.660481,
+      "user": "bob",
+      "origin": "cli",
+      "method": "history.undo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": null
+      },
+      "changes": [
+        {
+          "key": "param:mixer.2.pan",
+          "before": -0.4,
+          "after": 0.4
+        }
+      ],
+      "reverts": 20,
+      "error": null
+    },
+    {
+      "seq": 23,
+      "time": 1791575501.660693,
+      "user": "bob",
+      "origin": "cli",
+      "method": "history.redo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": null
+      },
+      "changes": [
+        {
+          "key": "param:mixer.2.pan",
+          "before": 0.4,
+          "after": -0.4
+        }
+      ],
+      "reverts": 22,
+      "error": null
+    },
+    {
+      "seq": 24,
+      "time": 1791575501.661003,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "instrument.add",
+      "params": {
+        "channel": null,
+        "id": "lead",
+        "name": null,
+        "no_channel": true,
+        "type": "tb303"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "instrument:lead",
+          "before": null,
+          "after": {
+            "name": "Bass",
+            "type": "tb303"
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 25,
+      "time": 1791575501.661555,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "pattern.set_notes",
+      "params": {
+        "instrument": "lead",
+        "steps": [
+          {
+            "accent": false,
+            "note": 48,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 52,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": 55,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          },
+          {
+            "accent": false,
+            "note": null,
+            "slide": false
+          }
+        ]
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:lead.0.48",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:lead.24.52",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:lead.48.55",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 26,
+      "time": 1791575501.662122,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "instrument.remove",
+      "params": {
+        "id": "lead",
+        "keep_channels": false
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:lead.0.48",
+          "before": {
+            "len": 12,
+            "velocity": 89
+          },
+          "after": null
+        },
+        {
+          "key": "event:lead.24.52",
+          "before": {
+            "len": 12,
+            "velocity": 89
+          },
+          "after": null
+        },
+        {
+          "key": "event:lead.48.55",
+          "before": {
+            "len": 12,
+            "velocity": 89
+          },
+          "after": null
+        },
+        {
+          "key": "instrument:lead",
+          "before": {
+            "name": "Bass",
+            "type": "tb303"
+          },
+          "after": null
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 27,
+      "time": 1791575501.662533,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "history.undo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:lead.0.48",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:lead.24.52",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:lead.48.55",
+          "before": null,
+          "after": {
+            "len": 12,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "instrument:lead",
+          "before": null,
+          "after": {
+            "name": "Bass",
+            "type": "tb303"
+          }
+        }
+      ],
+      "reverts": 26,
+      "error": null
+    },
+    {
+      "seq": 28,
+      "time": 1791575501.662756,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "param.set",
+      "params": {
+        "path": "nope.param",
+        "value": 1.0
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [],
+      "reverts": null,
+      "error": "unknown parameter 'nope.param' (see param.list)"
+    },
+    {
+      "seq": 29,
+      "time": 1791575501.663001,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "pattern.clear",
+      "params": {
+        "instrument": null,
+        "voice": "snare"
+      },
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:drums.144.38",
+          "before": {
+            "len": 24,
+            "velocity": 89
+          },
+          "after": null
+        },
+        {
+          "key": "event:drums.96.38",
+          "before": {
+            "len": 24,
+            "velocity": 127
+          },
+          "after": null
+        }
+      ],
+      "reverts": null,
+      "error": null
+    },
+    {
+      "seq": 30,
+      "time": 1791575501.66323,
+      "user": "e2e",
+      "origin": "cli",
+      "method": "history.undo",
+      "params": {},
+      "context": {
+        "playing": false,
+        "step": null,
+        "page": 0,
+        "seat": "e2e"
+      },
+      "changes": [
+        {
+          "key": "event:drums.144.38",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 89
+          }
+        },
+        {
+          "key": "event:drums.96.38",
+          "before": null,
+          "after": {
+            "len": 24,
+            "velocity": 127
+          }
+        }
+      ],
+      "reverts": 29,
+      "error": null
+    }
+  ],
+  "digest": "88b0e60befb29fc0"
+}

@@ -80,9 +80,17 @@ echo "pad 0 2" >&7
 echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
 sleep 0.5
 check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
-check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","seat":"e2e"} -> event:drums.48.36' s journal
+check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","profile":"livid_block","seat":"e2e"} -> event:drums.48.36' s journal
 check "undo takes back a device pad press (the host user's)" "kick        ---- ---- ---- ----" bash -c "$BIN/4s undo >/dev/null && $BIN/4s pattern show kick"
 check "redo" "kick        --x- ---- ---- ----" bash -c "$BIN/4s redo >/dev/null && $BIN/4s pattern show kick"
+# Input that can do nothing is not journaled, from a device or over RPC:
+# clock, active sensing, pitch bend, a pad release, an unmapped CC.
+last_seq() { echo "seq=$("$BIN/4s" --json journal --limit 1 | python3 -c "import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])")"; }
+BEFORE=$(last_seq)
+for m in "F8" "FE" "E0 00 40" "80 10 00"; do echo "raw $m" >&7; done
+s midi send knobs F8 >/dev/null; s midi send knobs E0 00 40 >/dev/null; s midi send knobs B0 63 40 >/dev/null
+sleep 0.5
+check "input that can do nothing is not journaled" "$BEFORE" last_seq
 # Knob 2 (CC 2) on the decay page -> snare decay. Knobs pick up: one far
 # from the current value does nothing until it passes it.
 echo "knob 1 0" >&7; sleep 0.5
@@ -485,6 +493,32 @@ s --seat bob bind keys --notes C1..B2 --to bass >/dev/null
 check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e
 check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project reveal --no-open
+# --- Recordings: this whole session, replayed elsewhere (docs/journal.md) ---
+check "export the session as a recording" "entries, digest" s journal export -o "$TMP/session.json"
+B_DIR=$(mktemp -d)
+FOURS_DATA_DIR=$B_DIR s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null
+check "replay it into a fresh daemon: same changes, same final state" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay "$TMP/session.json"
+check "a daemon with unsaved changes is not replaced without --force" "has unsaved changes" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay "$TMP/session.json"
+check "replay the raw journal file from the engine host" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$(ls -t "$FOURS_DATA_DIR"/journal/*.jsonl | head -1)"
+python3 -c "
+import json; r = json.load(open('$TMP/session.json'))
+e = [x for x in r['entries'] if x['changes']][3]; e['changes'][0]['after'] = 'tampered'
+json.dump(r, open('$TMP/tampered.json', 'w'))"
+check "a divergence is caught and the entry named" "replay diverged at entry" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$TMP/tampered.json"
+check "--accept rewrites a diverging recording with what the replay did" "accepted: rewrote" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force --accept "$TMP/tampered.json"
+check "...so it replays cleanly after" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$TMP/tampered.json"
+for f in tests/journals/*.json; do
+  check "fixture $(basename "$f") replays" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$f"
+done
+FOURS_DATA_DIR=$B_DIR s project new >/dev/null
+FOURS_DATA_DIR=$B_DIR s pattern set kick "x-x-x-x-" >/dev/null
+FOURS_DATA_DIR=$B_DIR s tempo 99 >/dev/null
+check "a journal file's last segment (after project new) replays without its starting request" "replay matched: 2 entries" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$(ls -t "$B_DIR"/journal/*.jsonl | head -1)"
+check "--accept refuses a journal file before touching the daemon" "rewrites a recording" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force --accept "$(ls -t "$B_DIR"/journal/*.jsonl | head -1)"
+check "project import sends a local project inline" "ch 2  Bass" bash -c "FOURS_DATA_DIR='$B_DIR' $BIN/4s project import '$FOURS_DATA_DIR/projects/e2e.4s' >/dev/null && FOURS_DATA_DIR='$B_DIR' $BIN/4s mixer"
+check "export as a script of 4s calls" "4s call project.import" s journal export --format sh
+FOURS_DATA_DIR=$B_DIR s daemon stop >/dev/null
+
 check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
 check "new is the default graph" "ch 1  Drums        vol 100%  pan C          <- drums" s mixer
 check "a new project starts a fresh history" "undo: (empty)" s history

@@ -272,7 +272,7 @@ test("MIDI panel connects a device by name; with no bindings it plays the seat's
     await page.getByTestId("select-lead").click();
     await page.getByTestId("make-target").click();
     await expect.poll(async () => (await rpc("controller.get", {})).focus).toBe("lead");
-    await rpc("midi.input", { device, data: [0x90, 36, 100], seat: null });
+    await rpc("midi.input", { device, data: [0x90, 36, 100], seat: null, profile: null });
     await expect(page.getByTestId("bass-last-note")).toHaveAttribute("data-note", "36");
     await page.getByTestId(`midi-disconnect-${name}`).click();
     await expect.poll(async () => (await rpc("midi.ports", {})).connections.length).toBe(0);

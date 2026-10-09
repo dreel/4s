@@ -398,7 +398,8 @@ differ from the sections above, these win):
 - **Host seat** (the engine host's own devices): pinned with
   `midi.set_seat`, else the seat of the latest local (loopback) client of
   the daemon's own user that was not told a seat (`--seat`), or that chose
-  one itself (`seat.claim`/`seat.create`), else the seat matching the daemon's OS user (`FOURS_USER`
+  one itself (`seat.claim`/`seat.create`; a chosen seat outranks a later
+  automatic one), else the seat matching the daemon's OS user (`FOURS_USER`
   overrides it), else a new seat for that user in a project without seats,
   else a session-only `local` seat. Session-only seats nobody sits in are
   dropped.
