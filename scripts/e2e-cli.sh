@@ -627,6 +627,14 @@ check "record --off ends the take, still playing" "not recording" s record --off
 check "status shows the next take's settings" "record: not recording (next take: overdub, quantize 1/16 at 100%" s status
 s stop >/dev/null
 check "undo takes back the take" "seq: 0 notes" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq"
+check "play during a take writes it and keeps recording" "seq: 1 notes" bash -c "$BIN/4s record --to seq --count-in 0 >/dev/null && sleep 0.3 && $BIN/4s key C2 --instrument seq --for 0.1 >/dev/null && $BIN/4s play >/dev/null && $BIN/4s clip show seq"
+check "still recording after it" "recording into seq" s record --show
+s stop >/dev/null
+s clip clear seq >/dev/null
+s instrument add tb303 --id rec >/dev/null
+s record --to rec --count-in 0 >/dev/null
+check "undoing the instrument's add ends a take into it" "not recording" bash -c "$BIN/4s undo >/dev/null && $BIN/4s record --show"
+s stop >/dev/null
 check "record settings are checked" "strength must be 0..1" s record --show --strength 2
 s record --show --quantize off --count-in 1 >/dev/null
 s instrument rm seq >/dev/null

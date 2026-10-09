@@ -109,23 +109,21 @@ pub const GRIDS: &[(&str, u32)] = &[
     ("1/32", PPQ / 8),
 ];
 
-/// Parse a grid: a name from `GRIDS`, `1` (a bar), `1/2`, a number of
-/// ticks, or `off` (`None`).
+/// Parse a grid: a name from `GRIDS`, `1` (a bar), `1/2`, or `off`
+/// (`None`).
 pub fn parse_grid(s: &str) -> Result<Option<u32>, String> {
     let s = s.trim().to_ascii_lowercase();
     match s.as_str() {
-        "off" | "none" | "0" => return Ok(None),
+        "off" | "none" => return Ok(None),
         "1" | "1/1" => return Ok(Some(TICKS_PER_BAR)),
         "1/2" => return Ok(Some(PPQ * 2)),
         _ => {}
     }
-    if let Some((_, t)) = GRIDS.iter().find(|(n, _)| *n == s) {
-        return Ok(Some(*t));
-    }
-    match s.parse::<u32>() {
-        Ok(t) if t <= MAX_CLIP_TICKS => Ok(Some(t)),
-        _ => Err(format!("invalid grid '{s}' (1/4, 1/8, 1/8t, 1/16, 1/16t, 1/32, ticks, or off)")),
-    }
+    GRIDS
+        .iter()
+        .find(|(n, _)| *n == s)
+        .map(|(_, t)| Some(*t))
+        .ok_or_else(|| format!("invalid grid '{s}' (1/4, 1/8, 1/8t, 1/16, 1/16t, 1/32, or off)"))
 }
 
 /// A grid's name (`1/16`), or its ticks when it has none.

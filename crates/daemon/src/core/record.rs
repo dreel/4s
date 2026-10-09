@@ -341,12 +341,12 @@ impl Core {
                 if self.take.is_none() {
                     let slot = self.slot(&id)?;
                     let from = if self.playing { self.song_tick as f64 } else { 0.0 };
-                    let take = Take::new(from);
-                    self.take =
-                        Some(LiveTake { take, instrument: id, slot, user: user.to_string(), origin: origin.to_string() });
                     if !self.playing {
                         self.start(origin, self.record.count_in * TICKS_PER_BAR);
                     }
+                    let take = Take::new(from);
+                    self.take =
+                        Some(LiveTake { take, instrument: id, slot, user: user.to_string(), origin: origin.to_string() });
                 }
             }
             Some(false) => self.end_take(),
@@ -398,6 +398,17 @@ impl Core {
             }
         }
         self.take = Some(t);
+    }
+
+    /// The transport restarts from tick 0: write the take so far, then
+    /// keep recording from the start.
+    pub(super) fn restart_take(&mut self) {
+        if self.take.is_some() {
+            self.write_take((self.song_tick + TICKS_PER_STEP as u64) as f64, true);
+            if let Some(t) = self.take.as_mut() {
+                t.take = Take::new(0.0);
+            }
+        }
     }
 
     /// Drop a take without writing it (its instrument or project went away).

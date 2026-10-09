@@ -115,5 +115,12 @@ moved, resized, and duplicated through phase B's RPCs.
   on top of the measured output latency.
 - The 4/4 click follows the sequencer's swing; a `transport.beats_per_bar`
   can come with the song model.
+- A live note is placed at the start of the audio block its command is
+  applied in, so it can land up to one buffer late (a few ms at typical
+  buffer sizes) on top of the latency correction. `offset_ms` covers a
+  steady error.
+- Playing again during a take writes what was played and keeps recording
+  from the new start; removing the instrument (including by undo) ends the
+  take without writing.
 - Live take progress (notes drawn while recording) waits for the piano roll
   (phase B).

@@ -445,9 +445,6 @@ impl Core {
         }
         // The removal, plus deactivating every channel it may leave empty.
         self.ensure_room(1 + self.instruments[pos].outputs.len())?;
-        if self.take.as_ref().is_some_and(|t| t.instrument == p.id) {
-            self.drop_take(origin);
-        }
         let fed = self.teardown_instrument(pos, origin);
         if !p.keep_channels {
             for n in fed {
@@ -472,6 +469,10 @@ impl Core {
         self.slot_used[inst.slot as usize] = false;
         self.in_flight += 1;
         self.clips.remove(&inst.id);
+        // However it goes (removal, undo, redo), a take into it ends.
+        if self.take.as_ref().is_some_and(|t| t.instrument == inst.id) {
+            self.drop_take(origin);
+        }
         let fed: Vec<u32> = inst.outputs.iter().filter_map(|o| self.routes.remove(&o.source)).collect();
         self.held.retain(|h| h.slot != inst.slot);
         let mut refocused = false;
@@ -814,6 +815,9 @@ impl Core {
 
     /// Play from tick 0 after `count_in` ticks of metronome.
     fn start(&mut self, origin: &str, count_in: u32) -> TransportState {
+        // Playing again during a take writes what was played and carries on
+        // recording from the new start.
+        self.restart_take();
         self.send(Command::Play { count_in });
         self.song_tick = 0;
         if !self.playing {
