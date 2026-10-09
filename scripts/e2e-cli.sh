@@ -532,6 +532,11 @@ check "the next CC moved is mapped, on its channel" "cc: knobs ch 3 cc 22 -> bas
 s midi send knobs B0 16 7F >/dev/null
 check "the same CC on another channel is not mapped" "bass.resonance = 0.5" s get bass.resonance
 s cc unmap knobs 22 >/dev/null
+check "a CC map can follow the focus" "cc: knobs any ch cc 23 -> focus.cutoff" s cc map knobs 23 focus.cutoff --no-pickup
+s midi send knobs B0 17 40 >/dev/null
+check "and moves the focused 303's cutoff" "bass.cutoff = 0.5039" s get bass.cutoff
+check "focus.<param> must exist on some instrument type" "no instrument type has a parameter 'nope'" s cc map knobs 23 focus.nope
+s cc unmap knobs 23 >/dev/null
 # Following knobs control the focused instrument's knob page.
 check "knobs follow the focus" "knobs: knobs cc 1 2 follow focus" s knobs follow knobs 1 2
 s midi send knobs B0 02 00 >/dev/null; s midi send knobs B0 02 7F >/dev/null

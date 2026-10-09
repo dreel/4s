@@ -528,7 +528,7 @@ impl Core {
                 })
                 .and_then(ok),
             Request::SeatMapCc(p) => {
-                if let Err(e) = self.param_id(&p.map.param) {
+                if let Err(e) = self.check_cc_param(&p.map.param) {
                     return Ok(Err(e));
                 }
                 self.edit_seat(p.seat.as_deref(), client, origin, |s| {
@@ -549,7 +549,7 @@ impl Core {
                 .and_then(ok),
             Request::SeatLearnCc(p) => {
                 if let Some(path) = &p.param
-                    && let Err(e) = self.param_id(path)
+                    && let Err(e) = self.check_cc_param(path)
                 {
                     return Ok(Err(e));
                 }
@@ -804,6 +804,21 @@ impl Core {
         let Some(slot) = self.resolve_target(seat, &target).and_then(|t| self.slot_of(&t)) else { return };
         let semitones = 2.0 * value as f32 / 8192.0;
         self.send(Command::PitchBend { slot, semitones });
+    }
+
+    /// A CC map's parameter: an existing path, or `focus.<param>` where some
+    /// instrument type has `<param>` (it applies whenever the focus has it).
+    fn check_cc_param(&self, param: &str) -> Result<(), RpcError> {
+        let Some(rest) = param.strip_prefix("focus.") else { return self.param_id(param).map(|_| ()) };
+        let known = InstrumentType::ALL.iter().any(|k| {
+            let id = k.default_id();
+            instrument::params(*k, id).iter().any(|p| p.path == format!("{id}.{rest}"))
+        });
+        if known {
+            Ok(())
+        } else {
+            Err(RpcError::invalid(format!("no instrument type has a parameter '{rest}' (see 4s instrument types)")))
+        }
     }
 
     /// A parameter path, with `focus.<param>` resolved to the seat's focus.

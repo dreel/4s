@@ -63,7 +63,7 @@ fn host_user() -> String {
     ["FOURS_USER", "USER", "USERNAME"]
         .iter()
         .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))
-        .unwrap_or_else(|| "me".into())
+        .unwrap_or_else(|| "local".into())
 }
 
 fn init_logging(log_file: Option<&PathBuf>) -> Result<()> {
