@@ -1023,7 +1023,12 @@ impl Core {
         {
             return;
         }
-        let req = Request::MidiInput(MidiInputParams { device: device.clone(), data: msg.data, seat: Some(self.host_seat.clone()) });
+        let req = Request::MidiInput(MidiInputParams {
+            device: device.clone(),
+            data: msg.data,
+            seat: Some(self.host_seat.clone()),
+            profile: Some(profile),
+        });
         let user = self.host_user.clone();
         let _ = self.handle(req, &origin, &format!("midi:{device}"), Some(&user));
     }
@@ -1128,6 +1133,7 @@ impl Core {
                 "data must be one MIDI message: a status byte (0x80..0xFF), then data bytes (0..0x7F)",
             ));
         }
+        let profile = self.input_profile(&p);
         let seat = match p.seat {
             Some(s) => {
                 self.check_seat(&s)?;
@@ -1135,7 +1141,6 @@ impl Core {
             }
             None => self.client_seat(client).unwrap_or_else(|| self.host_seat.clone()),
         };
-        let profile = self.midi.by_device(&p.device).map(|c| c.profile).unwrap_or_default();
         // From a device on this machine (`handle_midi`): it already emitted
         // `midi_in`, and the device itself holds its notes.
         let local = format!("midi:{}", p.device);
@@ -1147,6 +1152,10 @@ impl Core {
         };
         self.device_input(&seat, &p.device, profile, &holder, &p.data, origin);
         Ok(())
+    }
+
+    fn input_profile(&self, p: &MidiInputParams) -> DeviceProfile {
+        p.profile.or_else(|| self.midi.by_device(&p.device).map(|c| c.profile)).unwrap_or_default()
     }
 
     /// Hotplug: drop vanished ports and, if `auto`, connect a Livid Block
@@ -2132,7 +2141,7 @@ impl Core {
             // Notes from a generic device only play; CCs set parameters, and a
             // Block's pads and knobs edit steps and parameters.
             Request::MidiInput(p) => {
-                let block = self.midi.by_device(&p.device).is_some_and(|c| c.profile == DeviceProfile::LividBlock);
+                let block = self.input_profile(p) == DeviceProfile::LividBlock;
                 block || p.data.first().is_some_and(|s| s & 0xf0 == 0xb0)
             }
             _ => !matches!(

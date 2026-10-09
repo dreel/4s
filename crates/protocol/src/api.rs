@@ -527,6 +527,11 @@ pub struct MidiInputParams {
     /// Block only edits the host seat (its LEDs show that one).
     #[serde(default)]
     pub seat: Option<String>,
+    /// How to read the bytes; default: the connected device's profile, else
+    /// generic. Input from a device on the engine host carries it, so the
+    /// journal replays it the same way where that device is not connected.
+    #[serde(default)]
+    pub profile: Option<DeviceProfile>,
 }
 
 // ---- seats ---------------------------------------------------------------

@@ -453,6 +453,10 @@ enum MidiCmd {
         /// Hex bytes.
         #[arg(required = true)]
         bytes: Vec<String>,
+        /// Read the bytes as this kind of device (default: the connected
+        /// device's kind, else generic).
+        #[arg(long, value_enum)]
+        profile: Option<ProfileArg>,
     },
     /// Print raw incoming MIDI (for discovering controller mappings).
     Monitor {
@@ -467,6 +471,13 @@ enum ProfileArg {
     Generic,
     /// Livid Block: grid + knobs drive the seat's focus, LEDs lit.
     Block,
+}
+
+fn device_profile(p: ProfileArg) -> DeviceProfile {
+    match p {
+        ProfileArg::Generic => DeviceProfile::Generic,
+        ProfileArg::Block => DeviceProfile::LividBlock,
+    }
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -782,10 +793,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 input: input.clone(),
                 output: output.clone(),
                 name: name.clone(),
-                profile: profile.map(|p| match p {
-                    ProfileArg::Generic => DeviceProfile::Generic,
-                    ProfileArg::Block => DeviceProfile::LividBlock,
-                }),
+                profile: profile.map(device_profile),
             })],
             MidiCmd::Disconnect { input } => {
                 vec![Request::MidiDisconnect(MidiDisconnectParams { input: input.clone() })]
@@ -794,10 +802,11 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 vec![Request::MidiRename(MidiRenameParams { device: device.clone(), name: name.clone() })]
             }
             MidiCmd::Seat { seat } => vec![Request::MidiSetSeat(MidiSetSeatParams { seat: seat.clone() })],
-            MidiCmd::Send { device, bytes } => vec![Request::MidiInput(MidiInputParams {
+            MidiCmd::Send { device, bytes, profile } => vec![Request::MidiInput(MidiInputParams {
                 device: device.clone(),
                 data: hex_bytes(bytes)?,
                 seat: None,
+                profile: profile.map(device_profile),
             })],
             MidiCmd::Monitor { .. } => vec![
                 Request::EventsSubscribe(SubscribeParams { types: Some(vec!["midi_in".into()]) }),

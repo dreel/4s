@@ -1899,6 +1899,18 @@
             "description": "Logical device name the input comes from.",
             "type": "string"
           },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DeviceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How to read the bytes; default: the connected device's profile, else\ngeneric. Input from a device on the engine host carries it, so the\njournal replays it the same way where that device is not connected."
+          },
           "seat": {
             "default": null,
             "description": "Seat to apply; default: the caller's, else the host seat. A Livid\nBlock only edits the host seat (its LEDs show that one).",
