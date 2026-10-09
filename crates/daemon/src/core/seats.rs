@@ -836,14 +836,17 @@ impl Core {
         note: u8,
         velocity: f32,
     ) {
-        // Without bindings of its own (CC maps or knobs alone do not count)
-        // or in its model's layout, a device plays the seat's focus.
+        // The seat's own bindings for the device (CC maps or knobs alone do
+        // not count); else its model port's layout, which may bind nothing
+        // (the MPK's DAW port copies the pads: it plays no notes); else,
+        // with no model, the seat's focus.
         let mut bindings = self.device_config(seat, device, model).map(|c| c.bindings).unwrap_or_default();
-        if bindings.is_empty() {
-            let (m, role) = model.unzip();
-            bindings = m.and_then(crate::models::get).map(|m| layout(m, role.unwrap_or(""), device).bindings).unwrap_or_default();
-        }
-        if bindings.is_empty() {
+        let layout = model.and_then(|(m, role)| Some(layout(crate::models::get(m)?, role, device)));
+        if bindings.is_empty()
+            && let Some(l) = layout
+        {
+            bindings = l.bindings;
+        } else if bindings.is_empty() {
             bindings = vec![NoteBinding {
                 device: device.into(),
                 channel: None,

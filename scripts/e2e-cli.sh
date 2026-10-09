@@ -269,6 +269,11 @@ wait $WATCH; sleep 0.3
 check "keys play the first 303 whatever the focus" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
 check "pads play the 808's voices in order" '"instrument":"drums","voice":"snare"' cat "$TMP/mpk.json"
 s focus bass >/dev/null
+"$BIN/4s" watch --type trigger --json > "$TMP/mpk-daw.json" &
+WATCH=$!; sleep 0.5
+echo "raw 99 25 64" >&6; echo "raw 89 25 00" >&6   # a pad's copy on the DAW Port only
+sleep 0.5; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "the DAW Port's pad copies play nothing, whatever the focus" "0 triggers" bash -c "echo \$(grep -c trigger '$TMP/mpk-daw.json') triggers"
 # A held key (channel 1, note 48) survives a pad with the same note number
 # on channel 10 (bank B pad 5) being tapped.
 "$BIN/4s" watch --type meters --json > "$TMP/mpk-hold.json" &
