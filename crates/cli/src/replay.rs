@@ -16,7 +16,8 @@ use std::path::Path;
 /// disk or real MIDI ports and never change the undoable state. (A
 /// successful `project.load` starts a new segment and is not part of it, so
 /// one inside a segment is a failed load.)
-pub const NOT_REPLAYED: &[&str] = &["project.save", "project.load", "midi.connect", "midi.disconnect"];
+pub const NOT_REPLAYED: &[&str] =
+    &["project.save", "project.load", "midi.connect", "midi.disconnect", "midi.rename", "midi.set_seat"];
 
 /// The client name of the replay's own connection; its entries (the import,
 /// controller page fixes) are left out of the comparison.

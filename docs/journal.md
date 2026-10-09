@@ -241,8 +241,10 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
 
 - **Not replayed:** `project.save`, `project.load` (a successful one starts
   a new segment, so one inside a segment is a failed load), `midi.connect`,
-  and `midi.disconnect`. They depend on the engine host's disk or ports and
-  never change the doc.
+  `midi.disconnect`, `midi.rename`, and `midi.set_seat`. They depend on the
+  engine host's disk or ports and never change the doc. MIDI input from a
+  device is recorded as `midi.input` with the device's profile, so it
+  replays the same way without the device.
 - **Export covers the current segment only.** If it is longer than the
   in-memory journal (10k entries), export fails; replay the `.jsonl` file
   instead.
