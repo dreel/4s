@@ -18,6 +18,17 @@ pub(super) struct SeatState {
     pub learning: Option<String>,
 }
 
+/// What a `midi.input` message can do (`Core::input_effect`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum InputEffect {
+    /// Nothing: not journaled.
+    None,
+    /// Plays or releases notes; the doc is unchanged.
+    Plays,
+    /// May set parameters, edit steps, or learn a CC map.
+    Edits,
+}
+
 pub(super) struct ClientState {
     /// `name#n`, as shown in occupants.
     pub label: String,
@@ -34,6 +45,10 @@ pub(super) struct ClientState {
     /// itself. A one-off `4s --seat bob ...` or `--user carol` does not move
     /// this machine's devices.
     pub drives_host: bool,
+    /// It chose its seat (`seat.claim`, `seat.create`) rather than being
+    /// seated at hello. A chosen seat outranks a later automatic one, so a
+    /// `4s` command does not move the host seat away from the UI's choice.
+    pub chose: bool,
 }
 
 /// A note held by someone: `key` is the input note, `note` what it played
@@ -206,7 +221,8 @@ impl Core {
 
     /// Decide which seat the host's own devices use:
     /// 1. the seat pinned in `midi-devices.json` (created if missing);
-    /// 2. else the seat of the latest local client to take one;
+    /// 2. else the seat of the latest local client to choose one, or
+    ///    failing that, the latest seated automatically;
     /// 3. else the seat matching the host's user;
     /// 4. else, in a project without seats, a new seat for the host's user;
     /// 5. else a session-only `local` seat (devices play its focus).
@@ -217,7 +233,7 @@ impl Core {
             .clients
             .values()
             .filter(|c| c.local && c.drives_host && c.seat.is_some())
-            .max_by_key(|c| c.seated_at)
+            .max_by_key(|c| (c.chose, c.seated_at))
             .and_then(|c| c.seat.clone());
         let name = if let Some(p) = self.hardware.pinned_seat().map(str::to_string) {
             if !self.seats.contains_key(&p) {
@@ -287,7 +303,7 @@ impl Core {
         let drives_host = local && seat.is_none() && host_user;
         self.clients.insert(
             client.to_string(),
-            ClientState { label: label.to_string(), user: user.clone(), seat: None, local, auto, seated_at: 0, drives_host },
+            ClientState { label: label.to_string(), user: user.clone(), seat: None, local, auto, seated_at: 0, drives_host, chose: false },
         );
         // Registered first, so a bad seat leaves a client that can still
         // choose one.
@@ -349,6 +365,7 @@ impl Core {
         self.check_seat(name)?;
         let Some(c) = self.clients.get_mut(client) else { return Err(RpcError::invalid("say session.hello first")) };
         c.drives_host = c.local;
+        c.chose = true;
         self.sit(client, Some(name.to_string()));
         self.seats_changed(origin, false);
         Ok(self.seat_list(client))
@@ -370,6 +387,7 @@ impl Core {
         self.new_seat(&name, saved);
         if let Some(c) = self.clients.get_mut(client) {
             c.drives_host = c.local;
+            c.chose = true;
         }
         self.sit(client, Some(name));
         // An empty seat is not saved, so the project is not modified yet.
@@ -589,6 +607,40 @@ impl Core {
     }
 
     // ---- input routing -------------------------------------------------------
+
+    /// What a `midi.input` message can do in its seat, as `device_input`
+    /// would handle it. Input that can do nothing (clock, active sensing,
+    /// pitch bend, an unmapped CC, a Block pad release) is not journaled.
+    /// Malformed input or an unknown seat counts as playing, so its error
+    /// is journaled.
+    pub(super) fn input_effect(&self, p: &MidiInputParams, client: &str) -> InputEffect {
+        let d = &p.data;
+        let valid = d.first().is_some_and(|s| *s >= 0x80) && d[1..].iter().all(|b| *b < 0x80);
+        let seat = p.seat.clone().unwrap_or_else(|| self.client_seat(client).unwrap_or_else(|| self.host_seat.clone()));
+        let Some(s) = self.seats.get(&seat).filter(|_| valid) else { return InputEffect::Plays };
+        if d.len() < 3 || d[0] >= 0xf0 {
+            return InputEffect::None;
+        }
+        if self.input_profile(p) == DeviceProfile::LividBlock {
+            return match decode_block(&self.block_map, d) {
+                Some(BlockInput::Pad { pressed: false, .. }) | None => InputEffect::None,
+                Some(_) if seat != self.host_seat => InputEffect::None,
+                Some(_) => InputEffect::Edits,
+            };
+        }
+        let (channel, cc) = ((d[0] & 0x0f) + 1, d[1]);
+        let on_channel = |c: Option<u8>| c.is_none_or(|c| c == channel);
+        match d[0] & 0xf0 {
+            0x80 | 0x90 => InputEffect::Plays,
+            0xb0 if s.learning.is_some()
+                || s.config.cc.iter().any(|m| m.device == p.device && m.cc == cc && on_channel(m.channel))
+                || s.config.knobs.iter().any(|k| k.device == p.device && on_channel(k.channel) && k.ccs.contains(&cc)) =>
+            {
+                InputEffect::Edits
+            }
+            _ => InputEffect::None,
+        }
+    }
 
     /// One raw MIDI message from logical `device` in `seat`. Notes it
     /// starts are held by `holder`.

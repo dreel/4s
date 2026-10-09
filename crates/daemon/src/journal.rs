@@ -255,7 +255,7 @@ impl History {
 // ---- journal storage ----------------------------------------------------------
 
 /// Entries kept in memory for `journal.get`.
-const RING: usize = 10_000;
+const RING: usize = 100_000;
 /// Rotate journal files at this size.
 const FILE_BYTES: u64 = 50 * 1024 * 1024;
 /// Journal files kept on disk.

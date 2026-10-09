@@ -15,7 +15,7 @@ use crate::controller::{BlockInput, BlockMap, Controller, decode_block};
 use crate::hardware::{self, Hardware};
 use crate::journal::{self, Doc, History, Journal};
 use crate::midi::{Midi, MidiMessage, list_ports};
-use seats::{ClientState, Held, Pickup, SeatState, check_seat_config};
+use seats::{ClientState, Held, InputEffect, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
 use fours_engine::offline::{RenderInstrument, RenderPattern, RenderSpec};
 use fours_engine::params::{self, CHANNEL_PARAMS, NUM_GLOBALS};
@@ -199,7 +199,7 @@ impl Core {
     fn journal_export(&self) -> Result<Recording, RpcError> {
         let entries = self.journal.since(self.segment_seq).ok_or_else(|| {
             RpcError::failed(
-                "the start of this session is no longer in memory (over 10000 entries); \
+                "the start of this session is no longer in memory (over 100000 entries); \
                  replay the journal file under <data-dir>/journal instead",
             )
         })?;
@@ -1011,26 +1011,20 @@ impl Core {
     /// Handle a raw message from a connected MIDI device. It plays in the
     /// host seat, and is handled (and journaled, RFC 0006) as `midi.input`
     /// from the host user, with the port (`midi:<port>`) as origin and the
-    /// device (`midi:<device>`) holding the notes it plays.
+    /// device (`midi:<device>`) holding the notes it plays. Input that can
+    /// do nothing (clock, active sensing, a pad release) stops here.
     pub fn handle_midi(&mut self, msg: MidiMessage) {
         let origin = format!("midi:{}", msg.port);
         self.emit(&origin, Event::MidiIn { port: msg.port.clone(), data: msg.data.clone() });
         let Some(c) = self.midi.connection(&msg.port) else { return };
         let (device, profile) = (c.device.clone(), c.profile);
-        // A Block pad release does nothing (pads toggle on press): not journaled.
-        if profile == DeviceProfile::LividBlock
-            && matches!(decode_block(&self.block_map, &msg.data), Some(BlockInput::Pad { pressed: false, .. }))
-        {
+        let p = MidiInputParams { device: device.clone(), data: msg.data, seat: Some(self.host_seat.clone()), profile: Some(profile) };
+        let client = format!("midi:{device}");
+        if self.input_effect(&p, &client) == InputEffect::None {
             return;
         }
-        let req = Request::MidiInput(MidiInputParams {
-            device: device.clone(),
-            data: msg.data,
-            seat: Some(self.host_seat.clone()),
-            profile: Some(profile),
-        });
         let user = self.host_user.clone();
-        let _ = self.handle(req, &origin, &format!("midi:{device}"), Some(&user));
+        let _ = self.handle(Request::MidiInput(p), &origin, &client, Some(&user));
     }
 
     // ---- midi --------------------------------------------------------------
@@ -1064,22 +1058,25 @@ impl Core {
             return Err(RpcError::failed(format!("'{port}' is already connected")));
         }
         // A name held by a port that is not here any more moves to this one
-        // (a replacement keyboard keeps `keys`).
-        if let Some(n) = &p.name
-            && let Some(old) = self.hardware.port_named(n)
-            && old != port
-            && !list_ports().0.contains(&old)
-        {
-            self.hardware.forget(&old);
-        }
-        let (name, profile) =
-            self.hardware.resolve(&port, p.name.as_deref(), p.profile).map_err(RpcError::invalid)?;
+        // (a replacement keyboard keeps `keys`), once the connect succeeds.
+        let replaces = p
+            .name
+            .as_deref()
+            .and_then(|n| self.hardware.port_named(n))
+            .filter(|old| *old != port && !list_ports().0.contains(old));
+        let (name, profile) = self
+            .hardware
+            .resolve(&port, p.name.as_deref(), p.profile, replaces.as_deref())
+            .map_err(RpcError::invalid)?;
         if self.midi.by_device(&name).is_some() {
             return Err(RpcError::invalid(format!("a connected device is already named '{name}'")));
         }
         self.midi
             .connect(&port, p.output.as_deref(), &name, profile, self.midi_tx.clone())
             .map_err(|e| RpcError::failed(e.to_string()))?;
+        if let Some(old) = &replaces {
+            self.hardware.forget(old);
+        }
         self.hardware.connected(&port, &name, profile);
         self.midi_changed(origin);
         Ok(self.midi_ports())
@@ -1179,7 +1176,7 @@ impl Core {
                 if !inputs.contains(&port) || self.midi.is_connected(&port) {
                     continue;
                 }
-                let Ok((name, profile)) = self.hardware.resolve(&port, None, None) else { continue };
+                let Ok((name, profile)) = self.hardware.resolve(&port, None, None, None) else { continue };
                 if self.midi.by_device(&name).is_some() {
                     continue;
                 }
@@ -1850,13 +1847,18 @@ impl Core {
         }
         if !seats.is_empty() {
             for (name, config) in seats {
+                // A session-only seat of the same name is someone else's:
+                // it does not become a saved seat.
+                if self.seats.get(&name).is_some_and(|s| !s.saved) {
+                    skipped.push(format!("seat:{name}"));
+                    continue;
+                }
                 let seat = self.seats.entry(name).or_insert(SeatState {
                     config: SeatConfig::default(),
                     saved: true,
                     learning: None,
                 });
                 seat.config = config;
-                seat.saved = true;
             }
             self.seats_changed(origin, true);
         }
@@ -1901,7 +1903,8 @@ impl Core {
             Request::JournalExport(_) => return ok(self.journal_export()?),
             _ => {}
         }
-        if read_only(&req) {
+        let inert = matches!(&req, Request::MidiInput(p) if self.input_effect(p, client) == InputEffect::None);
+        if read_only(&req) || inert {
             return self.dispatch(req, origin, client);
         }
         let method = req.method();
@@ -1910,7 +1913,7 @@ impl Core {
         // A project load or new replaces everything and starts a fresh history.
         let fresh = matches!(req, Request::ProjectNew(_) | Request::ProjectLoad(_) | Request::ProjectImport(_));
         let context = self.journal_context(client);
-        let before = (!fresh && self.changes_doc(&req)).then(|| self.doc());
+        let before = (!fresh && self.changes_doc(&req, client)).then(|| self.doc());
         // Taken first, so a segment this request starts begins after it.
         let seq = self.journal.next_seq();
         let result = self.dispatch(req, origin, client);
@@ -2147,14 +2150,11 @@ fn read_only(req: &Request) -> bool {
 /// cannot (performance, transport, connections) skip building it twice,
 /// which matters for a stream of notes from a keyboard.
 impl Core {
-    fn changes_doc(&self, req: &Request) -> bool {
+    fn changes_doc(&self, req: &Request, client: &str) -> bool {
         match req {
-            // Notes from a generic device only play; CCs set parameters, and a
-            // Block's pads and knobs edit steps and parameters.
-            Request::MidiInput(p) => {
-                let block = self.input_profile(p) == DeviceProfile::LividBlock;
-                block || p.data.first().is_some_and(|s| s & 0xf0 == 0xb0)
-            }
+            // Notes only play; mapped CCs set parameters, and a Block's pads
+            // and knobs edit steps and parameters.
+            Request::MidiInput(p) => self.input_effect(p, client) == InputEffect::Edits,
             _ => !matches!(
                 req,
                 Request::TransportPlay(_)

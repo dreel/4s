@@ -83,6 +83,14 @@ check "pad press from device edits pattern (other channels ignored)" "kick      
 check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","profile":"livid_block","seat":"e2e"} -> step:drums.kick.2' s journal
 check "undo takes back a device pad press (the host user's)" "kick        ---- ---- ---- ----" bash -c "$BIN/4s undo >/dev/null && $BIN/4s pattern show kick"
 check "redo" "kick        --x- ---- ---- ----" bash -c "$BIN/4s redo >/dev/null && $BIN/4s pattern show kick"
+# Input that can do nothing is not journaled, from a device or over RPC:
+# clock, active sensing, pitch bend, a pad release, an unmapped CC.
+last_seq() { echo "seq=$("$BIN/4s" --json journal --limit 1 | python3 -c "import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])")"; }
+BEFORE=$(last_seq)
+for m in "F8" "FE" "E0 00 40" "80 10 00"; do echo "raw $m" >&7; done
+s midi send knobs F8 >/dev/null; s midi send knobs E0 00 40 >/dev/null; s midi send knobs B0 63 40 >/dev/null
+sleep 0.5
+check "input that can do nothing is not journaled" "$BEFORE" last_seq
 # Knob 2 (CC 2) on the decay page -> snare decay. Knobs pick up: one far
 # from the current value does nothing until it passes it.
 echo "knob 1 0" >&7; sleep 0.5

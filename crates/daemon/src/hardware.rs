@@ -107,16 +107,19 @@ impl Hardware {
     }
 
     /// The name and profile a connection of `port` gets: the given ones,
-    /// else the saved ones, else defaults. Changes nothing.
+    /// else the saved ones, else defaults. A given name may be the one of
+    /// port `replaces`, which the caller forgets once connected. Changes
+    /// nothing.
     pub fn resolve(
         &self,
         port: &str,
         name: Option<&str>,
         profile: Option<DeviceProfile>,
+        replaces: Option<&str>,
     ) -> Result<(String, DeviceProfile), String> {
         if let Some(n) = name {
             validate_name("device", n)?;
-            if self.name_taken(n, port) {
+            if self.name_taken(n, port) && self.port_named(n).as_deref() != replaces {
                 return Err(format!("another port is already named '{n}'"));
             }
         }
