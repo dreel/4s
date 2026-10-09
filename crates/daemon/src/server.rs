@@ -3,7 +3,7 @@
 //! core. Events are pushed as `event` notifications to subscribed connections.
 
 use crate::core::{RpcError, Shared, error_json};
-use fours_engine::offline;
+use fours_engine::{offline, params};
 use fours_protocol::*;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -153,7 +153,7 @@ async fn handle_text(
             }
             Ok(json!({}))
         }
-        Request::RenderOffline(p) => render(core, p).await,
+        Request::RenderOffline(p) => render(core, p, &format!("conn:{}", conn.id)).await,
         Request::DaemonInfo(_) => {
             let mut info = (*daemon.info).clone();
             info.uptime = daemon.started.elapsed().as_secs_f64();
@@ -244,8 +244,8 @@ fn subscribe(core: &Shared, conn: &mut Conn, tx: &mpsc::UnboundedSender<String>,
     serde_json::to_value(SubscribeResult { seq }).unwrap()
 }
 
-async fn render(core: &Shared, p: RenderParams) -> Result<Value, RpcError> {
-    let (spec, path) = {
+async fn render(core: &Shared, p: RenderParams, client: &str) -> Result<Value, RpcError> {
+    let (mut spec, path, input) = {
         let c = core.lock().unwrap();
         let path = match &p.path {
             Some(path) => c.resolve_data_path(path),
@@ -257,8 +257,10 @@ async fn render(core: &Shared, p: RenderParams) -> Result<Value, RpcError> {
                 c.data_dir().join("renders").join(format!("render-{ts}.wav"))
             }
         };
-        (c.render_spec(), path)
+        (c.render_spec(), path, c.render_input(&p, client)?)
     };
+    // The click is heard only when asked for, whatever `metronome.on` is.
+    spec.globals[params::METRONOME] = if p.metronome == Some(true) { 1.0 } else { 0.0 };
     let bars = p.bars.unwrap_or(1.0);
     if !(0.0..=64.0).contains(&bars) {
         return Err(RpcError::invalid("bars must be 0..64"));
@@ -266,7 +268,8 @@ async fn render(core: &Shared, p: RenderParams) -> Result<Value, RpcError> {
     let tail = p.tail.unwrap_or(0.0).clamp(0.0, 30.0);
     let sr = p.sample_rate.unwrap_or(48000).clamp(8000, 192000);
     tokio::task::spawn_blocking(move || {
-        let r = offline::render_graph(&spec, sr, bars, tail);
+        let r = offline::render_graph(&spec, sr, bars, tail, &input.notes);
+        let recorded = input.record.map(|rec| rec.clip(&r.feedback));
         let a = offline::analyze(&r.samples, sr);
         let (lp, lr) = offline::lane_level(&r.samples, 0);
         let (rp, rr) = offline::lane_level(&r.samples, 1);
@@ -281,6 +284,7 @@ async fn render(core: &Shared, p: RenderParams) -> Result<Value, RpcError> {
             right: Level { peak: rp, rms: rr },
             onsets: a.onsets,
             triggers: r.triggers,
+            recorded,
         };
         Ok(serde_json::to_value(result).unwrap())
     })

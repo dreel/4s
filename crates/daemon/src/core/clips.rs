@@ -274,7 +274,7 @@ impl Core {
 
     // ---- clip RPCs -----------------------------------------------------------
 
-    fn clip_target(&self, id: Option<&str>, client: &str) -> Result<String, RpcError> {
+    pub(super) fn clip_target(&self, id: Option<&str>, client: &str) -> Result<String, RpcError> {
         match id {
             Some(id) => Ok(self.find_instrument(id)?.id.clone()),
             None => self.default_instrument(client),
@@ -314,19 +314,17 @@ impl Core {
                 if p.grid == 0 || p.grid > MAX_CLIP_TICKS {
                     return Err(RpcError::invalid("grid must be 1.. ticks (24 = a 16th)"));
                 }
-                // Nearest grid line; one that lands on the loop's end wraps to
-                // its start (where it would play). Events that land together
-                // keep the later.
-                let g = p.grid;
-                let loop_len = self.clips[&id].length.unwrap_or(self.length() * TICKS_PER_STEP);
+                if p.strength.is_some_and(|s| !(0.0..=1.0).contains(&s)) {
+                    return Err(RpcError::invalid("strength must be 0..1"));
+                }
+                // Toward the nearest grid line; one that lands on the loop's
+                // end wraps to its start (where it would play). Events that
+                // land together keep the later.
+                let (strength, loop_len) = (p.strength.unwrap_or(1.0), self.loop_len(&id));
                 let events: Vec<ClipEvent> = self.clips[&id]
                     .events
                     .iter()
-                    .map(|e| {
-                        let t = (e.tick + g / 2) / g * g;
-                        let t = if e.tick < loop_len && t >= loop_len { 0 } else { t.min(MAX_CLIP_TICKS - 1) };
-                        ClipEvent { tick: t, ..*e }
-                    })
+                    .map(|e| ClipEvent { tick: snap_tick(e.tick, p.grid, strength, loop_len), ..*e })
                     .collect();
                 self.edit_clip(&id, events, None, origin)
             })),

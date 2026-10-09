@@ -467,6 +467,14 @@ they differ from the sections above, these win):
 - **Not in phase 2**: a piano-roll editor in the UI (the CLI and RPC edit
   any event; the step editors edit the grid).
 
+## Amendment (2026-10-09): recording moves to RFC 0008
+
+Phase 3's recording (arm, overdub/replace, quantize, latency compensation,
+undo per pass) is designed and built in
+[RFC 0008](0008-recording-and-arrangement.md), with a metronome and
+count-in, as the first phase of the song/arrangement work. SMF
+import/export remains to do.
+
 ## Implementation notes (device models)
 
 Added with the Akai MPK mini IV, the first controller with several ports

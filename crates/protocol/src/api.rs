@@ -366,6 +366,53 @@ pub struct ClipQuantizeParams {
     pub instrument: Option<String>,
     /// Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).
     pub grid: u32,
+    /// How far to move each note toward the grid, 0..1 (default 1: onto it).
+    #[serde(default)]
+    pub strength: Option<f32>,
+}
+
+// ---- recording (RFC 0008) -------------------------------------------------
+
+/// Arm or disarm recording, or change its settings. Settings left out keep
+/// their current values.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct RecordParams {
+    /// `true` starts recording (and the transport, after the count-in, if
+    /// stopped); `false` ends it, keeping what was played.
+    #[serde(default)]
+    pub arm: Option<bool>,
+    /// Instrument to record into. Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    #[serde(default)]
+    pub mode: Option<RecordMode>,
+    /// Record quantize grid in ticks (24 = a 16th); 0 turns it off.
+    #[serde(default)]
+    pub quantize: Option<u32>,
+    /// How far record quantize moves notes toward the grid, 0..1.
+    #[serde(default)]
+    pub strength: Option<f32>,
+    /// Bars of metronome before recording starts from a stop (0..4).
+    #[serde(default)]
+    pub count_in: Option<u32>,
+    /// Extra input latency to compensate, in milliseconds (0..500): notes
+    /// are placed this much earlier.
+    #[serde(default)]
+    pub offset_ms: Option<f32>,
+}
+
+/// A note played into an offline render, timed from the start of playback.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct RenderNote {
+    /// Seconds from play (after any count-in).
+    pub time: f64,
+    pub note: u8,
+    /// 1..127 (default 100).
+    #[serde(default)]
+    pub velocity: Option<u8>,
+    /// Seconds held (default a 16th at 120 bpm, 0.125).
+    #[serde(default)]
+    pub duration: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -697,6 +744,17 @@ pub struct RenderParams {
     pub path: Option<String>,
     #[serde(default)]
     pub sample_rate: Option<u32>,
+    /// Include the metronome click (default off, whatever `metronome.on` is).
+    #[serde(default)]
+    pub metronome: Option<bool>,
+    /// Notes to play during the render, as a player would (RFC 0008). They
+    /// go to `record.instrument`, else the caller's seat focus.
+    #[serde(default)]
+    pub input: Option<Vec<RenderNote>>,
+    /// Record `input` with these settings (`arm` is ignored) and return the
+    /// clip it would leave; the project is not changed.
+    #[serde(default)]
+    pub record: Option<RecordParams>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -713,6 +771,9 @@ pub struct RenderResult {
     pub onsets: Vec<f64>,
     /// What the sequencer actually fired, for comparison with `onsets`.
     pub triggers: Vec<RenderTrigger>,
+    /// With `record`: the clip the take would leave.
+    #[serde(default)]
+    pub recorded: Option<Clip>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -744,6 +805,9 @@ api! {
     TransportPlay = "transport.play" (Empty) -> TransportState;
     /// Stop the sequencer.
     TransportStop = "transport.stop" (Empty) -> TransportState;
+    /// Arm or end recording into an instrument's clip, or change record
+    /// settings (mode, quantize, count-in).
+    TransportRecord = "transport.record" (RecordParams) -> RecordState;
 
     /// Available instrument types, with their outputs and parameters.
     InstrumentTypes = "instrument.types" (Empty) -> InstrumentTypesResult;

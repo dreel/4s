@@ -331,6 +331,38 @@ pub struct TransportState {
     pub step: Option<u32>,
 }
 
+/// How a recording pass treats the notes already in the clip.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordMode {
+    /// Add to what is there.
+    #[default]
+    Overdub,
+    /// Each pass clears the part of the loop it passes over.
+    Replace,
+}
+
+/// Recording (RFC 0008): whether a take is running, and the settings the
+/// next one uses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct RecordState {
+    /// A take is running (the transport plays and notes are recorded).
+    pub recording: bool,
+    /// The instrument being recorded into, while recording.
+    pub instrument: Option<String>,
+    /// Who started the take (whose undo history it lands in).
+    pub user: Option<String>,
+    pub mode: RecordMode,
+    /// Record quantize grid in ticks; `None` keeps the played timing.
+    pub quantize: Option<u32>,
+    /// 0..1: how far notes move toward the grid.
+    pub strength: f32,
+    /// Bars of metronome before recording from a stop.
+    pub count_in: u32,
+    /// Extra input latency compensated, in milliseconds.
+    pub offset_ms: f32,
+}
+
 // ---------------------------------------------------------------------------
 // Controller (Livid Block, real or virtual)
 // ---------------------------------------------------------------------------
@@ -681,6 +713,7 @@ pub struct Snapshot {
     #[ts(type = "number")]
     pub seq: u64,
     pub transport: TransportState,
+    pub record: RecordState,
     pub params: BTreeMap<String, f64>,
     pub graph: Graph,
     /// One step view per instrument, in instrument order.
@@ -770,6 +803,8 @@ pub enum Event {
     /// added or removed: refetch `state.get` and `param.list`.
     Graph { graph: Graph },
     Transport { playing: bool },
+    /// Recording started or ended, or its settings changed.
+    Record { state: RecordState },
     /// A step started. `time` is engine time in seconds.
     Playhead { step: u32, time: f64 },
     /// An instrument played (from the sequencer, a pad, MIDI, or an
@@ -806,6 +841,7 @@ impl Event {
             Event::ClipChanged { .. } => "clip_changed",
             Event::Graph { .. } => "graph",
             Event::Transport { .. } => "transport",
+            Event::Record { .. } => "record",
             Event::Playhead { .. } => "playhead",
             Event::Trigger { .. } => "trigger",
             Event::Meters { .. } => "meters",

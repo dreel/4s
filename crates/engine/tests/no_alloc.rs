@@ -3,7 +3,7 @@
 //! added, routed, played, and removed through the command ring.
 
 use fours_engine::instrument::{self, MAX_BLOCK};
-use fours_engine::{Command, Engine, ParamTarget, RtEngine};
+use fours_engine::{Command, Engine, ParamTarget, RtEngine, params};
 use fours_protocol::{ClipEvent, InstrumentType, MAX_EVENTS, NoteStep, STEP_ON, Voice, drum_event, note_event};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -92,7 +92,8 @@ fn process_never_allocates() {
             Command::NoteOn { slot: 1, note: 43, velocity: 0.7, gate: false },
             Command::NoteOff { slot: 1, note: 43 },
             Command::NoteOff { slot: 1, note: 41 },
-            Command::Play,
+            Command::SetParam { target: ParamTarget::Global(params::METRONOME), value: 1.0 },
+            Command::Play { count_in: fours_protocol::TICKS_PER_BAR },
         ];
         for c in cmds {
             assert!(link.commands.push(c).is_ok());
@@ -103,6 +104,17 @@ fn process_never_allocates() {
             }
         });
         assert_eq!(n, 0, "round {round}: {n} heap operations while playing");
+
+        // Live notes while playing report their song position.
+        for c in [
+            Command::NoteOn { slot: 1, note: 45, velocity: 0.7, gate: false },
+            Command::NoteOff { slot: 1, note: 45 },
+            Command::NoteOn { slot: 0, note: 36, velocity: 1.0, gate: true },
+        ] {
+            assert!(link.commands.push(c).is_ok());
+        }
+        let n = counted(|| rt.process(&mut out, 2));
+        assert_eq!(n, 0, "round {round}: {n} heap operations playing live notes");
 
         // Filling a clip to capacity stays in its preallocated storage.
         for tick in 0..MAX_EVENTS as u32 {

@@ -78,6 +78,30 @@ enum Cmd {
     Play,
     /// Stop playback.
     Stop,
+    /// Record live notes into an instrument's clip (RFC 0008): `4s record`
+    /// starts (playing after the count-in if stopped), `4s record --off`
+    /// ends it, keeping what was played. Settings stay for the next take.
+    Record {
+        /// End the take.
+        #[arg(long, conflicts_with = "show")]
+        off: bool,
+        /// Only show (or, with settings, change) the record state.
+        #[arg(long)]
+        show: bool,
+        /// Instrument to record into (default: your seat's focus).
+        #[arg(long)]
+        to: Option<String>,
+        #[command(flatten)]
+        settings: RecordArgs,
+    },
+    /// The metronome: `4s metronome on`, `4s metronome --level 40%`. It
+    /// always clicks during a recording's count-in.
+    Metronome {
+        /// on or off.
+        state: Option<String>,
+        #[arg(long)]
+        level: Option<String>,
+    },
     /// Set tempo in BPM (shorthand for `set transport.tempo`).
     Tempo { bpm: f64 },
     /// Show or edit a drum pattern.
@@ -176,6 +200,22 @@ enum Cmd {
         out: Option<String>,
         #[arg(long)]
         sample_rate: Option<u32>,
+        /// Include the metronome click.
+        #[arg(long)]
+        metronome: bool,
+        /// Notes to play live during the render, as `secs:note[:dur[:vel]]`
+        /// tokens (seconds from play), e.g. `"0.51:C2 1.0:D#2:0.25:127"`.
+        #[arg(long, allow_hyphen_values = true)]
+        input: Option<String>,
+        /// Record `--input` and show the clip it would leave (the project
+        /// is not changed).
+        #[arg(long)]
+        record: bool,
+        /// Instrument the input plays and records into (default: your focus).
+        #[arg(long)]
+        to: Option<String>,
+        #[command(flatten)]
+        settings: RecordArgs,
     },
     /// Project files.
     Project {
@@ -442,6 +482,48 @@ enum ProfileArg {
     Block,
 }
 
+/// Record settings, shared by `4s record` and `4s render --record`.
+#[derive(clap::Args, Debug, Clone, Default)]
+struct RecordArgs {
+    /// Each pass clears the part of the loop it covers (default: overdub).
+    #[arg(long, conflicts_with = "overdub")]
+    replace: bool,
+    /// Add to what is in the clip.
+    #[arg(long)]
+    overdub: bool,
+    /// Record quantize: 1/4, 1/8, 1/8t, 1/16, 1/16t, 1/32, ticks, or off.
+    #[arg(long)]
+    quantize: Option<String>,
+    /// How far quantize moves notes toward the grid: 0..1 or a percentage.
+    #[arg(long)]
+    strength: Option<String>,
+    /// Bars of metronome before recording from a stop (0..4).
+    #[arg(long)]
+    count_in: Option<u32>,
+    /// Extra input latency to compensate, in milliseconds.
+    #[arg(long)]
+    offset_ms: Option<f32>,
+}
+
+impl RecordArgs {
+    fn params(&self, arm: Option<bool>, instrument: Option<String>) -> Result<RecordParams> {
+        let mode = match (self.replace, self.overdub) {
+            (true, _) => Some(RecordMode::Replace),
+            (_, true) => Some(RecordMode::Overdub),
+            _ => None,
+        };
+        Ok(RecordParams {
+            arm,
+            instrument,
+            mode,
+            quantize: self.quantize.as_deref().map(|q| grid_arg(q).map(|g| g.unwrap_or(0))).transpose()?,
+            strength: self.strength.as_deref().map(|v| parse_value(v).map(|v| v as f32)).transpose()?,
+            count_in: self.count_in,
+            offset_ms: self.offset_ms,
+        })
+    }
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum ClipCmd {
     /// Show a clip (default: your focus).
@@ -473,11 +555,16 @@ enum ClipCmd {
     Length { instrument: String, steps: String },
     /// Remove every note.
     Clear { instrument: String },
-    /// Snap notes to a grid: 1/4, 1/8, 1/16 (default), 1/32, or ticks.
+    /// Snap notes to a grid: 1/4, 1/8, 1/8t, 1/16 (default), 1/16t, 1/32,
+    /// or `<n>t` ticks.
     Quantize {
         instrument: String,
         #[arg(default_value = "1/16")]
         grid: String,
+        /// How far to move notes toward it: 0..1 or a percentage (default
+        /// 100%).
+        #[arg(long)]
+        strength: Option<String>,
     },
 }
 
@@ -626,16 +713,39 @@ fn note_arg(s: &str) -> Result<u8> {
     }
 }
 
-/// `1/16` (or `16`) as a grid in ticks, or `<n>t` ticks.
-fn grid_ticks(s: &str) -> Result<u32> {
-    if let Some(t) = s.strip_suffix('t') {
-        return t.parse().map_err(|_| anyhow!("invalid grid '{s}'"));
+/// A grid in ticks: `1/16`, `1/8t` (triplets), `off` (`None`), `16` (1/16),
+/// or `<n>t` ticks.
+fn grid_arg(s: &str) -> Result<Option<u32>> {
+    if s.contains('/') || s.eq_ignore_ascii_case("off") {
+        return parse_grid(s).map_err(|e| anyhow!(e));
     }
-    let d: u32 = s.trim_start_matches("1/").parse().map_err(|_| anyhow!("grid is 1/4, 1/8, 1/16, 1/32, or <n>t"))?;
-    if d == 0 || (PPQ * 4) % d != 0 {
+    if let Some(t) = s.strip_suffix('t') {
+        return t.parse().map(Some).map_err(|_| anyhow!("invalid grid '{s}'"));
+    }
+    let d: u32 = s.parse().map_err(|_| anyhow!("grid is 1/4, 1/8, 1/8t, 1/16, 1/16t, 1/32, <n>t, or off"))?;
+    if d == 0 || TICKS_PER_BAR % d != 0 {
         bail!("grid 1/{d} is not a whole number of ticks");
     }
-    Ok(PPQ * 4 / d)
+    Ok(Some(TICKS_PER_BAR / d))
+}
+
+/// `secs:note[:dur[:vel]]` tokens: notes to play into a render.
+fn parse_input(s: &str) -> Result<Vec<RenderNote>> {
+    s.split_whitespace()
+        .map(|tok| {
+            let parts: Vec<&str> = tok.split(':').collect();
+            if !(2..=4).contains(&parts.len()) {
+                bail!("invalid input note '{tok}' (expected secs:note[:dur[:vel]], e.g. 0.5:C2:0.1:100)");
+            }
+            let secs = |p: &str| p.parse::<f64>().map_err(|_| anyhow!("invalid seconds in '{tok}'"));
+            Ok(RenderNote {
+                time: secs(parts[0])?,
+                note: note_arg(parts[1])?,
+                duration: parts.get(2).map(|p| secs(p)).transpose()?,
+                velocity: parts.get(3).map(|p| p.parse::<u8>().map_err(|_| anyhow!("invalid velocity in '{tok}'"))).transpose()?,
+            })
+        })
+        .collect()
 }
 
 fn hex_bytes(bytes: &[String]) -> Result<Vec<u8>> {
@@ -686,6 +796,21 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
         }
         Cmd::Play => vec![Request::TransportPlay(e)],
         Cmd::Stop => vec![Request::TransportStop(e)],
+        Cmd::Record { off, show, to, settings } => {
+            let arm = if *off { Some(false) } else if *show { None } else { Some(true) };
+            vec![Request::TransportRecord(settings.params(arm, to.clone())?)]
+        }
+        Cmd::Metronome { state, level } => {
+            let mut reqs = Vec::new();
+            if let Some(s) = state {
+                reqs.push(Request::ParamSet(ParamSetParams { path: "metronome.on".into(), value: parse_value(s)? }));
+            }
+            if let Some(l) = level {
+                reqs.push(Request::ParamSet(ParamSetParams { path: "metronome.level".into(), value: parse_value(l)? }));
+            }
+            reqs.push(Request::StateGet(e));
+            reqs
+        }
         Cmd::Tempo { bpm } => {
             vec![Request::ParamSet(ParamSetParams { path: "transport.tempo".into(), value: *bpm })]
         }
@@ -796,12 +921,18 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             }),
             Request::EventsUnsubscribe(e),
         ],
-        Cmd::Render { bars, tail, out, sample_rate } => vec![Request::RenderOffline(RenderParams {
-            bars: Some(*bars),
-            tail: *tail,
-            path: out.clone(),
-            sample_rate: *sample_rate,
-        })],
+        Cmd::Render { bars, tail, out, sample_rate, metronome, input, record, to, settings } => {
+            let record = (*record || to.is_some()).then(|| settings.params(None, to.clone())).transpose()?;
+            vec![Request::RenderOffline(RenderParams {
+                bars: Some(*bars),
+                tail: *tail,
+                path: out.clone(),
+                sample_rate: *sample_rate,
+                metronome: metronome.then_some(true),
+                input: input.as_deref().map(parse_input).transpose()?,
+                record,
+            })]
+        }
         Cmd::Project { cmd } => match cmd {
             ProjectCmd::New => vec![Request::ProjectNew(e)],
             ProjectCmd::Save { path } => vec![Request::ProjectSave(ProjectSaveParams { path: path.clone() })],
@@ -888,9 +1019,11 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 },
             }),
             ClipCmd::Clear { instrument } => Request::ClipClear(ClipGetParams { instrument: Some(instrument) }),
-            ClipCmd::Quantize { instrument, grid } => {
-                Request::ClipQuantize(ClipQuantizeParams { instrument: Some(instrument), grid: grid_ticks(&grid)? })
-            }
+            ClipCmd::Quantize { instrument, grid, strength } => Request::ClipQuantize(ClipQuantizeParams {
+                instrument: Some(instrument),
+                grid: grid_arg(&grid)?.ok_or_else(|| anyhow!("quantize needs a grid"))?,
+                strength: strength.as_deref().map(|v| parse_value(v).map(|v| v as f32)).transpose()?,
+            }),
         }],
         Cmd::Seat { cmd } => vec![match cmd.clone().unwrap_or(SeatCmd::List) {
             SeatCmd::List => Request::SeatList(e),
@@ -1123,11 +1256,33 @@ fn print_status_lines(s: &Snapshot) {
         println!("midi: {} as {} ({:?}) out: {}", m.input, m.device, m.profile, m.output.as_deref().unwrap_or("-"));
     }
     println!("devices on this engine play in seat: {}", s.seats.host);
+    print!("record: ");
+    print_record(&s.record);
     println!(
         "project: {}{}",
         s.project.path.as_deref().unwrap_or("(unsaved)"),
         if s.project.dirty { " *modified*" } else { "" }
     );
+}
+
+fn print_record(r: &RecordState) {
+    let quantize = match r.quantize {
+        Some(_) => format!("quantize {} at {:.0}%", format_grid(r.quantize), r.strength * 100.0),
+        None => "no quantize".into(),
+    };
+    let mode = match r.mode {
+        RecordMode::Overdub => "overdub",
+        RecordMode::Replace => "replace",
+    };
+    let bars = if r.count_in == 1 { "bar" } else { "bars" };
+    let offset = if r.offset_ms > 0.0 { format!(", {} ms earlier", r.offset_ms) } else { String::new() };
+    let settings = format!("{mode}, {quantize}, count-in {} {bars}{offset}", r.count_in);
+    match &r.instrument {
+        Some(i) if r.recording => {
+            println!("recording into {i} for {} ({settings})", r.user.as_deref().unwrap_or("?"))
+        }
+        _ => println!("not recording (next take: {settings})"),
+    }
 }
 
 fn print_clip(c: &Clip) {
@@ -1228,6 +1383,10 @@ fn print_event(e: &EventEnvelope, json: bool) {
             graph.routes.len()
         ),
         Event::Transport { playing } => if *playing { "playing".into() } else { "stopped".into() },
+        Event::Record { state } => match &state.instrument {
+            Some(i) if state.recording => format!("recording into {i}"),
+            _ => "not recording".into(),
+        },
         Event::Playhead { step, time } => format!("step {} @ {time:.3}s", step + 1),
         Event::Trigger { instrument, voice, note, velocity, time } => {
             let what = match (voice, note) {
@@ -1337,6 +1496,13 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             let t: TransportState = serde_json::from_value(last)?;
             println!("{}", if t.playing { "playing" } else { "stopped" });
         }
+        Cmd::Record { .. } => print_record(&serde_json::from_value(last)?),
+        Cmd::Metronome { .. } => {
+            let s: Snapshot = serde_json::from_value(last)?;
+            let on = s.params.get("metronome.on").copied().unwrap_or(0.0) >= 0.5;
+            let level = s.params.get("metronome.level").copied().unwrap_or(0.0);
+            println!("metronome {} (level {:.0}%)", if on { "on" } else { "off" }, level * 100.0);
+        }
         Cmd::Pattern { cmd, .. } => match cmd {
             None | Some(PatternCmd::Show { .. }) | Some(PatternCmd::Clear { .. }) => {
                 print_pattern(&serde_json::from_value(last)?)
@@ -1439,6 +1605,10 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             );
             let onsets: Vec<String> = r.onsets.iter().map(|t| format!("{t:.3}")).collect();
             println!("onsets (s): {}", onsets.join(" "));
+            if let Some(c) = &r.recorded {
+                print!("recorded ");
+                print_clip(c);
+            }
         }
         Cmd::Project { cmd: ProjectCmd::List } => {
             let r: ProjectListResult = serde_json::from_value(last)?;
@@ -1888,7 +2058,8 @@ mod tests {
             "cc unmap knobs 21", "cc learn bass.cutoff", "knobs page decay", "knobs follow knobs 21 22",
             "daemon status", "daemon stop", "undo", "redo", "history", "journal",
             "clip", "clip show bass", "clip set bass 0:C2:12", "clip add bass 36 C3 --len 6", "clip rm bass 36 C3",
-            "clip length bass 12", "clip clear bass", "clip quantize bass 1/8",
+            "clip length bass 12", "clip clear bass", "clip quantize bass 1/8", "record", "record --off",
+            "metronome on", "render --record --input 0.5:C2",
             "midi models", "midi layout mpk --apply",
         ];
         let mut covered: BTreeSet<&str> = commands.iter().flat_map(|c| methods_for(c)).collect();

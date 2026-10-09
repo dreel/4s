@@ -154,7 +154,7 @@ export function RenderPanel() {
   const [result, setResult] = useState<RenderResult | null>(null);
   const render = async () => {
     setBusy(true);
-    setResult((await act(client.call("render.offline", { bars, tail: 0.5, path: null, sample_rate: null }))) ?? null);
+    setResult((await act(client.call("render.offline", { bars, tail: 0.5, path: null, sample_rate: null, metronome: null, input: null, record: null }))) ?? null);
     setBusy(false);
   };
   return (

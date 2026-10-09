@@ -1,0 +1,119 @@
+# RFC 0008: Recording and the arrangement
+
+- Status: accepted (phase A implemented; see "Implementation notes")
+- Author: Sam (@dreel), drafted with Claude
+- Created: 2026-10-09
+- Discussion: the PR that introduces this RFC.
+
+## Summary
+
+An Ableton-style workflow in three phases: **record** live notes into clips
+(record quantize with strength, overdub/replace, a metronome, and a
+count-in); a **song**: a clip pool per instrument and an arrangement
+timeline that plays through or loops the song or a section; and the UI for
+both, a **piano roll** for any clip and an **arrangement view** with one
+column per mixer channel, grouped by instrument. This takes over RFC 0007's
+phase 3 (recording). SMF import/export follows in a separate change.
+
+## Motivation
+
+Clips (RFC 0007) can only be entered as step grids or event text. Nothing
+records, nothing clicks, and a project is one loop per instrument. Making
+music means playing parts in, fixing their timing, and arranging them into a
+song.
+
+## Design
+
+### Phase A: recording, metronome, count-in
+
+- **Where a live note lands.** The engine reports each live (non-clip) note
+  with the song tick the player *heard* when they played it:
+  `Feedback::Live { slot, note, velocity, on, gate, tick, time }`. `tick` is
+  fractional, counted in the unswung tick grid, with the output latency (from
+  the audio backend's callback timestamps) taken off. It is negative during
+  a count-in.
+- **Takes.** `transport.record { arm: true }` starts a take into an
+  instrument (default: the caller's seat focus). From a stop it plays after
+  `count_in` bars of metronome. A take writes once per loop pass, one step
+  before the loop's end (so pass 1 plays back in pass 2), and when it ends
+  (`arm: false`, or stopping). Each write goes through `edit_clip` and is
+  one journal entry, `record.take`, so one pass is one undo step, owned by
+  the user who armed.
+- **Modes.** `overdub` adds; `replace` clears the part of the loop each
+  pass covers, then adds what was played.
+- **Record quantize.** A grid (`1/4` .. `1/32`, triplets) and a strength
+  (0..1) moving each note's start toward the nearest grid line; a note that
+  lands on the loop's end wraps to its start. `clip.quantize` gets the same
+  `strength`. Lengths are kept.
+- **Metronome.** A click in the engine (not an instrument), mixed after the
+  master fader and its meter: `metronome.on`, `metronome.level` (globals,
+  saved with the project, not undone). It always clicks during a count-in.
+- **Agent loop.** `render.offline` takes `input` (notes timed in seconds)
+  and `record` (settings), plays the notes sample-accurately, and runs the
+  same take code over the render's feedback, returning the clip it would
+  leave (`recorded`) without changing the project. `metronome: true`
+  includes the click.
+- RPC/CLI: `transport.record` -> `4s record [--off|--show] [--to] [--replace]
+  [--quantize] [--strength] [--count-in] [--offset-ms]`; `4s metronome`;
+  `4s render --input ... --record`; `4s clip quantize --strength`. Event
+  `record`; snapshot `record`. Protocol 6.
+
+### Phase B: song model, clip pool, loop range, piano roll
+
+- Each instrument (a **track**) has a clip pool and an arrangement of
+  placements `{clip, start, length, offset}`; a clip loops inside a longer
+  placement.
+- `transport.mode`: `pattern` (each track loops its selected clip, today's
+  behavior) or `song`. Song loop: `song | range | off`; `transport.locate`.
+- Engine: a preallocated clip table shared by slots and fixed placement
+  arrays; per tick, the placement under the song tick plays its clip.
+- Recording in song mode records into the placement under the playhead, or
+  a new clip and placement that grows as you play.
+- Project format v5 (each clip becomes clip 1 of its pool).
+- Piano roll for any clip (drum rows for the 808), editing through an atomic
+  `clip.update { remove, add }`.
+
+### Phase C: arrangement view
+
+Columns per mixer channel, grouped under their instrument (an unrouted
+instrument is one column without a strip); time runs downward with a bar
+ruler, loop brace, and playhead; clips are blocks spanning their group,
+moved, resized, and duplicated through phase B's RPCs.
+
+## Impact on the principles
+
+- **API first / parity:** every capability is an RPC with a CLI command
+  before the UI uses it.
+- **Real-time safety:** the click and count-in are fixed state in the
+  engine; live-note positions are computed on the audio thread from
+  existing clock state; takes are built on the control side
+  (`no_alloc` covers live notes, the click, and a count-in).
+- **Close the loop:** recording is verified deterministically through
+  `render --input --record`, and live through the CLI and Electron e2e.
+
+## Alternatives
+
+- Session view (scenes) instead of an arrangement: the user asked for a
+  song timeline that loops the song or a section.
+- Writing each recorded note as it is released: live feedback, but one undo
+  step per note; per-pass writes match Ableton's takes.
+- Recording raw timing and quantizing non-destructively: more state for
+  little gain while `clip.quantize` exists.
+
+## Implementation notes (phase A)
+
+- Record settings (mode, quantize, strength, count-in, offset) are session
+  state shared by everyone on the engine, not saved in the project. One take
+  runs at a time.
+- Defaults: overdub, no quantize, strength 100%, count-in 1 bar.
+- Notes played more than a 16th before the song's tick 0 (during the
+  count-in) are not recorded; later ones are (and wrap or quantize onto the
+  downbeat).
+- `replace` clears a pass's span when the pass is written, so the old notes
+  still play during that pass.
+- `offset_ms` compensates extra input latency (MIDI interfaces, Bluetooth)
+  on top of the measured output latency.
+- The 4/4 click follows the sequencer's swing; a `transport.beats_per_bar`
+  can come with the song model.
+- Live take progress (notes drawn while recording) waits for the piano roll
+  (phase B).

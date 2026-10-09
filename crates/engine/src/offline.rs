@@ -67,34 +67,77 @@ impl RenderSpec {
     }
 }
 
+/// A note played live during an offline render (as a key would be).
+#[derive(Clone, Copy, Debug)]
+pub struct LiveNote {
+    /// Seconds from play.
+    pub time: f64,
+    pub slot: u8,
+    pub note: u8,
+    pub velocity: f32,
+    /// Seconds held.
+    pub duration: f64,
+}
+
 pub struct OfflineRender {
     pub sample_rate: u32,
     /// Interleaved stereo.
     pub samples: Vec<f32>,
     pub triggers: Vec<RenderTrigger>,
+    /// `Step` and `Live` feedback, in order (what a recording sees).
+    pub feedback: Vec<Feedback>,
 }
 
 /// Render `bars` 4/4 bars (16 steps each, at the current tempo) from step 1,
-/// plus `tail` seconds.
-pub fn render_graph(spec: &RenderSpec, sample_rate: u32, bars: f64, tail: f64) -> OfflineRender {
+/// plus `tail` seconds, playing `input` notes at their times
+/// (sample-accurately).
+pub fn render_graph(spec: &RenderSpec, sample_rate: u32, bars: f64, tail: f64, input: &[LiveNote]) -> OfflineRender {
     let mut engine = spec.build(sample_rate);
     let tempo = spec.globals[TEMPO].clamp(20.0, 300.0) as f64;
     let bar_secs = 4.0 * 60.0 / tempo;
     let play_frames = (bars.max(0.0) * bar_secs * sample_rate as f64).round() as usize;
     let tail_frames = (tail.max(0.0) * sample_rate as f64).round() as usize;
+    let total = play_frames + tail_frames;
+
+    // Note ons and offs by frame; a note's off before a later on at the
+    // same frame.
+    let at = |t: f64| ((t.max(0.0) * sample_rate as f64).round() as usize).min(total);
+    let mut cmds: Vec<(usize, bool, Command)> = Vec::new();
+    for n in input {
+        let on = Command::NoteOn { slot: n.slot, note: n.note, velocity: n.velocity, gate: false };
+        cmds.push((at(n.time), true, on));
+        cmds.push((at(n.time + n.duration.max(0.0)), false, Command::NoteOff { slot: n.slot, note: n.note }));
+    }
+    cmds.sort_by_key(|(f, on, _)| (*f, *on));
+    cmds.push((play_frames, false, Command::Stop));
+    cmds.sort_by_key(|(f, on, _)| (*f, *on));
 
     let mut fb = Vec::new();
-    let mut samples = vec![0.0f32; (play_frames + tail_frames) * 2];
-    let _ = engine.apply(Command::Play, &mut |f| fb.push(f));
-    let (play, rest) = samples.split_at_mut(play_frames * 2);
-    for chunk in play.chunks_mut(1024) {
-        engine.render(chunk, 2, &mut |f| fb.push(f));
+    let mut samples = vec![0.0f32; total * 2];
+    let _ = engine.apply(Command::Play { count_in: 0 }, &mut |f| fb.push(f));
+    let mut frame = 0;
+    let mut pending = cmds.into_iter().peekable();
+    while frame < total || pending.peek().is_some() {
+        while let Some((_, _, cmd)) = pending.next_if(|(f, _, _)| *f <= frame) {
+            let _ = engine.apply(cmd, &mut |f| fb.push(f));
+        }
+        let until = pending.peek().map(|(f, _, _)| *f).unwrap_or(total).min(frame + 1024).min(total);
+        if until <= frame {
+            if frame >= total {
+                break;
+            }
+            continue;
+        }
+        engine.render(&mut samples[frame * 2..until * 2], 2, &mut |f| fb.push(f));
+        frame = until;
     }
-    let _ = engine.apply(Command::Stop, &mut |f| fb.push(f));
-    for chunk in rest.chunks_mut(1024) {
-        engine.render(chunk, 2, &mut |f| fb.push(f));
+    // Anything left (e.g. note-offs past the end) still reaches the engine,
+    // so recorded notes close.
+    for (_, _, cmd) in pending {
+        let _ = engine.apply(cmd, &mut |f| fb.push(f));
     }
 
+    let feedback = fb.iter().filter(|f| matches!(f, Feedback::Step { .. } | Feedback::Live { .. })).copied().collect();
     let triggers = fb
         .into_iter()
         .filter_map(|f| match f {
@@ -109,7 +152,7 @@ pub fn render_graph(spec: &RenderSpec, sample_rate: u32, bars: f64, tail: f64) -
             _ => None,
         })
         .collect();
-    OfflineRender { sample_rate, samples, triggers }
+    OfflineRender { sample_rate, samples, triggers, feedback }
 }
 
 /// Peak and RMS of one lane (0 = left, 1 = right) of interleaved stereo.
@@ -232,7 +275,7 @@ mod tests {
         for s in [0, 4, 8, 12] {
             pattern[0][s] = STEP_ON;
         }
-        let r = render_graph(&drums_spec(pattern), 48000, 1.0, 0.0);
+        let r = render_graph(&drums_spec(pattern), 48000, 1.0, 0.0, &[]);
         assert_eq!(r.samples.len(), 48000 * 2 * 2); // 2s at 120 bpm, stereo
         assert_eq!(r.triggers.len(), 4);
         assert_eq!(r.triggers[0].instrument, "drums");
@@ -257,7 +300,7 @@ mod tests {
         set(&mut pattern, Voice::Cowbell, "---------------X");
         let mut spec = drums_spec(pattern);
         spec.globals[TEMPO] = 128.0;
-        let r = render_graph(&spec, 48000, 1.0, 0.0);
+        let r = render_graph(&spec, 48000, 1.0, 0.0, &[]);
         let mut hit_times: Vec<f64> = r.triggers.iter().map(|t| t.time).collect();
         hit_times.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
         let a = analyze(&r.samples, r.sample_rate);
@@ -276,7 +319,7 @@ mod tests {
             pattern[voice.index()][8] = STEP_ON;
             let mut spec = drums_spec(pattern);
             spec.instruments[0].params[voice.index() * VOICE_PARAMS + DECAY] = 1.0;
-            let r = render_graph(&spec, 48000, 1.0, 1.0);
+            let r = render_graph(&spec, 48000, 1.0, 1.0, &[]);
             let a = analyze(&r.samples, r.sample_rate);
             assert_eq!(a.onsets.len(), 2, "{voice:?}: {:?}", a.onsets);
         }
@@ -284,7 +327,7 @@ mod tests {
 
     #[test]
     fn silence_has_no_onsets() {
-        let r = render_graph(&drums_spec([[STEP_OFF; MAX_STEPS]; NUM_TRACKS]), 48000, 1.0, 0.0);
+        let r = render_graph(&drums_spec([[STEP_OFF; MAX_STEPS]; NUM_TRACKS]), 48000, 1.0, 0.0, &[]);
         let a = analyze(&r.samples, r.sample_rate);
         assert_eq!(a.peak, 0.0);
         assert!(a.onsets.is_empty());

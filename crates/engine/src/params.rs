@@ -10,7 +10,11 @@ pub const TEMPO: usize = 0;
 pub const SWING: usize = 1;
 pub const LENGTH: usize = 2;
 pub const MASTER_VOLUME: usize = 3;
-pub const NUM_GLOBALS: usize = 4;
+/// The metronome clicks while the transport plays (it always clicks during
+/// a count-in).
+pub const METRONOME: usize = 4;
+pub const METRONOME_LEVEL: usize = 5;
+pub const NUM_GLOBALS: usize = 6;
 
 /// Channel parameters, indexed by `ParamTarget::Channel`.
 pub const CH_VOLUME: usize = 0;
@@ -40,6 +44,8 @@ pub fn globals() -> Vec<ParamInfo> {
             unit: Some("steps".into()),
         },
         cont("mixer.master.volume".into(), "Master Volume".into(), 0.0, 1.0, 0.8, None),
+        toggle("metronome.on".into(), "Metronome".into()),
+        cont("metronome.level".into(), "Metronome Level".into(), 0.0, 1.0, 0.6, None),
     ]
 }
 

@@ -54,6 +54,8 @@ import type { ProjectInfo } from "./ProjectInfo";
 import type { ProjectListResult } from "./ProjectListResult";
 import type { ProjectLoadParams } from "./ProjectLoadParams";
 import type { ProjectSaveParams } from "./ProjectSaveParams";
+import type { RecordParams } from "./RecordParams";
+import type { RecordState } from "./RecordState";
 import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
 import type { RouteSetParams } from "./RouteSetParams";
@@ -90,6 +92,7 @@ export interface Methods {
   "param.set": { params: ParamSetParams; result: ParamValue };
   "transport.play": { params: Empty; result: TransportState };
   "transport.stop": { params: Empty; result: TransportState };
+  "transport.record": { params: RecordParams; result: RecordState };
   "instrument.types": { params: Empty; result: InstrumentTypesResult };
   "instrument.list": { params: Empty; result: InstrumentListResult };
   "instrument.add": { params: InstrumentAddParams; result: InstrumentInfo };
@@ -168,6 +171,7 @@ export const METHODS: MethodName[] = [
   "param.set",
   "transport.play",
   "transport.stop",
+  "transport.record",
   "instrument.types",
   "instrument.list",
   "instrument.add",

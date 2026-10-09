@@ -41,7 +41,10 @@ pub fn start_device(mut engine: RtEngine) -> Result<AudioStatus> {
             let stream = match format {
                 cpal::SampleFormat::F32 => device.build_output_stream(
                     config.clone(),
-                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| engine.process(data, channels),
+                    move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
+                        engine.set_output_latency(latency(info));
+                        engine.process(data, channels)
+                    },
                     err_fn,
                     None,
                 )?,
@@ -77,6 +80,13 @@ pub fn start_device(mut engine: RtEngine) -> Result<AudioStatus> {
     rx.recv().map_err(|_| anyhow!("audio thread exited"))?
 }
 
+/// How long until what this callback writes is heard, as the device
+/// reports it (recording places live notes by it).
+fn latency(info: &cpal::OutputCallbackInfo) -> f64 {
+    let t = info.timestamp();
+    t.playback.duration_since(t.callback).as_secs_f64()
+}
+
 fn build_converted<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -90,7 +100,8 @@ where
     let mut scratch = vec![0.0f32; MAX_FRAMES * channels];
     Ok(device.build_output_stream(
         config.clone(),
-        move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+        move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
+            engine.set_output_latency(latency(info));
             for chunk in data.chunks_mut(scratch.len()) {
                 let buf = &mut scratch[..chunk.len()];
                 engine.process(buf, channels);
