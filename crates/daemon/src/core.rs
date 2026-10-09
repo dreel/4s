@@ -87,6 +87,8 @@ pub struct Core {
     sample_rate: u32,
     playing: bool,
     playhead: Option<u32>,
+    /// Engine tick (from play) of the last playhead step.
+    play_tick: u64,
     controller: Controller,
     block_map: BlockMap,
     midi: Midi,
@@ -148,6 +150,7 @@ impl Core {
             sample_rate: audio.sample_rate,
             playing: false,
             playhead: None,
+            play_tick: 0,
             controller: Controller::default(),
             block_map,
             midi: Midi::default(),
@@ -249,6 +252,16 @@ impl Core {
     fn grid_length(&self) -> u32 {
         let own = self.drum_focus(&self.host_seat).and_then(|id| self.clips.get(&id).and_then(|c| c.length));
         own.map(|l| l.div_ceil(TICKS_PER_STEP).min(MAX_STEPS as u32)).unwrap_or_else(|| self.length())
+    }
+
+    /// The Block grid's playhead: the step of the host's focus clip, which
+    /// loops from play at its own length when it has one.
+    fn grid_playhead(&self) -> Option<u32> {
+        let own = self.drum_focus(&self.host_seat).and_then(|id| self.clips.get(&id).and_then(|c| c.length));
+        match own {
+            Some(l) => self.playhead.map(|_| (self.play_tick % l.max(1) as u64) as u32 / TICKS_PER_STEP),
+            None => self.playhead,
+        }
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -652,7 +665,7 @@ impl Core {
             self.controller.page = pages - 1;
         }
         let pattern = self.target_pattern();
-        let leds = self.controller.compute_leds(pattern.as_ref(), self.grid_length(), self.playhead);
+        let leds = self.controller.compute_leds(pattern.as_ref(), self.grid_length(), self.grid_playhead());
         let diff = self.controller.set_leds(leds);
         for (r, c, v) in &diff {
             let msg = self.block_map.led_message(*r, *c, *v);
@@ -1097,13 +1110,16 @@ impl Core {
 
     pub fn handle_feedback(&mut self, fb: Feedback) {
         match fb {
-            Feedback::Step { step, time } => {
+            Feedback::Step { step, tick, time } => {
                 if !self.playing {
                     return;
                 }
                 self.playhead = Some(step);
-                if self.controller.follow {
-                    self.controller.page = step / crate::controller::GRID as u32;
+                self.play_tick = tick;
+                if self.controller.follow
+                    && let Some(at) = self.grid_playhead()
+                {
+                    self.controller.page = at / crate::controller::GRID as u32;
                 }
                 self.emit("engine", Event::Playhead { step, time });
                 self.refresh_controller("engine", false);

@@ -564,7 +564,39 @@ check "so does a drum step edit" "0:C2:24:100 12:F#2:6:89 96:D2:24:89" bash -c "
 s instrument rm seqd >/dev/null
 check "clip set replaces the events" "seq: 1 notes" s clip set seq "0:60:96:127"
 check "clear" "seq: 0 notes" s clip clear seq
+check "quantize keeps a note past the longest clip on the grid" "1512:C2:6:89" bash -c "$BIN/4s clip set seq 1535:C2:6 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
 s instrument rm seq >/dev/null
+# The loop while playing (at 30 bpm a step is 0.5 s): shortening it past
+# the playhead goes back to step 1, lengthening it continues, and the Block
+# grid's playhead follows a focus clip with its own length.
+cat > "$TMP/loop.py" <<PY
+import subprocess, sys
+def run(*a): return subprocess.check_output(['$BIN/4s', *a], text=True)
+# One stream, so no step is missed between reads; 0-based (watch shows
+# steps from 1).
+watch = subprocess.Popen(['$BIN/4s', 'watch', '--type', 'playhead'], stdout=subprocess.PIPE, text=True)
+def step(): return int(watch.stdout.readline().split('step ')[1].split()[0]) - 1
+def until(ok):
+    while not ok(s := step()): pass
+    return s
+run('tempo', '30'); run('set', 'sequencer.length', sys.argv[1]); run('play')
+try:
+    if sys.argv[2] == 'shorten':
+        until(lambda s: s >= 13); run('set', 'sequencer.length', '12'); print('next step', step())
+    elif sys.argv[2] == 'lengthen':
+        until(lambda s: s == 11); until(lambda s: s == 3); run('set', 'sequencer.length', '16'); print('next step', step())
+    else:
+        s = until(lambda s: s >= 4)
+        col = run('controller').splitlines()[8].split()[s % 3]
+        print('grid playhead at clip step' if col == '#' else run('controller'))
+finally:
+    watch.kill(); run('stop'); run('set', 'sequencer.length', '16'); run('tempo', '120')
+PY
+check "shortening the loop past the playhead goes back to step 1" "next step 0" python3 "$TMP/loop.py" 16 shorten
+check "lengthening it continues" "next step 4" python3 "$TMP/loop.py" 12 lengthen
+s instrument add tr808 --id gridd --no-channel >/dev/null; s focus gridd >/dev/null; s clip length gridd 3 >/dev/null
+check "the Block grid's playhead follows a focus clip with its own length" "grid playhead at clip step" python3 "$TMP/loop.py" 16 grid
+s instrument rm gridd >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
 check "daemon logs" "listening on ws://" s daemon logs

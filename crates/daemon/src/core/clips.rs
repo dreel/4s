@@ -315,16 +315,18 @@ impl Core {
                     return Err(RpcError::invalid("grid must be 1.. ticks (24 = a 16th)"));
                 }
                 // Nearest grid line; one that lands on the loop's end wraps to
-                // its start (where it would play). Events that land together
-                // keep the later.
+                // its start (where it would play), and one past the longest
+                // clip takes the last line before it. Events that land
+                // together keep the later.
                 let g = p.grid;
+                let last = (MAX_CLIP_TICKS - 1) / g * g;
                 let loop_len = self.clips[&id].length.unwrap_or(self.length() * TICKS_PER_STEP);
                 let events: Vec<ClipEvent> = self.clips[&id]
                     .events
                     .iter()
                     .map(|e| {
                         let t = (e.tick + g / 2) / g * g;
-                        let t = if e.tick < loop_len && t >= loop_len { 0 } else { t.min(MAX_CLIP_TICKS - 1) };
+                        let t = if e.tick < loop_len && t >= loop_len { 0 } else { t.min(last) };
                         ClipEvent { tick: t, ..*e }
                     })
                     .collect();
