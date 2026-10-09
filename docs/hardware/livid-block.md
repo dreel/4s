@@ -1,7 +1,8 @@
 # Livid Block
 
-Status: v1 implemented. The MIDI note/CC map is a **default guess that has not
-been verified on the device yet** -- see "Calibrating" below.
+Status: v1 implemented. The grid note layout (column-major) was corrected
+after testing on the device: the first guess (row-major) showed the grid
+transposed. The knob CCs are still unverified -- see "Calibrating" below.
 
 ## Hardware
 
@@ -66,15 +67,20 @@ Stored in `<data-dir>/livid-block.json` (default `~/.4s/livid-block.json`),
 written with defaults on first run:
 
 - `channel`: 0 (MIDI channel 1)
-- `grid_notes[row][col]`: note `row * 8 + col` (0-63, row-major from the top
-  left)
+- `grid_notes[row][col]`: note `col * 8 + row` (0-63, down each column from
+  the top left: the first column is notes 0-7)
+- A map file still holding the first, transposed default (`row * 8 + col`) is
+  rewritten with this one when `4sd` starts; an edited map is left alone.
 - `knob_ccs`: CC 1-8, left to right
 - LEDs: note-on to the pad's note, velocity 127 = on, 0 = off
 
 ## Calibrating
 
-1. Run `4s midi monitor` and press the top-left pad, the top-right pad, the
-   bottom-left pad, then turn knob 1 and knob 8.
+The grid layout is verified on the device. The knob CCs and the channel are
+still the defaults:
+
+1. Run `4s midi monitor`, then turn knob 1 and knob 8 (and, to double-check
+   the grid, press the top-left pad and the pad below it: notes 0 and 1).
 2. Compare the printed messages (`90 nn vv` = note-on, `B0 cc vv` = CC) with
    the defaults above.
 3. Edit `livid-block.json` to match and restart `4sd`.

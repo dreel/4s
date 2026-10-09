@@ -42,7 +42,8 @@ fn main() {
         let parts: Vec<&str> = line.split_whitespace().collect();
         let msgs: Vec<Vec<u8>> = match parts.as_slice() {
             ["pad", r, c] => {
-                let note = r.parse::<u8>().unwrap_or(0) * 8 + c.parse::<u8>().unwrap_or(0);
+                // The default map numbers pads down each column.
+                let note = c.parse::<u8>().unwrap_or(0) * 8 + r.parse::<u8>().unwrap_or(0);
                 vec![vec![0x90, note, 127], vec![0x80, note, 0]]
             }
             ["knob", i, v] => vec![vec![0xB0, 1 + i.parse::<u8>().unwrap_or(0), v.parse().unwrap_or(0)]],
