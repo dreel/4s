@@ -718,6 +718,9 @@ pub struct JournalContext {
     pub step: Option<u32>,
     /// Controller page (pad columns map to steps through it).
     pub page: u32,
+    /// The caller's seat, which seat-relative requests apply to.
+    #[serde(default)]
+    pub seat: Option<String>,
 }
 
 /// One request that could change state, as the daemon applied it.

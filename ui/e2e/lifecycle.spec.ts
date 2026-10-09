@@ -46,6 +46,7 @@ async function launch(mode: string, dataDir: string, port: number) {
     args: [MAIN],
     env: {
       ...process.env,
+      FOURS_UI_BACKGROUND: "1",
       FOURS_URL: `ws://127.0.0.1:${port}`,
       FOURS_DAEMON: mode,
       FOURS_DATA_DIR: dataDir,

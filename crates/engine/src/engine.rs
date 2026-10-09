@@ -80,7 +80,8 @@ impl std::fmt::Debug for Command {
 /// Messages out of the engine. Times are engine time in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Feedback {
-    Step { step: u32, time: f64 },
+    /// `step` of `sequencer.length`; `tick` counted from play.
+    Step { step: u32, tick: u64, time: f64 },
     Trigger { slot: u8, voice: Option<u8>, note: Option<u8>, velocity: f32, time: f64, step: Option<u32> },
     Stopped { time: f64 },
     /// Peak (left, right) per channel index since the last meter message.
@@ -184,6 +185,10 @@ pub struct Engine {
     playing: bool,
     /// The next tick to fire, counted from play.
     tick: u64,
+    /// Position of the next tick in the `sequencer.length` loop. It wraps
+    /// to the start when it runs past the end, so shortening the loop
+    /// while playing goes back to step 1 and lengthening it continues.
+    loop_tick: u32,
     /// Absolute sample position at which it fires.
     next_tick_at: f64,
     /// Total samples rendered.
@@ -207,6 +212,7 @@ impl Engine {
             master_peak: [0.0; 2],
             playing: false,
             tick: 0,
+            loop_tick: 0,
             next_tick_at: 0.0,
             pos: 0,
             meter_countdown: 0,
@@ -350,6 +356,7 @@ impl Engine {
                 self.release_clip_notes(None);
                 self.playing = true;
                 self.tick = 0;
+                self.loop_tick = 0;
                 self.next_tick_at = self.pos as f64;
             }
             Command::Stop => {
@@ -405,17 +412,25 @@ impl Engine {
     /// starts its events at this position.
     fn fire_tick(&mut self, emit: &mut impl FnMut(Feedback)) {
         let tick = self.tick;
-        let step = (tick / TICKS_PER_STEP as u64) as u32;
         let time = self.time();
         let steps = (self.globals[LENGTH].round() as u32).clamp(1, MAX_STEPS as u32);
-        if tick % TICKS_PER_STEP as u64 == 0 {
-            emit(Feedback::Step { step: step % steps, time });
+        if self.loop_tick >= steps * TICKS_PER_STEP {
+            self.loop_tick = 0;
+        }
+        let loop_tick = self.loop_tick;
+        let step = loop_tick / TICKS_PER_STEP;
+        if loop_tick % TICKS_PER_STEP == 0 {
+            emit(Feedback::Step { step, tick, time });
         }
         self.release_clip_notes(Some(tick));
         for (slot, t) in self.tracks.iter_mut().enumerate() {
             let Some(Some(s)) = self.slots.get_mut(slot) else { continue };
-            let length = t.length.unwrap_or(steps * TICKS_PER_STEP) as u64;
-            let pos = (tick % length) as u32;
+            // A clip with its own length loops from play; the others follow
+            // the global loop.
+            let pos = match t.length {
+                Some(length) => (tick % length as u64) as u32,
+                None => loop_tick,
+            };
             let first = t.events.partition_point(|e| e.tick < pos);
             for e in t.events[first..].iter().take_while(|e| e.tick == pos) {
                 let velocity = e.velocity as f32 / 127.0;
@@ -440,8 +455,9 @@ impl Engine {
             }
         }
         // Swing pairs count from the pattern's first step, as the playhead does.
-        self.next_tick_at += self.step_samples(step % steps) / TICKS_PER_STEP as f64;
+        self.next_tick_at += self.step_samples(step) / TICKS_PER_STEP as f64;
         self.tick = tick + 1;
+        self.loop_tick = loop_tick + 1;
     }
 
     /// Render interleaved audio into `out` (`channels` >= 1; channels beyond

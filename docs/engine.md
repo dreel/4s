@@ -123,13 +123,16 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 - One shared clock: 96 ticks per quarter note (`PPQ`), 24 per 16th step
   (`TICKS_PER_STEP`). The playhead counts steps of `sequencer.length`
   (1-64).
+  Shortening it while playing past the new end goes back to step 1;
+  lengthening it continues where it was.
 - Swing (`transport.swing` 0..1) delays every second 16th: each pair keeps its
   length and the first note takes 50%..75% of it. Ticks inside a step are
   spaced evenly.
 - Each instrument slot has a **clip** (RFC 0007): up to `MAX_EVENTS` = 1024
   events `{tick, len, note, velocity}`, looping at its own length or, by
   default, at `sequencer.length` steps (clips of different lengths make
-  polymeters). On every tick the engine releases the notes that end there,
+  polymeters; a clip with its own length loops from play, unaffected by
+  changes to `sequencer.length`). On every tick the engine releases the notes that end there,
   then starts the events that begin there, sample-accurately inside audio
   blocks.
 - Clip storage is preallocated per slot; the daemon edits it with

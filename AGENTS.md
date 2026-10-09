@@ -40,6 +40,7 @@ and agents can drive and verify every part of it.
 - [RFCs](docs/rfcs/README.md) -- design records for big changes (optional during the build phase, RFC 0005)
 - [Testing](docs/testing.md) -- e2e first; which unit tests are worth writing (RFC 0002)
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
+- [Journal](docs/journal.md) -- what happened and who did it, undo/redo, reproducing bugs by replaying recordings, recordings as tests
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
 - [Akai MPK mini IV](docs/hardware/akai-mpk-mini-iv.md) -- device model, ports, default layout
 
@@ -79,6 +80,9 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history.
+- `4s journal export -o rec.json` saves a session; `4s journal replay rec.json`
+  (into an isolated daemon -- it replaces the project) reproduces it and
+  checks every step matches. See [docs/journal.md](docs/journal.md).
 
 ## How agents should work here
 
@@ -91,6 +95,12 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   [docs/testing.md](docs/testing.md).
 - **API first.** New features start as an RPC, then get a CLI command, then UI.
   Never add a capability that only the UI can reach.
+- **Reproduce before you fix.** For a reported bug, get the session
+  (`4s journal export` from the daemon it happened on, which is read-only, or
+  the newest `<data-dir>/journal/*.jsonl`) and replay it into an isolated
+  daemon. Read `4s journal` before guessing at what happened. A fixed bug's
+  recording can become a regression test in `tests/journals/`. See
+  [docs/journal.md](docs/journal.md).
 - **Keep the audio thread real-time safe.** No locks, allocations, or I/O on the
   audio callback path.
 - **Update docs/** when a change alters a principle or a design decision, and

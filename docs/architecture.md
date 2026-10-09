@@ -148,8 +148,10 @@ control side, in `crates/daemon/src/core/seats.rs`, in three layers:
   a session-only seat). The engine host's devices use the host seat: a
   pinned seat (`midi.set_seat`), else the seat of the latest local client
   of the host's own user (or one that chose its seat in the chooser or with
-  `seat claim`/`seat create`), else the one matching the OS user. A one-off
-  `4s --seat bob ...` or `4s --user carol ...` does not move the devices.
+  `seat claim`/`seat create`), else the one matching the OS user. A seat
+  chosen that way outranks a later automatic one, so a `4s` command does
+  not move the devices away from the UI's choice. A one-off
+  `4s --seat bob ...` or `4s --user carol ...` does not move them either.
 
 **Device models** (`crates/daemon/devices/*.json`) describe known
 controllers: which ports to use and what to call them, and a default layout
