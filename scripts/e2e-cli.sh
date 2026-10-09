@@ -80,7 +80,7 @@ echo "pad 0 2" >&7
 echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
 sleep 0.5
 check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
-check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","seat":"e2e"} -> step:drums.kick.2' s journal
+check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","profile":"livid_block","seat":"e2e"} -> step:drums.kick.2' s journal
 check "undo takes back a device pad press (the host user's)" "kick        ---- ---- ---- ----" bash -c "$BIN/4s undo >/dev/null && $BIN/4s pattern show kick"
 check "redo" "kick        --x- ---- ---- ----" bash -c "$BIN/4s redo >/dev/null && $BIN/4s pattern show kick"
 # Knob 2 (CC 2) on the decay page -> snare decay. Knobs pick up: one far
