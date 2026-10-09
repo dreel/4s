@@ -166,6 +166,13 @@ WATCH=$!; sleep 0.5
 echo "raw 90 24 64" >&8   # note on, C2 (36)
 wait $WATCH
 check "key down plays the note" '"instrument":"bass","voice":null,"note":36' cat "$TMP/key.json"
+s cc map keys 21 bass.cutoff >/dev/null
+"$BIN/4s" watch --type trigger --json > "$TMP/key-cc.json" &
+WATCH=$!; sleep 0.5
+echo "raw 90 26 64" >&8; echo "raw 80 26 00" >&8   # D2 (38)
+sleep 0.5; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "a keyboard with only a CC map still plays the focus" '"instrument":"bass","voice":null,"note":38' cat "$TMP/key-cc.json"
+s cc unmap keys 21 >/dev/null
 "$BIN/4s" watch --type meters --json > "$TMP/key-meters.json" &
 WATCH=$!; sleep 0.6
 echo "raw 80 24 00" >&8   # note off

@@ -836,11 +836,15 @@ impl Core {
         note: u8,
         velocity: f32,
     ) {
-        // Without a config of its own or a model layout, a device plays the
-        // seat's focus.
-        let bindings = match self.device_config(seat, device, model) {
-            Some(c) => c.bindings,
-            None => vec![NoteBinding {
+        // Without bindings of its own (CC maps or knobs alone do not count)
+        // or in its model's layout, a device plays the seat's focus.
+        let mut bindings = self.device_config(seat, device, model).map(|c| c.bindings).unwrap_or_default();
+        if bindings.is_empty() {
+            let (m, role) = model.unzip();
+            bindings = m.and_then(crate::models::get).map(|m| layout(m, role.unwrap_or(""), device).bindings).unwrap_or_default();
+        }
+        if bindings.is_empty() {
+            bindings = vec![NoteBinding {
                 device: device.into(),
                 channel: None,
                 low: None,
@@ -848,8 +852,8 @@ impl Core {
                 transpose: 0,
                 remap: None,
                 target: "focus".into(),
-            }],
-        };
+            }];
+        }
         for b in bindings.iter().filter(|b| b.matches(device, channel, note)) {
             let target = self.resolve_target(seat, &b.target);
             let (Some(slot), Some(out)) = (target.and_then(|t| self.slot_of(&t)), b.output(note)) else { continue };
@@ -860,7 +864,11 @@ impl Core {
     /// Pitch bend (-8192..8191) to +/-2 semitones on the configured target
     /// (default: the focus).
     fn input_pitch_bend(&mut self, seat: &str, device: &str, model: Option<(&str, &str)>, value: i32) {
-        let target = self.device_config(seat, device, model).and_then(|c| c.pitch_bend).unwrap_or_else(|| "focus".into());
+        let target = self
+            .device_config(seat, device, model)
+            .and_then(|c| c.pitch_bend)
+            .or_else(|| self.seats.get(seat)?.config.pitch_bend.clone())
+            .unwrap_or_else(|| "focus".into());
         let Some(slot) = self.resolve_target(seat, &target).and_then(|t| self.slot_of(&t)) else { return };
         let semitones = 2.0 * value as f32 / 8192.0;
         self.send(Command::PitchBend { slot, semitones });

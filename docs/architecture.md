@@ -159,7 +159,9 @@ that seats use until they bind the device themselves (`4s midi models`,
 `4s midi layout <device> [--apply]`). Bindings can `remap` notes and target
 `@<type>` (the first instrument of a type); CC maps can target
 `focus.<param>` and read endless encoders (`relative`). Pitch bend plays the
-focus and is not journaled.
+seat's `pitch_bend` target (default: the focus) and is not journaled. A
+device with CC maps or knobs but no bindings of its own still plays its
+model's layout, else the focus.
 
 Knobs pick up: a knob far from the parameter's value does nothing until it
 passes it. Bridges will forward raw input with `midi.input`; the engine
