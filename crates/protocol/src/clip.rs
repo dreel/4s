@@ -13,6 +13,8 @@ use ts_rs::TS;
 pub const PPQ: u32 = 96;
 /// Ticks per sequencer step (a 16th).
 pub const TICKS_PER_STEP: u32 = PPQ / 4;
+/// Ticks per 4/4 bar.
+pub const TICKS_PER_BAR: u32 = PPQ * 4;
 /// Most events a clip holds.
 pub const MAX_EVENTS: usize = 1024;
 /// Longest clip, in ticks (`MAX_STEPS` steps).
@@ -80,6 +82,57 @@ pub fn normalize_events(events: &[ClipEvent]) -> Result<Vec<ClipEvent>, String> 
         return Err(format!("at most {MAX_EVENTS} events in a clip"));
     }
     Ok(out)
+}
+
+// ---- quantize ---------------------------------------------------------------
+
+/// Move `tick` toward the nearest multiple of `grid` by `strength` (0..1; 1
+/// lands exactly on the grid). A tick that ends up at or past the loop's end
+/// wraps to its start, where it would play; one past the longest clip takes
+/// the last grid line before it.
+pub fn snap_tick(tick: u32, grid: u32, strength: f32, loop_len: u32) -> u32 {
+    let g = grid.max(1);
+    let nearest = (tick + g / 2) / g * g;
+    let moved = tick as f64 + (nearest as f64 - tick as f64) * strength.clamp(0.0, 1.0) as f64;
+    let t = moved.round() as u32;
+    let t = if tick < loop_len && t >= loop_len { t - loop_len } else { t };
+    if t >= MAX_CLIP_TICKS { (MAX_CLIP_TICKS - 1) / g * g } else { t }
+}
+
+/// Grid names the CLI and UI offer, with their size in ticks: `1/4` .. `1/32`,
+/// and triplets (`1/8t` = three in the time of two 1/8s).
+pub const GRIDS: &[(&str, u32)] = &[
+    ("1/4", PPQ),
+    ("1/8", PPQ / 2),
+    ("1/8t", PPQ / 3),
+    ("1/16", PPQ / 4),
+    ("1/16t", PPQ / 6),
+    ("1/32", PPQ / 8),
+];
+
+/// Parse a grid: a name from `GRIDS`, `1` (a bar), `1/2`, or `off`
+/// (`None`).
+pub fn parse_grid(s: &str) -> Result<Option<u32>, String> {
+    let s = s.trim().to_ascii_lowercase();
+    match s.as_str() {
+        "off" | "none" => return Ok(None),
+        "1" | "1/1" => return Ok(Some(TICKS_PER_BAR)),
+        "1/2" => return Ok(Some(PPQ * 2)),
+        _ => {}
+    }
+    GRIDS
+        .iter()
+        .find(|(n, _)| *n == s)
+        .map(|(_, t)| Some(*t))
+        .ok_or_else(|| format!("invalid grid '{s}' (1/4, 1/8, 1/8t, 1/16, 1/16t, 1/32, or off)"))
+}
+
+/// A grid's name (`1/16`), or its ticks when it has none.
+pub fn format_grid(grid: Option<u32>) -> String {
+    match grid {
+        None => "off".into(),
+        Some(t) => GRIDS.iter().find(|(_, g)| *g == t).map(|(n, _)| n.to_string()).unwrap_or_else(|| format!("{t} ticks")),
+    }
 }
 
 // ---- step views ---------------------------------------------------------------
@@ -204,6 +257,19 @@ mod tests {
             .flat_map(|v| (0..MAX_STEPS).filter_map(move |s| drum_event(*v, s, grid[v.index()][s])))
             .collect();
         assert_eq!(drum_grid(&normalize_events(&events).unwrap()), grid);
+    }
+
+    #[test]
+    fn snap_moves_by_strength_and_wraps_at_the_loop_end() {
+        assert_eq!(snap_tick(30, 24, 1.0, 384), 24);
+        assert_eq!(snap_tick(30, 24, 0.5, 384), 27);
+        assert_eq!(snap_tick(30, 24, 0.0, 384), 30);
+        assert_eq!(snap_tick(380, 24, 1.0, 384), 0, "the loop's end is its start");
+        assert_eq!(snap_tick(380, 24, 0.5, 384), 382);
+        assert_eq!(parse_grid("1/16").unwrap(), Some(24));
+        assert_eq!(parse_grid("1/8T").unwrap(), Some(32));
+        assert_eq!(parse_grid("off").unwrap(), None);
+        assert!(parse_grid("1/7").is_err());
     }
 
     #[test]

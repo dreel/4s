@@ -6,13 +6,14 @@ import type { Graph } from "./Graph";
 import type { InstrumentPattern } from "./InstrumentPattern";
 import type { MidiConnection } from "./MidiConnection";
 import type { ProjectInfo } from "./ProjectInfo";
+import type { RecordState } from "./RecordState";
 import type { SeatsState } from "./SeatsState";
 import type { TransportState } from "./TransportState";
 
 /**
  * Full engine state. Subscribers apply events with `seq` greater than this.
  */
-export type Snapshot = { seq: number, transport: TransportState, params: { [key in string]: number }, graph: Graph, 
+export type Snapshot = { seq: number, transport: TransportState, record: RecordState, params: { [key in string]: number }, graph: Graph, 
 /**
  * One step view per instrument, in instrument order.
  */

@@ -44,6 +44,10 @@ What exists today:
   killed, a detached daemon survives the app, and an existing daemon is never
   stopped.
 
+Recording (RFC 0008) is checked offline with `4s render --input ...
+--record` (sample-accurate, so tick positions and quantize are exact) and
+live with `4s record` plus `4s key` in the CLI e2e and the Electron e2e.
+
 Not yet: golden renders, spectral checks, multi-daemon tests (no bridge yet),
 latency/jitter injection.
 

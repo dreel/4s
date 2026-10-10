@@ -11,6 +11,7 @@ import type { ClipGetParams } from "./ClipGetParams";
 import type { ClipLengthParams } from "./ClipLengthParams";
 import type { ClipQuantizeParams } from "./ClipQuantizeParams";
 import type { ClipRemoveParams } from "./ClipRemoveParams";
+import type { ClipUpdateParams } from "./ClipUpdateParams";
 import type { ControllerModeParams } from "./ControllerModeParams";
 import type { ControllerState } from "./ControllerState";
 import type { DaemonInfo } from "./DaemonInfo";
@@ -55,6 +56,8 @@ import type { ProjectInfo } from "./ProjectInfo";
 import type { ProjectListResult } from "./ProjectListResult";
 import type { ProjectLoadParams } from "./ProjectLoadParams";
 import type { ProjectSaveParams } from "./ProjectSaveParams";
+import type { RecordParams } from "./RecordParams";
+import type { RecordState } from "./RecordState";
 import type { Recording } from "./Recording";
 import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
@@ -92,6 +95,7 @@ export interface Methods {
   "param.set": { params: ParamSetParams; result: ParamValue };
   "transport.play": { params: Empty; result: TransportState };
   "transport.stop": { params: Empty; result: TransportState };
+  "transport.record": { params: RecordParams; result: RecordState };
   "instrument.types": { params: Empty; result: InstrumentTypesResult };
   "instrument.list": { params: Empty; result: InstrumentListResult };
   "instrument.add": { params: InstrumentAddParams; result: InstrumentInfo };
@@ -118,6 +122,7 @@ export interface Methods {
   "clip.set": { params: ClipEventsParams; result: Clip };
   "clip.add": { params: ClipEventsParams; result: Clip };
   "clip.remove": { params: ClipRemoveParams; result: Clip };
+  "clip.update": { params: ClipUpdateParams; result: Clip };
   "clip.length": { params: ClipLengthParams; result: Clip };
   "clip.clear": { params: ClipGetParams; result: Clip };
   "clip.quantize": { params: ClipQuantizeParams; result: Clip };
@@ -172,6 +177,7 @@ export const METHODS: MethodName[] = [
   "param.set",
   "transport.play",
   "transport.stop",
+  "transport.record",
   "instrument.types",
   "instrument.list",
   "instrument.add",
@@ -198,6 +204,7 @@ export const METHODS: MethodName[] = [
   "clip.set",
   "clip.add",
   "clip.remove",
+  "clip.update",
   "clip.length",
   "clip.clear",
   "clip.quantize",

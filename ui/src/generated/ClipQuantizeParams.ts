@@ -4,4 +4,8 @@ export type ClipQuantizeParams = { instrument: string | null,
 /**
  * Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).
  */
-grid: number, };
+grid: number, 
+/**
+ * How far to move each note toward the grid, 0..1 (default 1: onto it).
+ */
+strength: number | null, };

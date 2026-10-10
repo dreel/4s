@@ -55,12 +55,53 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   `midi.input` doesn't cap its length.
 - (2026-10-09, #25 follow-up) a seat-level `pitch_bend` is ignored for a
   model device until its layout is applied (the layout's own target wins).
+- (2026-10-10, recording branch review) recording: a take maps song ticks onto
+  the loop by the current length, but the global loop keeps its own
+  position when `sequencer.length` changes while playing; a length change
+  during a take places later notes off. Report the loop position with
+  `Feedback::Live` (`crates/daemon/src/core/record.rs`, `Take::flush`).
+- (2026-10-10, recording branch review) recording: `Feedback::Live` is sent even
+  when the instrument ignores the note (a non-GM note on a `tr808`), so
+  recording into a drum machine stores silent events
+  (`crates/engine/src/engine.rs`, `Command::NoteOn`).
+- (2026-10-10, recording branch review) recording: dropped feedback (a full
+  feedback ring) can leave `starting` set (playhead frozen until the next
+  play) or a note open until the take ends (recorded take-long).
+- (2026-10-10, recording branch review) recording: a write that fails when a take
+  ends or restarts is lost (only pass writes are retried); `write_take`
+  tells a busy engine from an invalid clip by comparing error codes; name
+  the codes.
+- (2026-10-10, recording branch review) recording: in `replace` mode the
+  write when a take ends or restarts clears up to the end of the current
+  step (`play_tick + TICKS_PER_STEP`), including the part the playhead had
+  not reached (during a count-in, the first step); bound the cleared span
+  by the heard tick (`crates/daemon/src/core/record.rs`,
+  `end_take`/`restart_take`).
+- (2026-10-10, recording branch review) recording: `transport_record` saves
+  the new settings before `self.slot(&id)?`, so a request that fails there
+  still changes them (`crates/daemon/src/core/record.rs`).
+- (2026-10-10, recording branch review) recording, replace mode: a clip
+  event at or past the loop length (left after shortening a clip) is only
+  cleared by a pass that covers the whole loop (`Take::flush`); decide and
+  document.
+- (2026-10-10, recording branch review) quantize: `snap_tick`'s wrap at the
+  loop's end can still leave a tick past the loop when the loop is shorter
+  than the grid (a 10-tick clip, 1/16 grid); wrap with `%`
+  (`crates/protocol/src/clip.rs`).
+- (2026-10-10, recording branch review) recording: `settle_take` runs after
+  only the settings are checked, so `transport.record {arm: false,
+  instrument: "nope"}` ends the take and then fails on the instrument.
+- (2026-10-10, recording branch review) recording: while the command queue
+  stays full, a pass write is retried every step and each failed try is a
+  journal entry; retry at the next pass instead, or journal only the first
+  failure.
 
 ## Follow-ups
 
 - (2026-10-09, #24 review) UI constants `TICKS_PER_STEP` and the GM drum
   notes are copied by hand into `ui/src/components/Editor.tsx` and
-  `voices.ts`; export them through the generated bindings.
+  `voices.ts` (and the record quantize grids into `Transport.tsx`, from
+  `clip.rs`'s `GRIDS`); export them through the generated bindings.
 - (2026-10-09, #24 review) editor: the hidden-note count misses extra 303
   chord notes on a step's first tick, and a clip length that isn't a whole
   number of steps shows as "loops every 2.5 steps".
@@ -88,9 +129,33 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-09, #24 follow-up) `Command::ClearClip` is unused by the daemon.
 - (2026-10-09, #25 follow-up) the 303 note-stack unit test duplicates the
   e2e legato checks.
+- (2026-10-10, recording branch review) record UI: while someone else's take
+  runs, the Rec button ends it (any client can); show the owner
+  (`RecordState.user`) in its title, and say so in `docs/rpc.md`.
+- (2026-10-10, recording branch review) the `parse_grid` asserts in
+  `clip.rs`'s unit test restate `GRIDS`; drop them and add a CLI e2e check
+  that `--quantize 1/8t` is a 32-tick grid.
+- (2026-10-10, recording branch review) render input: a note with
+  `duration` 0 sends its note-off on the same frame as its note-on (a
+  silent, 1-tick recorded note); require a positive duration.
+- (2026-10-10, recording branch review) recording: when the connection that
+  armed a take closes, the take keeps running and later passes are
+  journaled with that gone client's context (no seat); end the take, or
+  keep the seat on the take.
+- (2026-10-10, recording branch review) `4s render --replace/--quantize/...`
+  without `--record` or `--to` ignores those flags silently; require one.
+- (2026-10-10, recording branch review) `4s render --to` alone turns on
+  recording; there is no way to play `--input` into a non-focus instrument
+  without recording.
+- (2026-10-10, recording branch) SMF import/export (RFC 0007 phase 3) is not
+  built; and live take progress (notes shown while recording) waits for the
+  piano roll (RFC 0008 phase B).
 
 ## Mismatches
 
+- (2026-10-10, recording branch review) RFC 0008 says live-note ticks are
+  "counted in the unswung tick grid"; `heard_tick` follows the swung clock
+  (each swung step's ticks evenly spaced). Fix the RFC wording.
 - (2026-10-09, #24/#25 follow-up) RFC 0007's main "Migration" section
   predates the v3/v4 split (still says v3/protocol 3 and clip swapping); the
   implementation notes override it.
@@ -99,8 +164,3 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   the host user.
 
 ## Process
-
-- (2026-10-09, merging #24/#25) the local `recording` branch (not pushed)
-  was cut from `clips-phase2` before the #24 review fixes and #25 (device
-  models) merged; merge `main` into it before continuing. Expect conflicts
-  in MIDI input handling, seats, and the journal.

@@ -13,7 +13,7 @@ import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
 import { RpcClient, type ConnectionState } from "./rpc";
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 export type AppState = {
   connection: ConnectionState;
@@ -130,6 +130,7 @@ const UI_EVENTS: EventEnvelope["event"]["type"][] = [
   "clip_changed",
   "graph",
   "transport",
+  "record",
   "playhead",
   "trigger",
   "meters",
@@ -271,6 +272,9 @@ function apply(env: EventEnvelope) {
       break;
     case "playhead":
       app.set({ snapshot: { ...s, transport: { ...s.transport, step: ev.step } } });
+      break;
+    case "record":
+      app.set({ snapshot: { ...s, record: ev.state } });
       break;
     case "controller":
       app.set({ snapshot: { ...s, controller: ev.state } });

@@ -435,6 +435,23 @@
             "type": "object"
           },
           {
+            "description": "Recording started or ended, or its settings changed.",
+            "properties": {
+              "state": {
+                "$ref": "#/$defs/RecordState"
+              },
+              "type": {
+                "const": "record",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "state"
+            ],
+            "type": "object"
+          },
+          {
             "description": "A step started. `time` is engine time in seconds.",
             "properties": {
               "step": {
@@ -1117,6 +1134,80 @@
         ],
         "type": "object"
       },
+      "RecordMode": {
+        "description": "How a recording pass treats the notes already in the clip.",
+        "oneOf": [
+          {
+            "const": "overdub",
+            "description": "Add to what is there.",
+            "type": "string"
+          },
+          {
+            "const": "replace",
+            "description": "Each pass clears the part of the loop it passes over.",
+            "type": "string"
+          }
+        ]
+      },
+      "RecordState": {
+        "description": "Recording (RFC 0008): whether a take is running, and the settings the\nnext one uses.",
+        "properties": {
+          "count_in": {
+            "description": "Bars of metronome before recording from a stop.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "instrument": {
+            "description": "The instrument being recorded into, while recording.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "$ref": "#/$defs/RecordMode"
+          },
+          "offset_ms": {
+            "description": "Extra input latency compensated, in milliseconds.",
+            "format": "float",
+            "type": "number"
+          },
+          "quantize": {
+            "description": "Record quantize grid in ticks; `None` keeps the played timing.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "recording": {
+            "description": "A take is running (the transport plays and notes are recorded).",
+            "type": "boolean"
+          },
+          "strength": {
+            "description": "0..1: how far notes move toward the grid.",
+            "format": "float",
+            "type": "number"
+          },
+          "user": {
+            "description": "Who started the take (whose undo history it lands in).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "recording",
+          "mode",
+          "strength",
+          "count_in",
+          "offset_ms"
+        ],
+        "type": "object"
+      },
       "Seat": {
         "properties": {
           "config": {
@@ -1692,7 +1783,7 @@
     "type": "object"
   },
   "project_format_version": 4,
-  "protocol_version": 5,
+  "protocol_version": 6,
   "request": {
     "$defs": {
       "CcMap": {
@@ -1942,6 +2033,15 @@
               "string",
               "null"
             ]
+          },
+          "strength": {
+            "default": null,
+            "description": "How far to move each note toward the grid, 0..1 (default 1: onto it).",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1968,6 +2068,41 @@
         "required": [
           "events"
         ],
+        "type": "object"
+      },
+      "ClipUpdateParams": {
+        "description": "Remove and add events in one edit (one undo step).",
+        "properties": {
+          "add": {
+            "default": [],
+            "description": "Events to add (replacing any at the same tick and note).",
+            "items": {
+              "$ref": "#/$defs/ClipEvent"
+            },
+            "type": "array"
+          },
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recorded": {
+            "default": false,
+            "description": "Marks a recorded take (RFC 0008): the daemon journals each recorded\npass as this call, so a replay writes the same notes. It changes\nnothing else.",
+            "type": "boolean"
+          },
+          "remove": {
+            "default": [],
+            "description": "Events to remove first.",
+            "items": {
+              "$ref": "#/$defs/EventKey"
+            },
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "ControllerModeParams": {
@@ -2938,6 +3073,133 @@
         },
         "type": "object"
       },
+      "RecordMode": {
+        "description": "How a recording pass treats the notes already in the clip.",
+        "oneOf": [
+          {
+            "const": "overdub",
+            "description": "Add to what is there.",
+            "type": "string"
+          },
+          {
+            "const": "replace",
+            "description": "Each pass clears the part of the loop it passes over.",
+            "type": "string"
+          }
+        ]
+      },
+      "RecordParams": {
+        "description": "Arm or disarm recording, or change its settings. Settings left out keep\ntheir current values.",
+        "properties": {
+          "arm": {
+            "default": null,
+            "description": "`true` starts recording (and the transport, after the count-in, if\nstopped); `false` ends it, keeping what was played.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "count_in": {
+            "default": null,
+            "description": "Bars of metronome before recording starts from a stop (0..4).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "description": "Instrument to record into. Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RecordMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "offset_ms": {
+            "default": null,
+            "description": "Extra input latency to compensate, in milliseconds (0..500): notes\nare placed this much earlier.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "quantize": {
+            "default": null,
+            "description": "Record quantize grid in ticks (24 = a 16th); 0 turns it off.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "strength": {
+            "default": null,
+            "description": "How far record quantize moves notes toward the grid, 0..1.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RenderNote": {
+        "description": "A note played into an offline render, timed from the start of playback.",
+        "properties": {
+          "duration": {
+            "default": null,
+            "description": "Seconds held (default a 16th at 120 bpm, 0.125).",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "note": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "time": {
+            "description": "Seconds from play (after any count-in).",
+            "format": "double",
+            "type": "number"
+          },
+          "velocity": {
+            "default": null,
+            "description": "1..127 (default 100).",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "time",
+          "note"
+        ],
+        "type": "object"
+      },
       "RenderParams": {
         "properties": {
           "bars": {
@@ -2949,6 +3211,25 @@
               "null"
             ]
           },
+          "input": {
+            "default": null,
+            "description": "Notes to play during the render, as a player would (RFC 0008). They\ngo to `record.instrument`, else the caller's seat focus.",
+            "items": {
+              "$ref": "#/$defs/RenderNote"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "metronome": {
+            "default": null,
+            "description": "Include the metronome click (default off, whatever `metronome.on` is).",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "path": {
             "default": null,
             "description": "Engine-side WAV path. Relative paths resolve under the data dir.",
@@ -2956,6 +3237,18 @@
               "string",
               "null"
             ]
+          },
+          "record": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RecordParams"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Record `input` with these settings (`arm` is ignored) and return the\nclip it would leave; the project is not changed."
           },
           "sample_rate": {
             "default": null,
@@ -3583,6 +3876,23 @@
         "type": "object"
       },
       {
+        "description": "Arm or end recording into an instrument's clip, or change record\nsettings (mode, quantize, count-in).",
+        "properties": {
+          "method": {
+            "const": "transport.record",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/RecordParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Available instrument types, with their outputs and parameters.",
         "properties": {
           "method": {
@@ -4016,6 +4326,23 @@
           },
           "params": {
             "$ref": "#/$defs/ClipRemoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove and add events in one edit; recorded takes are journaled as\nthis.",
+        "properties": {
+          "method": {
+            "const": "clip.update",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipUpdateParams"
           }
         },
         "required": [
@@ -5341,6 +5668,80 @@
         ],
         "type": "object"
       },
+      "RecordMode": {
+        "description": "How a recording pass treats the notes already in the clip.",
+        "oneOf": [
+          {
+            "const": "overdub",
+            "description": "Add to what is there.",
+            "type": "string"
+          },
+          {
+            "const": "replace",
+            "description": "Each pass clears the part of the loop it passes over.",
+            "type": "string"
+          }
+        ]
+      },
+      "RecordState": {
+        "description": "Recording (RFC 0008): whether a take is running, and the settings the\nnext one uses.",
+        "properties": {
+          "count_in": {
+            "description": "Bars of metronome before recording from a stop.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "instrument": {
+            "description": "The instrument being recorded into, while recording.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "$ref": "#/$defs/RecordMode"
+          },
+          "offset_ms": {
+            "description": "Extra input latency compensated, in milliseconds.",
+            "format": "float",
+            "type": "number"
+          },
+          "quantize": {
+            "description": "Record quantize grid in ticks; `None` keeps the played timing.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "recording": {
+            "description": "A take is running (the transport plays and notes are recorded).",
+            "type": "boolean"
+          },
+          "strength": {
+            "description": "0..1: how far notes move toward the grid.",
+            "format": "float",
+            "type": "number"
+          },
+          "user": {
+            "description": "Who started the take (whose undo history it lands in).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "recording",
+          "mode",
+          "strength",
+          "count_in",
+          "offset_ms"
+        ],
+        "type": "object"
+      },
       "Seat": {
         "properties": {
           "config": {
@@ -5554,6 +5955,9 @@
       "project": {
         "$ref": "#/$defs/ProjectInfo"
       },
+      "record": {
+        "$ref": "#/$defs/RecordState"
+      },
       "seats": {
         "$ref": "#/$defs/SeatsState"
       },
@@ -5569,6 +5973,7 @@
     "required": [
       "seq",
       "transport",
+      "record",
       "params",
       "graph",
       "patterns",

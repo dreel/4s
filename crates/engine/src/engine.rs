@@ -9,6 +9,10 @@
 //! that end there, then starts the events that begin there. A clip loops at
 //! its own length (or `sequencer.length` steps).
 //!
+//! Recording (RFC 0008): live notes report the song tick the player heard
+//! when they played them (`Feedback::Live`), the metronome clicks on beats,
+//! and `Play` can run a count-in of clicks before tick 0.
+//!
 //! Signal flow per block: each instrument renders its outputs; each routed
 //! output is summed into its channel with its own pan law (constant-power pan
 //! for mono, balance for stereo); each channel applies its fader and
@@ -17,7 +21,11 @@
 use crate::dsp::{Smoother, soft_clip};
 use crate::instrument::{Instrument, MAX_BLOCK, MAX_OUTPUTS};
 use crate::params::*;
-use fours_protocol::{ClipEvent, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_EVENTS, MAX_INSTRUMENTS, MAX_STEPS, OutputWidth, TICKS_PER_STEP};
+use fours_protocol::{
+    ClipEvent, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_EVENTS, MAX_INSTRUMENTS, MAX_STEPS, OutputWidth, PPQ, TICKS_PER_BAR,
+    TICKS_PER_STEP,
+};
+use std::f32::consts::TAU;
 
 /// Most notes a clip can hold sounding at once.
 const MAX_ACTIVE: usize = 64;
@@ -52,7 +60,8 @@ pub enum Command {
     NoteOn { slot: u8, note: u8, velocity: f32, gate: bool },
     NoteOff { slot: u8, note: u8 },
     PitchBend { slot: u8, semitones: f32 },
-    Play,
+    /// Start from tick 0, after `count_in` ticks of metronome only.
+    Play { count_in: u32 },
     Stop,
 }
 
@@ -71,7 +80,7 @@ impl std::fmt::Debug for Command {
             Command::NoteOn { slot, note, .. } => write!(f, "NoteOn({slot}, {note})"),
             Command::NoteOff { slot, note } => write!(f, "NoteOff({slot}, {note})"),
             Command::PitchBend { slot, semitones } => write!(f, "PitchBend({slot}, {semitones})"),
-            Command::Play => write!(f, "Play"),
+            Command::Play { count_in } => write!(f, "Play({count_in})"),
             Command::Stop => write!(f, "Stop"),
         }
     }
@@ -80,9 +89,17 @@ impl std::fmt::Debug for Command {
 /// Messages out of the engine. Times are engine time in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Feedback {
-    /// `step` of `sequencer.length`; `tick` counted from play.
+    /// A step started: `step` within `sequencer.length`, `tick` counted
+    /// from play (tick 0 is the first step after any count-in).
     Step { step: u32, tick: u64, time: f64 },
+    /// A live note (not from a clip) was played or released. `tick` is the
+    /// song position the player heard at that moment (the output latency
+    /// taken off; negative during a count-in), or `None` when stopped.
+    /// `gate` notes release by themselves after half a step.
+    Live { slot: u8, note: u8, velocity: f32, on: bool, gate: bool, tick: Option<f64>, time: f64 },
     Trigger { slot: u8, voice: Option<u8>, note: Option<u8>, velocity: f32, time: f64, step: Option<u32> },
+    /// `Play` took effect: feedback after this counts from the new start.
+    Started { time: f64 },
     Stopped { time: f64 },
     /// Peak (left, right) per channel index since the last meter message.
     Meters { channels: [[f32; 2]; MAX_CHANNELS], master: [f32; 2] },
@@ -117,6 +134,38 @@ impl Track {
 
     fn position(&self, e: &ClipEvent) -> Result<usize, usize> {
         self.events.binary_search_by_key(&e.key(), ClipEvent::key)
+    }
+}
+
+/// The metronome's click: a short decaying sine, higher on a bar's
+/// downbeat.
+struct Click {
+    phase: f32,
+    inc: f32,
+    env: f32,
+    decay: f32,
+}
+
+impl Click {
+    fn new(sr: f32) -> Self {
+        // About 25 ms to -60 dB.
+        Self { phase: 0.0, inc: 0.0, env: 0.0, decay: (-6.9 / (0.025 * sr)).exp() }
+    }
+
+    fn start(&mut self, sr: f32, downbeat: bool) {
+        self.phase = 0.0;
+        self.inc = TAU * if downbeat { 1500.0 } else { 1000.0 } / sr;
+        self.env = 1.0;
+    }
+
+    fn next(&mut self) -> f32 {
+        if self.env < 1e-4 {
+            return 0.0;
+        }
+        let s = self.phase.sin() * self.env;
+        self.phase = (self.phase + self.inc) % TAU;
+        self.env *= self.decay;
+        s
     }
 }
 
@@ -183,14 +232,22 @@ pub struct Engine {
     master_bus: Vec<f32>,
     master_peak: [f32; 2],
     playing: bool,
-    /// The next tick to fire, counted from play.
+    /// The next tick to fire, counted from play, count-in included.
     tick: u64,
+    /// Count-in ticks before the song's tick 0.
+    count_in: u64,
     /// Position of the next tick in the `sequencer.length` loop. It wraps
     /// to the start when it runs past the end, so shortening the loop
     /// while playing goes back to step 1 and lengthening it continues.
     loop_tick: u32,
     /// Absolute sample position at which it fires.
     next_tick_at: f64,
+    /// Samples between the last tick fired and the next.
+    tick_len: f64,
+    /// Seconds from rendering a sample to hearing it (set by the audio
+    /// backend).
+    output_latency: f64,
+    click: Click,
     /// Total samples rendered.
     pos: u64,
     meter_countdown: u32,
@@ -212,8 +269,12 @@ impl Engine {
             master_peak: [0.0; 2],
             playing: false,
             tick: 0,
+            count_in: 0,
             loop_tick: 0,
             next_tick_at: 0.0,
+            tick_len: 1.0,
+            output_latency: 0.0,
+            click: Click::new(sr),
             pos: 0,
             meter_countdown: 0,
         }
@@ -229,6 +290,25 @@ impl Engine {
 
     pub fn is_playing(&self) -> bool {
         self.playing
+    }
+
+    /// How long rendered audio takes to be heard; live notes are placed
+    /// that much earlier (`Feedback::Live`).
+    pub fn set_output_latency(&mut self, secs: f64) {
+        self.output_latency = secs.clamp(0.0, 1.0);
+    }
+
+    /// The song tick (fractional, negative in a count-in) whose sound
+    /// reaches the listener now, or `None` when stopped.
+    fn heard_tick(&self) -> Option<f64> {
+        if !self.playing {
+            return None;
+        }
+        let tick_len = self.tick_len.max(1.0);
+        // The last tick fired is `tick - 1`, `tick_len` samples before the
+        // next one is due.
+        let now = self.tick as f64 - (self.next_tick_at - self.pos as f64) / tick_len;
+        Some(now - self.count_in as f64 - self.output_latency * self.sr as f64 / tick_len)
     }
 
     /// Jump every smoother to its target, so an offline render starts at the
@@ -333,18 +413,22 @@ impl Engine {
                     t.length = length.map(|l| l.clamp(1, MAX_CLIP_TICKS));
                 }
             }
-            Command::NoteOn { slot, note, velocity, gate } => {
+            Command::NoteOn { slot, note, velocity, gate: gated } => {
                 let time = self.time();
-                let gate = gate.then(|| self.sixteenth() * 0.5);
-                if let Some(Some(s)) = self.slots.get_mut(slot as usize)
-                    && let Some(h) = s.instrument.note_on(note, velocity, gate)
-                {
-                    emit(Feedback::Trigger { slot, voice: h.voice, note: h.note, velocity: h.velocity, time, step: None });
+                let tick = self.heard_tick();
+                let gate = gated.then(|| self.sixteenth() * 0.5);
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    if let Some(h) = s.instrument.note_on(note, velocity, gate) {
+                        emit(Feedback::Trigger { slot, voice: h.voice, note: h.note, velocity: h.velocity, time, step: None });
+                    }
+                    emit(Feedback::Live { slot, note, velocity, on: true, gate: gated, tick, time });
                 }
             }
             Command::NoteOff { slot, note } => {
+                let (time, tick) = (self.time(), self.heard_tick());
                 if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
                     s.instrument.note_off(note);
+                    emit(Feedback::Live { slot, note, velocity: 0.0, on: false, gate: false, tick, time });
                 }
             }
             Command::PitchBend { slot, semitones } => {
@@ -352,12 +436,16 @@ impl Engine {
                     s.instrument.pitch_bend(semitones);
                 }
             }
-            Command::Play => {
+            Command::Play { count_in } => {
                 self.release_clip_notes(None);
                 self.playing = true;
                 self.tick = 0;
+                // Whole bars, so swing pairs and beats line up with the song.
+                self.count_in = (count_in as u64).div_ceil(TICKS_PER_BAR as u64) * TICKS_PER_BAR as u64;
                 self.loop_tick = 0;
                 self.next_tick_at = self.pos as f64;
+                self.tick_len = self.step_samples(0) / TICKS_PER_STEP as f64;
+                emit(Feedback::Started { time: self.time() });
             }
             Command::Stop => {
                 if self.playing {
@@ -412,23 +500,36 @@ impl Engine {
     /// starts its events at this position.
     fn fire_tick(&mut self, emit: &mut impl FnMut(Feedback)) {
         let tick = self.tick;
-        let time = self.time();
         let steps = (self.globals[LENGTH].round() as u32).clamp(1, MAX_STEPS as u32);
+        // Beats click from the count-in's first tick; `count_in` is whole
+        // bars, so the song's downbeats are the count-in's too.
+        if tick % PPQ as u64 == 0 && (tick < self.count_in || self.globals[METRONOME] >= 0.5) {
+            self.click.start(self.sr, tick % TICKS_PER_BAR as u64 == 0);
+        }
+        if tick < self.count_in {
+            self.tick_len = self.step_samples((tick / TICKS_PER_STEP as u64) as u32) / TICKS_PER_STEP as f64;
+            self.next_tick_at += self.tick_len;
+            self.tick = tick + 1;
+            return;
+        }
+        // Ticks from the song's start, after any count-in.
+        let song = tick - self.count_in;
+        let time = self.time();
         if self.loop_tick >= steps * TICKS_PER_STEP {
             self.loop_tick = 0;
         }
         let loop_tick = self.loop_tick;
         let step = loop_tick / TICKS_PER_STEP;
         if loop_tick % TICKS_PER_STEP == 0 {
-            emit(Feedback::Step { step, tick, time });
+            emit(Feedback::Step { step, tick: song, time });
         }
         self.release_clip_notes(Some(tick));
         for (slot, t) in self.tracks.iter_mut().enumerate() {
             let Some(Some(s)) = self.slots.get_mut(slot) else { continue };
-            // A clip with its own length loops from play; the others follow
-            // the global loop.
+            // A clip with its own length loops from the song's start; the
+            // others follow the global loop.
             let pos = match t.length {
-                Some(length) => (tick % length as u64) as u32,
+                Some(length) => (song % length as u64) as u32,
                 None => loop_tick,
             };
             let first = t.events.partition_point(|e| e.tick < pos);
@@ -455,7 +556,8 @@ impl Engine {
             }
         }
         // Swing pairs count from the pattern's first step, as the playhead does.
-        self.next_tick_at += self.step_samples(step) / TICKS_PER_STEP as f64;
+        self.tick_len = self.step_samples(step) / TICKS_PER_STEP as f64;
+        self.next_tick_at += self.tick_len;
         self.tick = tick + 1;
         self.loop_tick = loop_tick + 1;
     }
@@ -540,12 +642,17 @@ impl Engine {
         }
 
         let master_target = volume_to_gain(self.globals[MASTER_VOLUME]);
+        let click_gain = 0.5 * volume_to_gain(self.globals[METRONOME_LEVEL].clamp(0.0, 1.0));
         for (f, o) in out.chunks_exact_mut(channels).enumerate().take(n) {
             let m = self.master.next(master_target);
             let l = soft_clip(self.master_bus[f * 2] * m);
             let r = soft_clip(self.master_bus[f * 2 + 1] * m);
             self.master_peak[0] = self.master_peak[0].max(l.abs());
             self.master_peak[1] = self.master_peak[1].max(r.abs());
+            // The click is not part of the mix: after the master and its
+            // meter.
+            let c = self.click.next() * click_gain;
+            let (l, r) = ((l + c).clamp(-1.0, 1.0), (r + c).clamp(-1.0, 1.0));
             if channels == 1 {
                 o[0] = 0.5 * (l + r);
             } else {
@@ -634,7 +741,7 @@ pub(crate) mod tests {
         let mut e = drum_engine();
         let mut fb = vec![];
         add_events(&mut e, [0, 4].into_iter().filter_map(|s| drum_event(Voice::Kick, s, STEP_ON)));
-        let _ = e.apply(Command::Play, &mut |_| {});
+        let _ = e.apply(Command::Play { count_in: 0 }, &mut |_| {});
         // 120 bpm: 16th = 0.125s, one 16-step bar = 2s.
         render_secs(&mut e, 4.0, &mut fb);
         let kicks: Vec<f64> = fb
@@ -659,7 +766,7 @@ pub(crate) mod tests {
         let mut e = drum_engine();
         let mut fb = vec![];
         let _ = e.apply(Command::SetParam { target: ParamTarget::Global(SWING), value: 1.0 }, &mut |_| {});
-        let _ = e.apply(Command::Play, &mut |_| {});
+        let _ = e.apply(Command::Play { count_in: 0 }, &mut |_| {});
         render_secs(&mut e, 0.6, &mut fb);
         let times: Vec<f64> =
             fb.iter().filter_map(|f| if let Feedback::Step { time, .. } = f { Some(*time) } else { None }).collect();
@@ -718,7 +825,7 @@ pub(crate) mod tests {
         for (index, value) in [(1u16, 1.0f32), (3, 0.5), (4, 0.5), (5, 0.62), (6, 0.74)] {
             let _ = e.apply(Command::SetParam { target: ParamTarget::Instrument { slot: 0, index }, value }, &mut fb);
         }
-        let _ = e.apply(Command::Play, &mut fb);
+        let _ = e.apply(Command::Play { count_in: 0 }, &mut fb);
         let mut out = vec![0.0f32; 512 * 2];
         let mut rng = 12345u32;
         let (mut bar_peak, mut silent_bars) = (0.0f32, 0);
@@ -780,7 +887,7 @@ pub(crate) mod tests {
         let level = |events: &[ClipEvent]| {
             let mut e = note_engine();
             add_events(&mut e, events.iter().copied());
-            let _ = e.apply(Command::Play, &mut |_| {});
+            let _ = e.apply(Command::Play { count_in: 0 }, &mut |_| {});
             let out = render_secs(&mut e, 0.2, &mut vec![]);
             let (a, b) = ((0.165 * 48000.0) as usize * 2, (0.18 * 48000.0) as usize * 2);
             out[a..b].iter().fold(0.0f32, |m, x| m.max(x.abs()))
@@ -806,7 +913,7 @@ pub(crate) mod tests {
         add_notes(&mut plain, &steps);
         // Step 0 is 0..0.125s; without slide its gate closes at 0.0625s.
         let gap_level = |e: &mut Engine| {
-            let _ = e.apply(Command::Play, &mut |_| {});
+            let _ = e.apply(Command::Play { count_in: 0 }, &mut |_| {});
             let out = render_secs(e, 0.25, &mut vec![]);
             let (a, b) = ((0.10 * 48000.0) as usize * 2, (0.12 * 48000.0) as usize * 2);
             out[a..b].iter().fold(0.0f32, |m, x| m.max(x.abs()))
@@ -815,5 +922,36 @@ pub(crate) mod tests {
         let released = gap_level(&mut plain);
         assert!(held > 0.05, "slide should hold the gate: {held}");
         assert!(released < 0.01, "without slide the gate should close: {released}");
+    }
+
+    /// Live notes report the song tick the player heard: after a one-bar
+    /// count-in (which only clicks), minus the output latency. 120 bpm =
+    /// 192 ticks a second.
+    #[test]
+    fn live_notes_report_the_heard_tick() {
+        let mut e = note_engine();
+        let mut fb = vec![];
+        e.set_output_latency(0.05);
+        let _ = e.apply(Command::Play { count_in: TICKS_PER_BAR }, &mut |_| {});
+        let out = render_secs(&mut e, 1.0, &mut fb);
+        assert!(out.iter().any(|x| x.abs() > 0.1), "the count-in clicks");
+        assert!(!fb.iter().any(|f| matches!(f, Feedback::Step { .. })), "no steps during the count-in");
+        let live = |e: &mut Engine| {
+            let mut got = None;
+            let _ = e.apply(Command::NoteOn { slot: 0, note: 36, velocity: 0.7, gate: false }, &mut |f| {
+                if let Feedback::Live { tick, .. } = f {
+                    got = tick;
+                }
+            });
+            got.expect("a live note while playing has a tick")
+        };
+        let t = live(&mut e);
+        assert!((t - (-192.0 - 9.6)).abs() < 1.0, "1 s into a 2 s count-in, 50 ms latency: {t}");
+        render_secs(&mut e, 1.5, &mut fb);
+        let first = fb.iter().find_map(|f| if let Feedback::Step { tick, time, .. } = f { Some((*tick, *time)) } else { None });
+        assert_eq!(first.map(|(t, _)| t), Some(0));
+        assert!((first.unwrap().1 - 2.0).abs() < 1e-3, "tick 0 starts after the count-in: {first:?}");
+        let t = live(&mut e);
+        assert!((t - (96.0 - 9.6)).abs() < 1.0, "half a second into the song: {t}");
     }
 }

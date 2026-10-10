@@ -518,7 +518,7 @@ s set bass.cutoff 0.25 >/dev/null
 # the seat matching its user, and the host's devices play in the host seat.
 check "the CLI joins the seat matching its user" "you: e2e" s seat
 check "it is this engine's devices' seat" "e2e: cli#" s seat
-check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 5, "user": "bob"}'
+check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 6, "user": "bob"}'
 check "and stays unseated" "you: (no seat)" s --user bob seat
 check "seat edits need a seat" "you have no seat" s --user bob focus drums
 check "create a seat for bob" "you: bob" s --user bob --new-seat seat
@@ -647,6 +647,55 @@ s instrument rm seqd >/dev/null
 check "clip set replaces the events" "seq: 1 notes" s clip set seq "0:60:96:127"
 check "clear" "seq: 0 notes" s clip clear seq
 check "quantize keeps a note past the longest clip on the grid" "1512:C2:6:89" bash -c "$BIN/4s clip set seq 1535:C2:6 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
+s clip clear seq >/dev/null
+check "clip update removes and adds in one edit" "0:C2:24:89 30:G2:24:89 48:E2:6:100" bash -c "$BIN/4s clip set seq '0:C2 24:D2' >/dev/null && $BIN/4s clip update seq --rm 24:D2 --add '48:E2:6:100 30:G2' | tail -1"
+check "...as one undo step" "0:C2:24:89 24:D2:24:89" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq | tail -1"
+check "quantize at half strength moves notes halfway" "0:C2:24:89 27:G2:24:89" bash -c "$BIN/4s clip set seq '0:C2 30:G2' >/dev/null && $BIN/4s clip quantize seq 1/16 --strength 50% | tail -1"
+s clip clear seq >/dev/null
+# Recording (RFC 0008). Offline first: the same take code over a render's
+# feedback, sample-accurate. At 120 bpm a second is 192 ticks: 0.51 s is
+# tick 97.9, 1.13 s is 217.
+check "render records played notes at their ticks" "98:C2:19:100 217:D#2:38:127" bash -c "$BIN/4s render --to seq --input '0.51:C2:0.1:100 1.13:D#2:0.2:127' --quantize off | tail -1"
+check "record quantize moves them onto the 16ths" "96:C2:19:100 216:D#2:38:127" bash -c "$BIN/4s render --to seq --input '0.51:C2:0.1:100 1.13:D#2:0.2:127' --quantize 1/16 | tail -1"
+check "half strength moves them halfway" "97:C2:19:100" bash -c "$BIN/4s render --to seq --input '0.51:C2:0.1:100' --quantize 1/16 --strength 50% | tail -1"
+check "a render's take leaves the project alone" "seq: 0 notes" s clip show seq
+s clip set seq "0:G1" >/dev/null
+check "overdub keeps the clip; a note just before the loop's end wraps to its start" "0:G1:24:89 0:E2:24:100 48:C2:24:100 96:D2:24:100" bash -c "$BIN/4s render --bars 2 --to seq --input '0.25:C2 1.99:E2 2.5:D2' --quantize 1/16 | tail -1"
+check "replace: each pass clears the loop it covers" "0:E2:24:100 96:D2:24:100" bash -c "$BIN/4s render --bars 2 --to seq --replace --input '0.25:C2 1.99:E2 2.5:D2' --quantize 1/16 | tail -1"
+# The click is after the master fader: with the mix silenced, only it sounds.
+s set mixer.master.volume 0 >/dev/null
+check "the metronome clicks on the beats (only when asked)" "onsets (s): 0.000 0.499 1.000 1.499" bash -c "$BIN/4s render --metronome | tail -1"
+check "and not otherwise" "detected onsets: 0" bash -c "$BIN/4s metronome on >/dev/null && $BIN/4s render | grep onsets: ; $BIN/4s metronome off >/dev/null"
+s set mixer.master.volume 0.8 >/dev/null
+s clip clear seq >/dev/null
+# Live: a take on the real-time engine, written at the loop's end.
+check "record starts the transport" "recording into seq" s record --to seq --count-in 0 --quantize 1/16
+sleep 0.4
+s key C2 --instrument seq --for 0.2 >/dev/null
+# Written one step before the loop's end (1.875 s in); poll rather than
+# guess how long a loaded machine takes.
+check "the pass is written into the clip" "seq: 1 notes" bash -c "for i in \$(seq 60); do $BIN/4s clip show seq | grep -q 'seq: 1 notes' && break; sleep 0.1; done; $BIN/4s clip show seq"
+check "as one journal entry: the clip.update that writes it" '"recorded":true' s journal --limit 3
+check "record --off ends the take, still playing" "not recording" s record --off
+check "status shows the next take's settings" "record: not recording (next take: overdub, quantize 1/16 at 100%" s status
+s stop >/dev/null
+check "undo takes back the take" "seq: 0 notes" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq"
+check "play during a take writes it and keeps recording" "seq: 1 notes" bash -c "$BIN/4s record --to seq --count-in 0 >/dev/null && sleep 0.3 && $BIN/4s key C2 --instrument seq --for 0.1 >/dev/null && $BIN/4s play >/dev/null && $BIN/4s clip show seq"
+check "still recording after it" "recording into seq" s record --show
+s stop >/dev/null
+s clip clear seq >/dev/null
+s instrument add tb303 --id rec >/dev/null
+s record --to rec --count-in 0 >/dev/null
+check "undoing the instrument's add ends a take into it" "not recording" bash -c "$BIN/4s undo >/dev/null && $BIN/4s record --show"
+s stop >/dev/null
+check "recording into another instrument ends the take and starts one there" "recording into drums" bash -c "$BIN/4s record --to seq --count-in 0 >/dev/null && sleep 0.2 && $BIN/4s key C2 --instrument seq --for 0.1 >/dev/null && $BIN/4s record --to drums"
+check "...writing the first one" "seq: 1 notes" s clip show seq
+s stop >/dev/null
+# A session with takes replays: the takes are entries of their own, and
+# replay does not record the replayed notes again.
+check "a session with recorded takes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/takes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/takes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+check "record settings are checked" "strength must be 0..1" s record --show --strength 2
+s record --show --quantize off --count-in 1 >/dev/null
 s instrument rm seq >/dev/null
 # The loop while playing (at 30 bpm a step is 0.5 s): shortening it past
 # the playhead goes back to step 1, lengthening it continues, and the Block

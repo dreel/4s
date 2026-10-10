@@ -247,6 +247,10 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
   port role, and `seat.apply_layout` with the model's ports it applied, so
   both replay the same way without the device (a model's default layout
   included).
+- **Recording isn't re-armed.** Replay sends `transport.record` without
+  `arm`, so replayed notes are not recorded again; each recorded pass is
+  its own `clip.update` entry (`recorded: true`, RFC 0008), replayed like
+  any edit.
 - **Replay into a daemon with the recording's host user.** Each entry
   records its caller's seat, and replay joins it, but `controller.*` and a
   Block act on the host seat, the daemon's own user (`FOURS_USER`, else the

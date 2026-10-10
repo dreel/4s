@@ -147,7 +147,14 @@ pub async fn run(o: Options<'_>) -> Result<()> {
                 .await?;
             }
         }
-        let req = parse_request(&e.method, Some(e.params.clone()))
+        // Recording is not re-armed: replayed notes would be recorded again
+        // at the replay's timing. The takes it wrote are entries of their
+        // own (`clip.update`, `recorded`), replayed like any other.
+        let mut params = e.params.clone();
+        if e.method == "transport.record" {
+            params["arm"] = Value::Null;
+        }
+        let req = parse_request(&e.method, Some(params))
             .map_err(|err| anyhow!("entry {} ({}): {err}", e.seq, e.method))?;
         let key = (e.user.clone(), e.origin.clone(), e.context.seat.clone());
         if !conns.contains_key(&key) {

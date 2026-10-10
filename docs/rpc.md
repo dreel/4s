@@ -46,8 +46,10 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 ### Structural methods
 
 Explicit methods for things that are not a single parameter: transport
-(`transport.play/stop`), the instrument graph (`instrument.*`, `channel.*`,
-`route.set`), clips (`clip.*`: timed note events, RFC 0007) and their step
+(`transport.play/stop`), recording (`transport.record`, RFC 0008), the
+instrument graph (`instrument.*`, `channel.*`,
+`route.set`), clips (`clip.*`: timed note events, RFC 0007; `clip.update`
+removes and adds in one step, and is how recorded takes are journaled) and their step
 views (`pattern.*`, drum steps and note steps),
 auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
 seats and their bindings (`seat.*`, RFC 0007), undo and the journal
@@ -85,7 +87,11 @@ current parameter set.
   `graph` and `reset`).
 - Pattern and trigger events name their instrument (`step_changed`,
   `pattern_changed`, `notes_changed`, `trigger`), so clients know which
-  instrument an edit or hit belongs to.
+  instrument an edit or hit belongs to. `clip_changed` carries a whole clip
+  after any edit to it, `seats` the seats and who sits where, and `record`
+  the recording state (a take running, and the next take's settings), which
+  is also in the snapshot. Record settings are shared by everyone on the
+  engine (session state, not saved), and one take runs at a time.
 - **Connection-scoped state: held notes and seats.** `voice.note_on` (and
   a note-on sent with `midi.input`) holds a note for the calling connection
   until it sends the note-off for that note, or until the connection closes

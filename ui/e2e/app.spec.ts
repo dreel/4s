@@ -388,6 +388,44 @@ test("transport: play from UI, playhead moves, stop", async () => {
   expect((await rpc("state.get", {})).transport.playing).toBe(false);
 });
 
+test("record: settings and the take from the UI; notes played elsewhere land quantized in the focus clip", async () => {
+  const { page, rpc } = h;
+  await page.getByTestId("metronome-toggle").click();
+  await expect.poll(async () => (await rpc("param.get", { path: "metronome.on" })).value).toBe(1);
+  await page.getByTestId("record-quantize").selectOption("24");
+  await page.getByTestId("record-count-in").selectOption("0");
+  await expect.poll(async () => (await rpc("state.get", {})).record).toMatchObject({ quantize: 24, count_in: 0 });
+
+  // A 4-step loop (half a second at 120 bpm) so passes come round quickly.
+  await rpc("param.set", { path: "sequencer.length", value: 4 });
+  await page.getByTestId("record-toggle").click();
+  await expect(page.getByTestId("record-toggle")).toHaveAttribute("data-recording", "true");
+  expect((await rpc("state.get", {})).transport.playing).toBe(true);
+  await page.waitForTimeout(150);
+  await rpc("voice.trigger", { voice: "snare", instrument: null, note: null, velocity: null });
+  // Written one step before the loop's end, so it plays in the next pass.
+  await expect
+    .poll(async () => (await rpc("clip.get", { instrument: "drums" })).events, { timeout: 3000 })
+    .toEqual([expect.objectContaining({ note: 38 })]);
+  const [e] = (await rpc("clip.get", { instrument: "drums" })).events;
+  expect(e.tick % 24).toBe(0);
+
+  await page.getByTestId("record-toggle").click();
+  await expect(page.getByTestId("record-toggle")).toHaveAttribute("data-recording", "false");
+  expect((await rpc("state.get", {})).transport.playing).toBe(true);
+  await rpc("transport.stop", {});
+  await rpc("param.set", { path: "metronome.on", value: 0 });
+  await rpc("transport.record", {
+    arm: null,
+    instrument: null,
+    mode: null,
+    quantize: 0,
+    strength: null,
+    count_in: 1,
+    offset_ms: null,
+  });
+});
+
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
   const { page, rpc } = h;
   // Pad row 1 (snare), column 3 -> snare step 2.

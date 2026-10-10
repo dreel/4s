@@ -78,6 +78,9 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 - `4s render` writes a WAV on the engine host and reports peak, RMS, detected
   onsets, and sequencer triggers -- use it to verify audio changes without
   listening. `ui/test-results/groove.png` (from the Electron e2e) shows the UI.
+- `4s render --input "0.5:C2 1.0:D#2" --record --quantize 1/16` plays notes
+  into a render and shows the clip a recording would leave (RFC 0008);
+  `4s record` / `4s record --off` record live into your focus.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history.

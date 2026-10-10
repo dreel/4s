@@ -10,6 +10,7 @@
 //! live in `seats.rs`.
 
 mod clips;
+pub(crate) mod record;
 mod seats;
 
 use crate::controller::{BlockInput, BlockMap, Controller, decode_block};
@@ -17,6 +18,7 @@ use crate::hardware::{self, Hardware};
 use crate::journal::{self, Doc, History, Journal};
 use crate::midi::{Midi, MidiMessage, list_ports};
 use clips::ClipState;
+use record::{LiveTake, RecordSettings};
 use seats::{ClientState, Held, InputEffect, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
 use fours_engine::offline::{RenderInstrument, RenderSpec};
@@ -87,8 +89,19 @@ pub struct Core {
     sample_rate: u32,
     playing: bool,
     playhead: Option<u32>,
-    /// Engine tick (from play) of the last playhead step.
+    /// Engine tick (from play, after any count-in) of the last playhead
+    /// step.
     play_tick: u64,
+    /// `Play`s sent that the engine has not confirmed yet: until it has
+    /// confirmed the last one, steps and live notes count from an earlier
+    /// start.
+    starting: u32,
+    /// Recording settings and the take in progress (RFC 0008).
+    record: RecordSettings,
+    take: Option<LiveTake>,
+    /// A journaled request is being handled: changes made now are part of
+    /// its entry (see `journaled`).
+    in_request: bool,
     controller: Controller,
     block_map: BlockMap,
     midi: Midi,
@@ -151,6 +164,10 @@ impl Core {
             playing: false,
             playhead: None,
             play_tick: 0,
+            starting: 0,
+            record: RecordSettings::default(),
+            take: None,
+            in_request: false,
             controller: Controller::default(),
             block_map,
             midi: Midi::default(),
@@ -497,6 +514,10 @@ impl Core {
         self.slot_used[inst.slot as usize] = false;
         self.in_flight += 1;
         self.clips.remove(&inst.id);
+        // However it goes (removal, undo, redo), a take into it ends.
+        if self.take.as_ref().is_some_and(|t| t.instrument == inst.id) {
+            self.drop_take(origin);
+        }
         let fed: Vec<u32> = inst.outputs.iter().filter_map(|o| self.routes.remove(&o.source)).collect();
         self.held.retain(|h| h.slot != inst.slot);
         let mut refocused = false;
@@ -717,6 +738,7 @@ impl Core {
         Snapshot {
             seq: self.seq,
             transport: TransportState { playing: self.playing, step: self.playhead },
+            record: self.record_state(),
             params: self.params.iter().map(|p| (p.info.path.clone(), p.value)).collect(),
             graph: self.graph(),
             patterns: self
@@ -833,7 +855,17 @@ impl Core {
     // ---- transport ---------------------------------------------------------
 
     fn play(&mut self, origin: &str) -> TransportState {
-        self.send(Command::Play);
+        self.start(origin, 0)
+    }
+
+    /// Play from tick 0 after `count_in` ticks of metronome.
+    fn start(&mut self, origin: &str, count_in: u32) -> TransportState {
+        // Wait for the engine's confirmation only if the command got there.
+        match self.commands.push(Command::Play { count_in }) {
+            Ok(()) => self.starting += 1,
+            Err(_) => tracing::warn!("engine command queue full; dropped Play"),
+        }
+        self.play_tick = 0;
         if !self.playing {
             self.playing = true;
             self.emit(origin, Event::Transport { playing: true });
@@ -842,6 +874,11 @@ impl Core {
     }
 
     fn stop(&mut self, origin: &str) -> TransportState {
+        // Stopping ends a take, keeping what was played.
+        if self.take.is_some() {
+            self.end_take();
+            self.record_changed(origin);
+        }
         self.send(Command::Stop);
         if self.playing {
             self.playing = false;
@@ -1147,11 +1184,12 @@ impl Core {
     pub fn handle_feedback(&mut self, fb: Feedback) {
         match fb {
             Feedback::Step { step, tick, time } => {
-                if !self.playing {
+                if !self.playing || self.starting > 0 {
                     return;
                 }
-                self.playhead = Some(step);
                 self.play_tick = tick;
+                self.record_step(tick);
+                self.playhead = Some(step);
                 if self.controller.follow
                     && let Some(at) = self.grid_playhead()
                 {
@@ -1167,7 +1205,11 @@ impl Core {
                     self.emit("engine", Event::Trigger { instrument, voice, note, velocity, time });
                 }
             }
-            Feedback::Stopped { .. } => {}
+            Feedback::Live { slot, note, velocity, on, gate, tick: Some(tick), .. } if self.starting == 0 => {
+                self.record_note(slot, note, velocity, on, gate, tick);
+            }
+            Feedback::Started { .. } => self.starting = self.starting.saturating_sub(1),
+            Feedback::Live { .. } | Feedback::Stopped { .. } => {}
             Feedback::Meters { channels, master } => {
                 let levels: Vec<ChannelLevel> = self
                     .channels
@@ -1319,6 +1361,7 @@ impl Core {
             self.send(Command::SetChannelActive { ch: (c.n - 1) as u8, active: false });
         }
         self.slot_used = [false; MAX_INSTRUMENTS];
+        self.drop_take(origin);
         self.held.clear();
         self.pickups.clear();
         self.routes.clear();
@@ -1472,7 +1515,8 @@ impl Core {
     /// in it.
     fn doc(&self) -> Doc {
         let mut d = Doc::new();
-        for p in &self.params {
+        // The metronome is a performance setting, saved but not undone.
+        for p in self.params.iter().filter(|p| !p.info.path.starts_with("metronome.")) {
             if p.value != p.info.default {
                 d.insert(format!("param:{}", p.info.path), json!(p.value));
             }
@@ -1809,7 +1853,13 @@ impl Core {
         }
         let inert = matches!(&req, Request::MidiInput(p) if self.input_effect(p, client) == InputEffect::None);
         if read_only(&req) || inert {
-            return self.dispatch(req, origin, client);
+            return self.dispatch(req, origin, client, &user);
+        }
+        // A transport request that ends or restarts a take writes it first,
+        // as its own entry before the request's. An invalid one changes
+        // nothing (it fails, journaled, below).
+        if !matches!(&req, Request::TransportRecord(p) if RecordSettings::default().update(p).is_err()) {
+            self.settle_take(&req, origin, client);
         }
         // A layout is journaled with the ports it applies (see
         // `SeatApplyLayoutParams`).
@@ -1831,7 +1881,9 @@ impl Core {
         let before = (!fresh && self.changes_doc(&req, client)).then(|| self.doc());
         // Taken first, so a segment this request starts begins after it.
         let seq = self.journal.next_seq();
-        let result = self.dispatch(req, origin, client);
+        self.in_request = before.is_some();
+        let result = self.dispatch(req, origin, client, &user);
+        self.in_request = false;
         let changes = before.map(|b| journal::diff(&b, &self.doc())).unwrap_or_default();
         if fresh && result.is_ok() {
             for u in self.history.clear() {
@@ -1861,7 +1913,50 @@ impl Core {
         result
     }
 
-    fn dispatch(&mut self, req: Request, origin: &str, client: &str) -> RpcResult {
+    /// Journal a change the daemon makes on a user's behalf outside a
+    /// request (a recorded take), as one undo step. Inside a journaled
+    /// request the change is part of the request's entry instead.
+    fn journaled<T>(
+        &mut self,
+        user: &str,
+        client: &str,
+        origin: &str,
+        method: &str,
+        params: Value,
+        f: impl FnOnce(&mut Self) -> Result<T, RpcError>,
+    ) -> Result<T, RpcError> {
+        if self.in_request {
+            return f(self);
+        }
+        let context = self.journal_context(client);
+        let before = self.doc();
+        let result = f(self);
+        let changes = journal::diff(&before, &self.doc());
+        let seq = self.journal.next_seq();
+        if !changes.is_empty() {
+            let was = self.history.summary(user);
+            self.history.record(user, seq, journal::label(method, &params, &changes), &changes);
+            if self.history.summary(user) != was {
+                self.emit_history(user, origin);
+            }
+        }
+        let entry = JournalEntry {
+            seq,
+            time: unix_time(),
+            user: user.to_string(),
+            origin: origin.to_string(),
+            method: method.to_string(),
+            params,
+            context,
+            changes,
+            reverts: None,
+            error: result.as_ref().err().map(|e| e.message.clone()),
+        };
+        self.journal_push(entry, origin);
+        result
+    }
+
+    fn dispatch(&mut self, req: Request, origin: &str, client: &str, user: &str) -> RpcResult {
         let drum = |c: &Self, id: &Option<String>| c.resolve(id.as_deref(), InstrumentType::Tr808);
         let req = match self.handle_seat(req, origin, client) {
             Ok(r) => return r,
@@ -1890,6 +1985,7 @@ impl Core {
             Request::ParamSet(p) => ok(self.set_param(&p.path, p.value, origin)?),
             Request::TransportPlay(_) => ok(self.play(origin)),
             Request::TransportStop(_) => ok(self.stop(origin)),
+            Request::TransportRecord(p) => ok(self.transport_record(p, origin, client, user)?),
             Request::InstrumentTypes(_) => ok(self.instrument_types()),
             Request::InstrumentList(_) => ok(InstrumentListResult { instruments: self.graph().instruments }),
             Request::InstrumentAdd(p) => ok(self.instrument_add(p, origin)?),
@@ -2047,6 +2143,7 @@ impl Core {
             | Request::ClipSet(_)
             | Request::ClipAdd(_)
             | Request::ClipRemove(_)
+            | Request::ClipUpdate(_)
             | Request::ClipLength(_)
             | Request::ClipClear(_)
             | Request::ClipQuantize(_) => unreachable!("handled by handle_clip"),
@@ -2063,7 +2160,7 @@ fn read_only(req: &Request) -> bool {
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
         | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) => true,
-        ParamSet(_) | TransportPlay(_) | TransportStop(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
+        ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
         | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
         | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
         | PatternSetNote(_) | VoiceTrigger(_) | VoiceNoteOn(_) | VoiceNoteOff(_) | ControllerPress(_)
@@ -2071,7 +2168,7 @@ fn read_only(req: &Request) -> bool {
         | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
         | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
         | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) => false,
+        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) => false,
     }
 }
 
@@ -2088,6 +2185,7 @@ impl Core {
                 req,
                 Request::TransportPlay(_)
                     | Request::TransportStop(_)
+                    | Request::TransportRecord(_)
                     | Request::VoiceTrigger(_)
                     | Request::VoiceNoteOn(_)
                     | Request::VoiceNoteOff(_)

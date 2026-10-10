@@ -1,6 +1,6 @@
 # Engine
 
-Status: v3 (RFC 0004, RFC 0007). Instruments added and removed at runtime (a
+Status: v3 (RFC 0004, RFC 0007, RFC 0008 phase A). Instruments added and removed at runtime (a
 TR-808-style drum machine and a TB-303-style bass synth), each played by a
 clip of timed note events on a shared tick clock with swing, and a
 multi-channel stereo mixer. Code: `crates/engine`.
@@ -138,6 +138,15 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 - Clip storage is preallocated per slot; the daemon edits it with
   `ClearClip`, `AddEvent`, `RemoveEvent`, and `SetClipLength` commands, so
   nothing is allocated or freed on the audio thread.
+- **Recording** (RFC 0008): live notes (keys, pads, `voice.*`) emit
+  `Feedback::Live` with the song tick the player heard (fractional, output
+  latency removed, negative during a count-in). The daemon's take
+  (`crates/daemon/src/core/record.rs`) writes them into the clip once per
+  loop pass, quantized toward the record grid by its strength.
+- **Metronome**: a click (1.5 kHz on the downbeat, 1 kHz on other beats)
+  mixed after the master fader and its meter, while `metronome.on`, and
+  always during a count-in. `Play { count_in }` runs whole bars of clicks
+  before tick 0.
 - Step patterns are views over clips (`crates/protocol/src/clip.rs`): a
   drum step is an event on the step's first tick at the voice's GM note,
   velocity 89 (on, 0.7) or 127 (accent), one step long; a 303 step is an
@@ -152,6 +161,8 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 | `transport.swing` | 0-1 | 0 |
 | `sequencer.length` | 1-64 steps (integer) | 16 |
 | `mixer.master.volume` | 0-1 | 0.8 |
+| `metronome.on` | toggle (not undone) | off |
+| `metronome.level` | 0-1 (squared taper) | 0.6 |
 | `mixer.<n>.volume` | 0-1 (squared taper) | 1.0 (unity) |
 | `mixer.<n>.pan` | -1..1 (pan for mono sources, balance for stereo) | 0 |
 | `mixer.<n>.mute` / `.solo` | toggle | off |

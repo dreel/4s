@@ -45,6 +45,12 @@ impl RtEngine {
         self.engine.sample_rate()
     }
 
+    /// How long rendered audio takes to reach the listener (from the audio
+    /// backend's timestamps); recording places live notes by it.
+    pub fn set_output_latency(&mut self, secs: f64) {
+        self.engine.set_output_latency(secs);
+    }
+
     /// Apply pending commands, then render. Call from the audio callback.
     pub fn process(&mut self, out: &mut [f32], channels: usize) {
         let fb = &mut self.feedback;
