@@ -246,3 +246,26 @@ above, these win:
   point; the playhead shows in song mode while playing.
 - Zoom is pixels per bar (50% to 400%); the view is 16 bars, or 4 past the
   furthest of the song's end, the start point, and the loop end.
+
+## Implementation notes (phase C, step 2: editing placements)
+
+- Drag a placement to move it (`song.move`), its right edge to resize it,
+  alt-drag to copy (`song.place` with its clip, length, and offset);
+  click selects it and Delete or Backspace removes it (`song.remove`);
+  Escape or a click on an empty lane clears the selection. Drags snap
+  their distance to the arrangement's snap (bar, beat, off), show where
+  they go, and send on release; a drag that ends where it started is a
+  click.
+- Resizing longer is one `song.place` at the same start (it replaces the
+  placement and cuts what it now covers). Shorter is a `batch` of
+  `song.remove` and `song.place`, since a shorter placement laid over it
+  would leave its tail playing. Either way one undo step. A resize keeps
+  at least a snap (or the placement's length, if shorter).
+- Each track header has its clip pool as small chips: drag one into its
+  own lane to place it (`song.place`, the clip's length) at the snap
+  cell under the pointer; dropped anywhere else, nothing happens.
+- The selection lasts while the arrangement has focus (clicking a
+  placement focuses it); Delete there does not reach the piano roll's
+  selection, and Delete in its selects or buttons does nothing.
+- No daemon changes. Moving a placement to another track, the loop brace,
+  and the piano roll panel come next.

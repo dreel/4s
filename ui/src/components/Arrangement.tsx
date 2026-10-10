@@ -3,10 +3,13 @@
 // editor and arm it (the seat's focus, which routes MIDI input and sets the
 // record target). The ruler shows bars, the loop range, the song's end, and
 // where song mode plays from; click it to locate. Placements show their
-// clip's name and a note preview, with looped repeats marked. This first
-// step only draws and locates; editing placements comes next.
+// clip's name and a note preview, with looped repeats marked. Drag a
+// placement to move it, its right edge to resize it (longer loops the clip),
+// alt-drag to copy; click selects and Delete removes; drag a clip from a
+// header's pool into its lane to place it. Drags show where they go and send
+// on release, one undo step each; the daemon decides, the view only draws.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Clip } from "../generated/Clip";
 import type { Placement } from "../generated/Placement";
 import { act, client, mySeat, select, useApp, useSelected } from "../store";
@@ -30,6 +33,25 @@ const SNAPS: [string, number][] = [
 ];
 /** Pixels per bar. */
 const ZOOMS = [48, 96, 192, 384];
+/** The song's last tick (bar 999, `MAX_SONG_TICKS`). */
+const MAX_TICKS = 999 * BAR;
+
+type Drag =
+  | { kind: "move"; id: string; p: Placement; x: number; dt: number }
+  | { kind: "copy"; id: string; p: Placement; x: number; dt: number }
+  | { kind: "resize"; id: string; p: Placement; x: number; dl: number }
+  // A clip from a header's pool; `start` is where it would land (null: off
+  // its lane).
+  | { kind: "pool"; id: string; clip: number; start: number | null };
+
+/** Pointer handlers a lane and a header hand their blocks and chips. */
+type Handlers = {
+  down: (e: React.PointerEvent, d: Drag) => void;
+  move: (e: React.PointerEvent) => void;
+  up: (e: React.PointerEvent) => void;
+  /** The pointer was taken away (a system gesture, the window lost focus). */
+  cancel: () => void;
+};
 
 /** A placement's clip drawn as notes, repeated where the placement loops it,
  * with each repeat's start marked. */
@@ -67,7 +89,7 @@ function NotePreview({ placement, clip, clipLength, px }: { placement: Placement
   );
 }
 
-function Lane({ id, px, bars }: { id: string; px: number; bars: number }) {
+function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars: number; drag: Drag | null; picked: number | null; h: Handlers }) {
   const track = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id));
   const clips = useApp((s) => s.snapshot?.clips);
   const stepsLength = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
@@ -75,61 +97,119 @@ function Lane({ id, px, bars }: { id: string; px: number; bars: number }) {
   const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
   const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
   if (!track) return null;
+  const clipOf = (n: number) => clips?.find((c) => c.instrument === id && c.id === n);
+  const lengthOf = (n: number) => clipOf(n)?.length ?? stepsLength * STEP;
+  const mine = drag?.id === id ? drag : null;
+
+  // Where the dragged placement is drawn (the daemon gets it on release).
+  const shown = (p: Placement): Placement => {
+    if (mine?.kind === "move" && mine.p.start === p.start) return { ...p, start: dragStart(mine) };
+    if (mine?.kind === "resize" && mine.p.start === p.start) return { ...p, length: resized(mine) };
+    return p;
+  };
+  let ghost: Placement | null = null;
+  if (mine?.kind === "copy") ghost = { ...mine.p, start: dragStart(mine) };
+  if (mine?.kind === "pool" && mine.start !== null) ghost = { clip: mine.clip, start: mine.start, length: lengthOf(mine.clip), offset: 0 };
+
+  const block = (p: Placement, at: number | null) => {
+    const clip = clipOf(p.clip);
+    const live = at !== null && playing && song && tick !== null && p.start <= tick && tick < p.start + p.length;
+    const sel = at !== null && at === picked;
+    return (
+      <div
+        key={at ?? "ghost"}
+        className={`absolute top-1 bottom-1 rounded border overflow-hidden text-violet-200 ${
+          at === null
+            ? "border-dashed border-violet-200 bg-violet-500/25 pointer-events-none"
+            : `cursor-grab ${p.clip === track.selected ? "bg-violet-500/35 border-violet-300" : "bg-violet-500/20 border-violet-500/60"}`
+        } ${sel ? "outline outline-1 outline-zinc-50" : ""} ${live ? "ring-1 ring-zinc-100" : ""}`}
+        style={{ left: p.start * px, width: Math.max(2, p.length * px) }}
+        title={`${clip?.name ?? `clip ${p.clip}`}: bar ${p.start / BAR + 1}, ${p.length / BAR} bars${p.offset ? `, from tick ${p.offset}` : ""}`}
+        data-testid={at === null ? `placement-ghost-${id}` : `placement-${id}-${at}`}
+        data-clip={p.clip}
+        data-length={p.length}
+        data-start={p.start}
+        data-selected={sel}
+        onPointerDown={at === null ? undefined : (e) => h.down(e, { kind: e.altKey ? "copy" : "move", id, p: track.arrangement.find((q) => q.start === at)!, x: e.clientX, dt: 0 })}
+        onPointerMove={h.move}
+        onPointerUp={h.up}
+        onPointerCancel={h.cancel}
+      >
+        <div className="px-1 text-[10px] leading-4 truncate">{clip?.name ?? p.clip}</div>
+        <NotePreview placement={p} clip={clip} clipLength={lengthOf(p.clip)} px={px} />
+        {at !== null && (
+          <div
+            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize"
+            data-testid={`placement-edge-${id}-${at}`}
+            onPointerDown={(e) => h.down(e, { kind: "resize", id, p: track.arrangement.find((q) => q.start === at)!, x: e.clientX, dl: 0 })}
+          />
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="relative border-b border-zinc-800" style={{ height: LANE, width: bars * BAR * px }} data-testid={`lane-${id}`}>
-      {track.arrangement.map((p) => {
-        const clip = clips?.find((c) => c.instrument === id && c.id === p.clip);
-        const clipLength = clip?.length ?? stepsLength * STEP;
-        const live = playing && song && tick !== null && p.start <= tick && tick < p.start + p.length;
-        return (
-          <div
-            key={p.start}
-            className={`absolute top-1 bottom-1 rounded border overflow-hidden text-violet-200 ${
-              p.clip === track.selected ? "bg-violet-500/35 border-violet-300" : "bg-violet-500/20 border-violet-500/60"
-            } ${live ? "ring-1 ring-zinc-100" : ""}`}
-            style={{ left: p.start * px, width: Math.max(2, p.length * px) }}
-            title={`${clip?.name ?? `clip ${p.clip}`}: bar ${p.start / BAR + 1}, ${p.length / BAR} bars${p.offset ? `, from tick ${p.offset}` : ""}`}
-            data-testid={`placement-${id}-${p.start}`}
-            data-clip={p.clip}
-            data-length={p.length}
-          >
-            <div className="px-1 text-[10px] leading-4 truncate">{clip?.name ?? p.clip}</div>
-            <NotePreview placement={p} clip={clip} clipLength={clipLength} px={px} />
-          </div>
-        );
-      })}
+      {track.arrangement.map((p) => block(shown(p), p.start))}
+      {ghost && block(ghost, null)}
     </div>
   );
 }
 
-function TrackHeader({ id, name, type, armed, selected, seated }: { id: string; name: string; type: string; armed: boolean; selected: boolean; seated: boolean }) {
+/** A move or copy's new start. */
+const dragStart = (d: { p: Placement; dt: number }) => Math.min(MAX_TICKS - d.p.length, Math.max(0, d.p.start + d.dt));
+/** A resize's new length (the drag keeps it at least a snap long). */
+const resized = (d: { p: Placement; dl: number }) => Math.min(MAX_TICKS - d.p.start, d.p.length + d.dl);
+
+function TrackHeader({ id, name, type, armed, selected, seated, h }: { id: string; name: string; type: string; armed: boolean; selected: boolean; seated: boolean; h: Handlers }) {
+  const clips = useApp((s) => s.snapshot?.clips);
+  const pool = useMemo(() => (clips ?? []).filter((c) => c.instrument === id), [clips, id]);
   return (
     <div
-      className={`flex items-center gap-1 px-2 border-b border-zinc-800 text-xs ${selected ? "bg-zinc-800" : ""}`}
+      className={`flex flex-col justify-center gap-0.5 px-2 border-b border-zinc-800 text-xs ${selected ? "bg-zinc-800" : ""}`}
       style={{ height: LANE }}
       data-testid={`track-header-${id}`}
     >
-      <button
-        className="flex-1 min-w-0 text-left truncate text-zinc-200"
-        title="open in the editor"
-        data-testid={`track-select-${id}`}
-        data-selected={selected}
-        onClick={() => select(id)}
-      >
-        {name} <span className="text-zinc-500">{type}</span>
-      </button>
-      <button
-        className={`w-5 h-5 shrink-0 rounded-full border flex items-center justify-center ${
-          armed ? "bg-red-600 border-red-400" : "border-zinc-600 hover:border-zinc-400"
-        }`}
-        disabled={!seated}
-        title={!seated ? "join a seat to arm" : armed ? "armed: MIDI input plays it and recording goes here" : "arm: play MIDI input here and record into it"}
-        data-testid={`arm-${id}`}
-        data-armed={armed}
-        onClick={() => !armed && void act(client.call("seat.focus", { seat: null, instrument: id }))}
-      >
-        <span className={`w-2 h-2 rounded-full ${armed ? "bg-white" : "bg-red-500/70"}`} />
-      </button>
+      <div className="flex items-center gap-1">
+        <button
+          className="flex-1 min-w-0 text-left truncate text-zinc-200"
+          title="open in the editor"
+          data-testid={`track-select-${id}`}
+          data-selected={selected}
+          onClick={() => select(id)}
+        >
+          {name} <span className="text-zinc-500">{type}</span>
+        </button>
+        <button
+          className={`w-5 h-5 shrink-0 rounded-full border flex items-center justify-center ${
+            armed ? "bg-red-600 border-red-400" : "border-zinc-600 hover:border-zinc-400"
+          }`}
+          disabled={!seated}
+          title={!seated ? "join a seat to arm" : armed ? "armed: MIDI input plays it and recording goes here" : "arm: play MIDI input here and record into it"}
+          data-testid={`arm-${id}`}
+          data-armed={armed}
+          onClick={() => !armed && void act(client.call("seat.focus", { seat: null, instrument: id }))}
+        >
+          <span className={`w-2 h-2 rounded-full ${armed ? "bg-white" : "bg-red-500/70"}`} />
+        </button>
+      </div>
+      {/* The clip pool: drag a clip into the lane to place it. */}
+      <div className="flex gap-0.5 overflow-hidden" data-testid={`pool-${id}`}>
+        {pool.map((c) => (
+          <div
+            key={c.id}
+            className="max-w-12 px-1 rounded-sm bg-violet-500/25 border border-violet-500/50 text-[9px] leading-3 text-violet-200 truncate cursor-grab touch-none select-none"
+            title={`${c.name}: drag into the lane to place it`}
+            data-testid={`pool-${id}-${c.id}`}
+            onPointerDown={(e) => h.down(e, { kind: "pool", id, clip: c.id, start: null })}
+            onPointerMove={h.move}
+            onPointerUp={h.up}
+            onPointerCancel={h.cancel}
+          >
+            {c.name}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -137,6 +217,8 @@ function TrackHeader({ id, name, type, armed, selected, seated }: { id: string; 
 export function Arrangement() {
   const instruments = useApp((s) => s.snapshot?.graph.instruments ?? []);
   const tracks = useApp((s) => s.snapshot?.tracks);
+  const clips = useApp((s) => s.snapshot?.clips);
+  const stepsLength = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   const seat = useApp(mySeat);
   const selected = useSelected();
   const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
@@ -148,6 +230,11 @@ export function Arrangement() {
   const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
   const [zoom, setZoom] = useState(96);
   const [snap, setSnap] = useState(BAR);
+  const [drag, setDrag] = useState<Drag | null>(null);
+  // The selected placement: its track and start.
+  const [picked, setPicked] = useState<{ id: string; start: number } | null>(null);
+  const root = useRef<HTMLElement>(null);
+  const lanes = useRef<HTMLDivElement>(null);
   const px = zoom / BAR;
 
   // The end of the last placement (`song.get`'s `length`).
@@ -162,12 +249,106 @@ export function Arrangement() {
     const t = Math.max(0, Math.round(x / px / snap) * snap);
     void act(client.call("transport.locate", { tick: t }));
   };
+  const snapTo = (t: number) => Math.round(t / snap) * snap;
+  const placementAt = (id: string, start: number) => tracks?.find((t) => t.instrument === id)?.arrangement.find((p) => p.start === start);
+  const place = (id: string, p: { clip: number; start: number; length: number | null; offset: number | null }) => ({
+    method: "song.place",
+    params: { instrument: id, ...p },
+  });
+
+  /** A drag after the pointer moved to `e`. */
+  const follow = (drag: Drag, e: React.PointerEvent): Drag => {
+    if (drag.kind === "move" || drag.kind === "copy") return { ...drag, dt: snapTo((e.clientX - drag.x) / px) };
+    if (drag.kind === "resize") {
+      // At least a snap long (or as long as it was, if shorter).
+      const least = Math.min(snap, drag.p.length) - drag.p.length;
+      return { ...drag, dl: Math.max(least, snapTo((e.clientX - drag.x) / px)) };
+    }
+    // Over its own lane: the snap cell under the pointer, ending by the
+    // song's last tick.
+    const lane = lanes.current?.querySelector(`[data-testid="lane-${drag.id}"]`);
+    const r = lane?.getBoundingClientRect();
+    const x = r ? e.clientX - r.left : -1;
+    const on = !!r && x >= 0 && x < r.width && e.clientY >= r.top && e.clientY < r.bottom;
+    const length = clips?.find((c) => c.instrument === drag.id && c.id === drag.clip)?.length ?? stepsLength * STEP;
+    return { ...drag, start: on ? Math.min(Math.floor((MAX_TICKS - length) / snap) * snap, Math.floor(x / px / snap) * snap) : null };
+  };
+
+  const h: Handlers = {
+    down: (e, d) => {
+      e.stopPropagation();
+      e.preventDefault();
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      root.current?.focus();
+      if (d.kind !== "pool") setPicked({ id: d.id, start: d.p.start });
+      setDrag(d);
+    },
+    move: (e) => {
+      const d = drag && follow(drag, e);
+      if (d) setDrag(d);
+    },
+    cancel: () => setDrag(null),
+    up: (e) => {
+      if (!drag) return;
+      setDrag(null);
+      // Where the pointer let go, even if its last move has not drawn yet.
+      const d = follow(drag, e);
+      const { id } = d;
+      if (d.kind === "move" || d.kind === "copy") {
+        const to = dragStart(d);
+        if (to === d.p.start) return; // a click: selected
+        const { clip, length, offset } = d.p;
+        setPicked({ id, start: to });
+        if (d.kind === "move") void act(client.call("song.move", { instrument: id, start: d.p.start, to }));
+        else void act(client.call("song.place", { instrument: id, clip, start: to, length, offset }));
+      } else if (d.kind === "resize") {
+        const length = resized(d);
+        if (length === d.p.length) return;
+        const p = place(id, { clip: d.p.clip, start: d.p.start, length, offset: d.p.offset });
+        // Placing over it at the same start replaces it, but a shorter one
+        // would leave its tail playing: lift it off first (one batch, one
+        // undo step). `batch` does not roll back, but this place cannot
+        // fail where the remove succeeded: same clip and start, shorter.
+        if (length > d.p.length) void act(client.call("song.place", p.params));
+        else void act(client.call("batch", { requests: [{ method: "song.remove", params: { instrument: id, start: d.p.start } }, p] }));
+      } else if (d.start !== null) {
+        setPicked({ id, start: d.start });
+        void act(client.call("song.place", place(id, { clip: d.clip, start: d.start, length: null, offset: null }).params));
+      }
+    },
+  };
+
+  // Delete removes the selected placement; Escape clears the selection.
+  const key = (e: React.KeyboardEvent) => {
+    const t = e.target as HTMLElement;
+    // Only for the section itself (focused by a placement), not its buttons
+    // and fields.
+    if (!picked || t !== root.current) return;
+    if (e.key === "Delete" || e.key === "Backspace") {
+      // Not also the piano roll's selected notes.
+      e.preventDefault();
+      e.stopPropagation();
+      if (placementAt(picked.id, picked.start)) void act(client.call("song.remove", { instrument: picked.id, start: picked.start }));
+      setPicked(null);
+    } else if (e.key === "Escape") setPicked(null);
+  };
+
   const line = (every: number, color: string) => `repeating-linear-gradient(to right, ${color} 0 1px, transparent 1px ${every * px}px)`;
   const grid = [line(BAR, "#3f3f46"), ...(zoom >= 192 ? [line(BEAT, "#27272a")] : [])].join(", ");
   const sel = "px-1 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-zinc-200";
 
   return (
-    <section className="flex flex-col gap-2 p-3 min-w-0 rounded-lg bg-zinc-900/50 border border-zinc-800" data-testid="arrangement" data-end={end}>
+    <section
+      ref={root}
+      tabIndex={-1}
+      className="flex flex-col gap-2 p-3 min-w-0 rounded-lg bg-zinc-900/50 border border-zinc-800 outline-none"
+      data-testid="arrangement"
+      data-end={end}
+      onKeyDown={key}
+      // The selection goes with the focus, so Delete elsewhere never
+      // removes a placement picked long ago.
+      onBlur={(e) => !root.current?.contains(e.relatedTarget as Node | null) && setPicked(null)}
+    >
       <div className="flex items-center gap-3 text-xs text-zinc-400">
         <span className="text-zinc-300">arrangement</span>
         {!song && <span className="text-zinc-500">pattern mode: the song plays in song mode</span>}
@@ -191,7 +372,7 @@ export function Arrangement() {
             ))}
           </select>
         </label>
-        <span className="ml-auto text-zinc-500">click the ruler: play from there</span>
+        <span className="ml-auto text-zinc-500">ruler: play from there - drag: move - edge: length - alt-drag: copy - Delete: remove - drag a clip from the pool into its lane</span>
       </div>
       <div className="flex overflow-x-auto rounded border border-zinc-800 bg-zinc-950" data-testid="arr-scroll">
         {/* Track headers, sticky on the left. */}
@@ -206,6 +387,7 @@ export function Arrangement() {
               armed={i.id === focus}
               selected={i.id === selected}
               seated={!!seat}
+              h={h}
             />
           ))}
           {!instruments.length && <div className="p-2 text-xs text-zinc-500">No instruments.</div>}
@@ -239,9 +421,9 @@ export function Arrangement() {
               data-tick={start}
             />
           </div>
-          <div className="relative" style={{ backgroundImage: grid }}>
+          <div className="relative touch-none select-none" ref={lanes} style={{ backgroundImage: grid }} onPointerDown={() => setPicked(null)}>
             {instruments.map((i) => (
-              <Lane key={i.id} id={i.id} px={px} bars={bars} />
+              <Lane key={i.id} id={i.id} px={px} bars={bars} drag={drag} picked={picked?.id === i.id ? picked.start : null} h={h} />
             ))}
             {loop === 2 && loopEnd > loopStart && (
               <div
