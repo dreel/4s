@@ -528,9 +528,10 @@ pub struct LocateParams {
 /// the requests before it changed stays.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct BatchParams {
-    /// Each `{"method": ..., "params": ...}`. Not `batch` itself, nor
+    /// Each `{"method": ..., "params": ...}`. Not `batch` itself,
     /// connection-level methods (hello, subscribe, render, daemon), undo,
-    /// or the journal.
+    /// the journal, `project.new/load/import`, or the transport
+    /// (`transport.play/stop/locate/record`).
     #[ts(type = "Array<{ method: string, params?: unknown }>")]
     #[schemars(with = "Vec<serde_json::Value>")]
     pub requests: Vec<serde_json::Value>,

@@ -766,6 +766,8 @@ check "batches cannot nest" "cannot be in a batch" s batch '[{"method":"batch","
 # under them, into a new clip made there.
 check "song-mode takes write into placements and make a clip past the end" "recorded song clip 3: 1 notes, length 16 steps" bash -c "$BIN/4s render --bars 4 --to song --input '0.25:39 4.25:39 6.5:39:0.1' | grep 'recorded song clip 3'"
 check "...the bar-3 note in clip 2 at its own tick" "48:D#2:24:100 96:D2:24:89 288:D2:24:89" bash -c "$BIN/4s render --bars 4 --to song --input '0.25:39 4.25:39 6.5:39:0.1' | grep -A4 'clip 2' | tail -1"
+check "notes past the end go in clips of whole bars, a new one past the longest" "recorded song clip 4: 1 notes" bash -c "$BIN/4s render --bars 12 --to song --input '8.5:39 14.5:39 20.5:39' | grep 'recorded song clip 4'"
+check "...the clip before it grew to hold both of its notes" "96:D#2:24:100 1248:D#2:24:100" bash -c "$BIN/4s render --bars 12 --to song --input '8.5:39 14.5:39 20.5:39' | grep -A3 'recorded song clip 3' | tail -1"
 # Live, at 240 bpm (a bar is 1 s): the song's end stops playback, unless
 # recording, which goes on past it.
 s tempo 240 >/dev/null

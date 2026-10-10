@@ -639,7 +639,7 @@ enum SongCmd {
 enum ClipCmd {
     /// Show a clip (default: your focus).
     Show { instrument: Option<String> },
-    /// The clips in an instrument's pool (default: your focus).
+    /// The clips in an instrument's pool (default: every instrument's).
     List { instrument: Option<String> },
     /// A new empty clip, selected unless --keep.
     New {
@@ -2013,8 +2013,7 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
         Cmd::Controller { .. } => print_leds(&serde_json::from_value(last)?),
         Cmd::Clip { cmd: Some(ClipCmd::List { instrument }), .. } => {
             let song: SongInfo = serde_json::from_value(last)?;
-            let want = instrument.clone().or_else(|| song.tracks.first().map(|t| t.instrument.clone()));
-            for t in song.tracks.iter().filter(|t| want.as_deref().is_none_or(|w| w == t.instrument)) {
+            for t in song.tracks.iter().filter(|t| instrument.as_deref().is_none_or(|w| w == t.instrument)) {
                 print_track(t);
             }
         }

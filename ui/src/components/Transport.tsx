@@ -1,8 +1,8 @@
 import type { RecordParams } from "../generated/RecordParams";
 import { act, app, client, setParam, useApp } from "../store";
+import { ParamKnob } from "./ParamKnob";
 
 type AppSnapshot = typeof app.state;
-import { ParamKnob } from "./ParamKnob";
 
 /** Record quantize grids in ticks (96 per quarter), as the protocol's `GRIDS`. */
 const GRIDS: [string, number | null][] = [

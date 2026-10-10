@@ -269,9 +269,11 @@ impl Take {
         out
     }
 
-    /// Song mode: notes with no placement under them go in a clip this take
-    /// makes: whole bars around them, in the gap they are in (it does not
-    /// cut other placements), or into the clip it made, which grows to fit.
+    /// Song mode: notes with no placement under them go in clips this take
+    /// makes, in order: whole bars around them, each inside the gap between
+    /// placements its notes start in (it does not cut other placements), at
+    /// most the longest clip; the clip the take made last grows to fit
+    /// notes that go on past it.
     fn make_clip(
         &mut self,
         notes: &[Played],
@@ -281,32 +283,67 @@ impl Take {
         quantize: &dyn Fn(u32, u32) -> u32,
     ) -> Vec<Write> {
         let bar = TICKS_PER_BAR as f64;
-        let first = notes.iter().map(|n| n.pos).fold(f64::MAX, f64::min).max(0.0);
-        let last = notes.iter().map(|n| n.pos + (n.end - n.tick)).fold(0.0, f64::max);
-        // The gap the notes start in.
-        let prev_end = placements.iter().map(|(p, _)| p.end()).filter(|e| *e as f64 <= first).max().unwrap_or(0);
-        let next_start = placements.iter().map(|(p, _)| p.start).filter(|s| *s as f64 > first).min().unwrap_or(MAX_SONG_TICKS);
-        let (clip, start, grow) = match self.made {
-            // The clip made earlier ends where this gap starts: grow it.
-            Some((clip, start, length)) if start + length == prev_end && prev_end > 0 => (clip, start, true),
-            _ => {
-                let start = ((first / bar).floor() * bar) as u32;
-                (next_id, start.max(prev_end), false)
+        let mut notes = notes.to_vec();
+        notes.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+        let mut placed: Vec<Placement> = placements.iter().map(|(p, _)| *p).collect();
+        let mut out: Vec<Write> = Vec::new();
+        let mut next_id = next_id;
+        let mut i = 0;
+        while i < notes.len() {
+            let at = notes[i].pos.max(0.0);
+            let prev_end = placed.iter().map(Placement::end).filter(|e| *e as f64 <= at).max().unwrap_or(0);
+            let next_start = placed.iter().map(|p| p.start).filter(|s| *s as f64 > at).min().unwrap_or(MAX_SONG_TICKS);
+            // Grow the clip made last when this gap starts where it ends.
+            let (clip, start, grow) = match self.made {
+                Some((clip, start, length))
+                    if start + length == prev_end && prev_end > 0 && at < (start + MAX_CLIP_TICKS) as f64 =>
+                {
+                    (clip, start, true)
+                }
+                _ => {
+                    let id = next_id;
+                    next_id += 1;
+                    (id, (((at / bar).floor() * bar) as u32).max(prev_end), false)
+                }
+            };
+            let limit = next_start.min(start + MAX_CLIP_TICKS).min(MAX_SONG_TICKS);
+            // The notes that start before the limit go in this clip.
+            let j = i + notes[i..].iter().take_while(|n| (n.pos.max(0.0) as u32) < limit).count().max(1);
+            let group = &notes[i..j];
+            i = j;
+            let last = group.iter().map(|n| n.pos + (n.end - n.tick)).fold(0.0, f64::max);
+            let end = (((last / bar).ceil() * bar) as u32).clamp(start + 1, limit.max(start + 1));
+            let old_length = self.made.filter(|m| grow && m.0 == clip).map_or(0, |m| m.2);
+            let length = (end - start).max(old_length);
+            let mut events = match out.iter().find_map(|w| match w {
+                Write::New { clip: c, events, .. } | Write::Grow { clip: c, events, .. } if *c == clip => Some(events.clone()),
+                _ => None,
+            }) {
+                Some(e) => e,
+                None if grow => existing(clip),
+                None => Vec::new(),
+            };
+            for n in group {
+                let local = ((n.pos - start as f64).max(0.0).round() as u32).min(length - 1);
+                let len = ((n.end - n.tick).round() as u32).clamp(1, length);
+                let e = ClipEvent { tick: quantize(local, length), len, note: n.note, velocity: n.velocity };
+                events.retain(|x| x.key() != e.key());
+                events.push(e);
             }
-        };
-        let end = (((last / bar).ceil() * bar) as u32).clamp(start + 1, next_start.max(start + 1)).min(MAX_SONG_TICKS);
-        let length = (end - start).min(MAX_CLIP_TICKS);
-        let mut events = if grow { existing(clip) } else { Vec::new() };
-        for n in notes {
-            let local = ((n.pos - start as f64).max(0.0).round() as u32).min(length - 1);
-            let len = ((n.end - n.tick).round() as u32).clamp(1, length);
-            let e = ClipEvent { tick: quantize(local, length), len, note: n.note, velocity: n.velocity };
-            events.retain(|x| x.key() != e.key());
-            events.push(e);
+            events.sort_by_key(ClipEvent::key);
+            // One write per clip: a clip made earlier in this write stays new.
+            let made_now = out.iter().any(|w| matches!(w, Write::New { clip: c, .. } if *c == clip));
+            out.retain(|w| !matches!(w, Write::New { clip: c, .. } | Write::Grow { clip: c, .. } if *c == clip));
+            out.push(if grow && !made_now {
+                Write::Grow { clip, start, length, events }
+            } else {
+                Write::New { clip, start, length, events }
+            });
+            placed.retain(|p| p.start != start);
+            placed.push(Placement { clip, start, length, offset: 0 });
+            self.made = Some((clip, start, length));
         }
-        events.sort_by_key(ClipEvent::key);
-        self.made = Some((clip, start, length));
-        vec![if grow { Write::Grow { clip, start, length, events } } else { Write::New { clip, start, length, events } }]
+        out
     }
 }
 
@@ -733,8 +770,19 @@ impl Core {
             self.record_changed(origin);
             return;
         }
-        if matches!(req, Request::TransportPlay(_)) {
-            self.restart_take();
+        match req {
+            Request::TransportPlay(_) => self.restart_take(),
+            // Jumping while recording in song mode: what was played is
+            // written, and the take goes on from the new position.
+            Request::TransportLocate(p) if self.playing && self.song_mode() => {
+                let (tick, pos) = self.take_upto();
+                self.write_take(tick, pos, true);
+                let from = self.play_tick as f64;
+                if let Some(t) = self.take.as_mut() {
+                    t.take = Take::new(from, p.tick as f64);
+                }
+            }
+            _ => {}
         }
     }
 

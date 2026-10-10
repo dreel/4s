@@ -2223,7 +2223,8 @@ impl Core {
 }
 
 /// Requests a `batch` can hold: not another batch, nor what a connection,
-/// the journal, or the transport's recording handles on its own.
+/// the journal, a project load, or the transport (which settles a running
+/// take before it is journaled) handles on its own.
 fn batchable(req: &Request) -> bool {
     use Request::*;
     !matches!(
@@ -2244,6 +2245,9 @@ fn batchable(req: &Request) -> bool {
             | ProjectLoad(_)
             | ProjectImport(_)
             | TransportRecord(_)
+            | TransportPlay(_)
+            | TransportStop(_)
+            | TransportLocate(_)
     )
 }
 

@@ -536,7 +536,10 @@ impl Engine {
             }
             Command::Locate { tick } => {
                 self.start_pos = tick as u64;
-                if self.playing && self.song_mode() && self.tick >= self.count_in {
+                // During a count-in the song has not started: it starts here.
+                if self.playing && self.tick < self.count_in {
+                    self.song_pos = tick as u64;
+                } else if self.playing && self.song_mode() {
                     self.release_clip_notes(None);
                     self.song_pos = tick as u64;
                     self.ended = false;
