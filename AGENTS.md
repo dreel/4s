@@ -43,6 +43,7 @@ and agents can drive and verify every part of it.
 - [Journal](docs/journal.md) -- what happened and who did it, undo/redo, reproducing bugs by replaying recordings, recordings as tests
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
 - [Akai MPK mini IV](docs/hardware/akai-mpk-mini-iv.md) -- device model, ports, default layout
+- [Backlog](docs/backlog.md) -- noticed but not done: possible bugs, follow-ups, doc/code mismatches
 
 ## Build, run, verify
 
@@ -105,6 +106,22 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   audio callback path.
 - **Update docs/** when a change alters a principle or a design decision, and
   keep this index in sync.
+- **Stack changes; don't fork them from main.** Unless the user says
+  otherwise, assume the work is serial (one person, large changes, one after
+  another). Before starting a branch, check `gh pr list` and local unmerged
+  branches, branch from the newest unmerged one, and open its PR with
+  `--base <parent>`. When the parent gets new commits (review fixes), merge
+  them into its children right away and re-run the gates on a child whose
+  code changed. When the parent merges, retarget the child to `main`
+  (`gh pr edit --base main`) and merge `main` into it. Branches cut from an
+  old `main` in parallel end up with conflicts and broken behavior to sort
+  out at merge time. Make independent branches only when the user asks.
+- **Log what you notice but don't do.** A possible bug, a follow-up, a doc
+  that disagrees with the code, a review suggestion left for later: add it to
+  [docs/backlog.md](docs/backlog.md) in your current branch rather than
+  fixing it outside your change's scope or forgetting it. Check the backlog
+  for related items when you start work, and delete an item in the PR that
+  fixes it.
 
 ## Before you open a PR
 
@@ -120,9 +137,13 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
    (CLI against a daemon in an isolated data dir, `4s render`, UI tests,
    `virtual_block`).
 3. **Commit, then run `scripts/gates.sh`.** Fix what it reports and re-run
-   until it passes. Do not edit the review output.
-4. **Open the PR with the template**, pasting `.gates/report.md` and your
-   validation evidence.
+   until it passes. Do not edit the review output. For a stacked change
+   without a PR yet, run `REVIEW_BASE=origin/<parent> scripts/gates.sh`;
+   once its PR exists, the review uses the PR's base (found with `gh`;
+   without it, set `REVIEW_BASE`).
+4. **Open the PR with the template** (`--base <parent>` when stacked),
+   pasting `.gates/report.md` and your validation evidence. Put follow-ups
+   in [docs/backlog.md](docs/backlog.md), not only in the PR body.
 
 ## If you are the independent reviewer
 

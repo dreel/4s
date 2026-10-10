@@ -1,0 +1,106 @@
+# Backlog
+
+Things noticed but not done: possible bugs, follow-ups, docs that disagree
+with the code, review suggestions left for later. A plain list until a better
+tracker exists (AGENTS.md, "Log what you notice but don't do").
+
+- Add an item in the branch you are working on when you notice it; don't
+  stop to fix something outside your change's scope.
+- One bullet per item: `(date, source) area: what, and where in the code`.
+  The source is a PR, a review, or what you were doing when you noticed.
+- Delete the item in the PR that fixes it (git history keeps the record). If
+  it turns out not to matter, delete it and say why in the commit message.
+- Unverified is fine: say "possible" and what would confirm it.
+
+## Bugs
+
+- (2026-10-09, #24 review) seats: a client whose `session.hello` has no user
+  counts as the host user, so a remote UI opened without `?user=` joins the
+  host's seat and can change its focus and bindings
+  (`crates/daemon/src/core/seats.rs`, hello handling). Limit the default to
+  local clients and add an e2e for a remote client with no user.
+- (2026-10-09, #25 review) pitch bend: a bend held through a focus change,
+  a target that resolves elsewhere, or an unplug leaves the old instrument
+  bent; the wheel's return to center goes to the new target
+  (`input_pitch_bend`). Remember the slot each device bent and reset it.
+- (2026-10-09, #25 review) relative CCs: raw 64 moves by -64 steps; many
+  encoders send 64 for "no change" (`cc_to`, `CcMode::Relative`).
+- (2026-10-09, #25 review) relative CCs on a toggle parameter move it in
+  1/200 steps; flip it instead, or reject relative mode for toggles.
+- (2026-10-09, #25 review) auto-connect connects every port whose name
+  contains "block" with the `livid_block` profile (`block`, `block_2`, ...);
+  before, at most one Block. Confirm or restore the one-Block guard
+  (`midi_autoconnect`); `main.rs`'s comment still mentions only the Block.
+- (2026-10-09, #24 follow-up) `set_step` rewrites an unchanged step's event
+  (velocity 100 becomes 89 when setting an "on" step to on); return early
+  when the level is the same.
+- (2026-10-09, #24 review) project load: one unreadable voice string fails
+  the whole drum pattern for that instrument; before, only that voice was
+  reported (`crates/daemon/src/core/clips.rs`, `from_project`).
+- (2026-10-09, #24 follow-up) a held key and a clip note on the same pitch
+  end each other's notes (documented); revisit with recording.
+- (2026-10-09, #25 review) `midi.rename` rewrites every `input:*:<old>`
+  holder, including notes held by a remote bridge that uses the same device
+  name; its later note-off under the old name then misses them.
+- (2026-10-09, #24 follow-up) a remote `midi.input` without `profile` takes
+  the profile (and now the model) of a local device with the same name; use
+  the local device's only for input from this machine.
+- (2026-10-09, #25 review) `seat.apply_layout` with `model` and an empty
+  `ports` list applies nothing without an error.
+- (2026-10-09, #25 review) an invalid `midi-devices.json` is moved to
+  `.json.bak`, overwriting any earlier `.bak` (`crates/daemon/src/hardware.rs`).
+- (2026-10-09, #25 follow-up) remote clients can call `midi.set_seat` and
+  `midi.rename`; `seat create`/`claim` on the host by another `--user` moves
+  the host's devices; pickup keys don't follow a device rename;
+  `midi.input` doesn't cap its length.
+- (2026-10-09, #25 follow-up) a seat-level `pitch_bend` is ignored for a
+  model device until its layout is applied (the layout's own target wins).
+
+## Follow-ups
+
+- (2026-10-09, #24 review) UI constants `TICKS_PER_STEP` and the GM drum
+  notes are copied by hand into `ui/src/components/Editor.tsx` and
+  `voices.ts`; export them through the generated bindings.
+- (2026-10-09, #24 review) editor: the hidden-note count misses extra 303
+  chord notes on a step's first tick, and a clip length that isn't a whole
+  number of steps shows as "loops every 2.5 steps".
+- (2026-10-09, #24 review) `notes_result.length` reports `sequencer.length`
+  even when the clip has its own length.
+- (2026-10-09, #25 review) `Seat.defaults` is a display string; the UI gets
+  the device name with `d.split(" ")[0]` (`ui/src/components/Seats.tsx`).
+  Make it structured (`{device, model, label}`).
+- (2026-10-09, #25 review) the Livid Block (empty layout) shows as a
+  "default layout" in every seat with an "edit" that applies nothing; list
+  only devices whose layout has entries for their role, in the seat they
+  play in. A device with only CC maps or knobs is left out of `defaults`
+  though its notes still play the model's bindings.
+- (2026-10-09, #25 review) no RPC or CLI sets or clears a seat's
+  `pitch_bend` (only `seat.apply_layout` and project files).
+- (2026-10-09, #25 review) no e2e shows pitch bend bending what the keys
+  play (only that it isn't journaled).
+- (2026-10-09, #24/#25 follow-up) CC and Block input build the full journal
+  doc (one key per clip event) twice per message; diff only the touched keys.
+- (2026-10-09, #25 follow-up) `cc learn` from an endless encoder stores an
+  absolute map; add a way to learn relative mode, or say so in the help.
+- (2026-10-09, #24/#25 follow-up) auto-connect of model ports and
+  auto-reconnect of hand-connected ports have no e2e (the e2e daemons run
+  with `--no-midi`).
+- (2026-10-09, #24 follow-up) `Command::ClearClip` is unused by the daemon.
+- (2026-10-09, #25 follow-up) the 303 note-stack unit test duplicates the
+  e2e legato checks.
+
+## Mismatches
+
+- (2026-10-09, #24/#25 follow-up) RFC 0007's main "Migration" section
+  predates the v3/v4 split (still says v3/protocol 3 and clip swapping); the
+  implementation notes override it.
+- (2026-10-09, #25 review) the daemon's fallback host user is now `local`
+  (was `me`); check `docs/journal.md` and the seats docs, which talk about
+  the host user.
+
+## Process
+
+- (2026-10-09, merging #24/#25) the local `recording` branch (not pushed)
+  was cut from `clips-phase2` before the #24 review fixes and #25 (device
+  models) merged; merge `main` into it before continuing. Expect conflicts
+  in MIDI input handling, seats, and the journal.

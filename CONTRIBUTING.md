@@ -75,6 +75,11 @@ Details, including what counts as good evidence: [docs/gates.md](docs/gates.md).
   as the gates pass. Prefer splitting work when the pieces stand on their
   own.
 - One change per PR. Don't mix a refactor with a feature.
+- Stack dependent work: branch from the PR it builds on and open yours with
+  that branch as its base, so each PR shows only its own change. Merge the
+  parent first; then retarget the child to `main` and merge `main` into it.
+  The review and the `pr-gates` check use the PR's base branch.
+- Note anything you find but don't fix in [docs/backlog.md](docs/backlog.md).
 - Never edit generated files by hand; change `crates/protocol` and run
   `cargo run -p fours-protocol --bin gen-bindings`.
 
