@@ -466,6 +466,63 @@ test("clip pool and song mode: the step editor edits the selected clip; song con
   await rpc("param.set", { path: "song.mode", value: 0 });
 });
 
+test("arrangement: lanes show placements and repeats, headers select and arm, the ruler locates, the playhead follows", async () => {
+  const { page, rpc } = h;
+  await rpc("pattern.set_step", { instrument: "drums", voice: "kick", step: 0, level: 1 });
+  await rpc("song.place", { instrument: "drums", clip: 1, start: 0, length: 4 * 384, offset: null });
+  await rpc("clip.new", { instrument: "drums", name: "Fill", length: 384, select: false });
+  await rpc("song.place", { instrument: "drums", clip: 2, start: 4 * 384, length: 384, offset: null });
+  const arr = page.getByTestId("arrangement");
+  await expect(page.getByTestId("placement-drums-0")).toHaveAttribute("data-length", String(4 * 384));
+  await expect(page.getByTestId("placement-drums-1536")).toContainText("Fill");
+  await expect(arr).toHaveAttribute("data-end", String(5 * 384));
+  // A daemon-side move shows up.
+  await rpc("song.move", { instrument: "drums", start: 4 * 384, to: 6 * 384 });
+  await expect(page.getByTestId("placement-drums-2304")).toBeVisible();
+  await expect(page.getByTestId("placement-drums-1536")).toHaveCount(0);
+
+  // Clicking the ruler locates, snapped to the bar.
+  const ruler = page.getByTestId("arr-ruler");
+  await arr.scrollIntoViewIfNeeded();
+  const box = (await ruler.boundingBox())!;
+  const pxPerBar = 96; // default zoom
+  await ruler.click({ position: { x: 2 * pxPerBar + 30, y: box.height / 2 } });
+  await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(2 * 384);
+  await expect(page.getByTestId("arr-start")).toHaveAttribute("data-tick", String(2 * 384));
+  await page.getByTestId("arr-snap").selectOption("96");
+  await ruler.click({ position: { x: 3 * pxPerBar + pxPerBar / 4 + 2, y: box.height / 2 } });
+  await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(3 * 384 + 96);
+
+  // The loop range shows on the ruler.
+  await rpc("param.set", { path: "song.loop", value: 2 });
+  await rpc("param.set", { path: "song.loop_end", value: 2 });
+  await expect(page.getByTestId("arr-loop")).toBeVisible();
+
+  // Headers: select opens the editor; arm sets the seat's focus.
+  await rpc("instrument.add", { type: "tb303", id: "bass", name: null, channel: null, no_channel: false });
+  await expect(page.getByTestId("lane-bass")).toBeVisible();
+  await page.getByTestId("track-select-bass").click();
+  await expect(page.getByTestId("select-bass")).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("arm-drums")).toHaveAttribute("data-armed", "true");
+  await page.getByTestId("arm-bass").click();
+  await expect(page.getByTestId("arm-bass")).toHaveAttribute("data-armed", "true");
+  await expect(page.getByTestId("arm-drums")).toHaveAttribute("data-armed", "false");
+  const seats = (await rpc("state.get", {})).seats.seats;
+  expect(seats.some((s) => s.config.focus === "bass")).toBe(true);
+
+  // In song mode the playhead follows.
+  await rpc("param.set", { path: "song.loop", value: 0 });
+  await rpc("transport.locate", { tick: 0 });
+  await rpc("param.set", { path: "song.mode", value: 1 });
+  await rpc("transport.play", {});
+  const head = page.getByTestId("arr-playhead");
+  await expect(head).toBeVisible();
+  await expect.poll(async () => Number(await head.getAttribute("data-tick"))).toBeGreaterThan(0);
+  await arr.screenshot({ path: "test-results/arrangement.png" });
+  await rpc("transport.stop", {});
+  await rpc("param.set", { path: "song.mode", value: 0 });
+});
+
 test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, and take notes", async () => {
   const { page, rpc } = h;
   const clip = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).events;

@@ -61,4 +61,4 @@ decisions (before implementation).
 | [0005](0005-build-phase.md) | Build phase: suspend the RFC gate, lighten the review bar | implemented |
 | [0006](0006-journal-and-undo.md) | Journal and per-user undo | implemented |
 | [0007](0007-midi-bindings-and-clips.md) | MIDI bindings, seats, clips, and recording | accepted (phases 1-2 implemented; recording moved to 0008) |
-| [0008](0008-recording-and-arrangement.md) | Recording and the arrangement | accepted (phases A, B1, B2 implemented) |
+| [0008](0008-recording-and-arrangement.md) | Recording and the arrangement | accepted (phases A, B1, B2 implemented; C in progress) |

@@ -1,3 +1,4 @@
+import { Arrangement } from "./components/Arrangement";
 import { Console } from "./components/Console";
 import { Editor } from "./components/Editor";
 import { MidiPanel, ProjectPanel, RenderPanel } from "./components/Panels";
@@ -102,6 +103,7 @@ export function App() {
         <main className="flex flex-col gap-3 p-4 overflow-auto *:shrink-0">
           <SeatChooser />
           <Console />
+          <Arrangement />
           <Editor />
           <div className="grid grid-cols-3 gap-3">
             <MidiPanel />
