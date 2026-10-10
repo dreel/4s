@@ -193,8 +193,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, song branch) `song.loop` is an integer parameter (0 off, 1
   song, 2 bars); the registry has no enum kind, so `4s params` and generic
   controls show a number. Add a choice kind with labels.
-- (2026-10-10, song branch) placing clips has no UI until the arrangement
-  view (RFC 0008 phase C); the CLI and RPC place them.
 - (2026-10-10, song branch) the transport row is crowded (record, song, and
   tempo controls in one line); give it a layout pass with the arrangement
   view.
@@ -215,6 +213,12 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, piano-roll branch) the piano roll has no copy/paste,
   keyboard nudging, or scroll-to-notes; its 808 view still shows the step
   editor below it (with the voices' knobs).
+- (2026-10-10, arrangement-edit branch) the arrangement selects one
+  placement at a time (no shift-click or box select, so no multi-placement
+  moves in one `batch`), has no keyboard nudging, and the header's clip
+  pool is cut off when a track has more clips than fit in 128 px.
+- (2026-10-10, arrangement-edit branch) moving a placement to another
+  track (copying its clip into that pool) is not built (RFC 0008 phase C).
 
 ## Mismatches
 

@@ -523,6 +523,95 @@ test("arrangement: lanes show placements and repeats, headers select and arm, th
   await rpc("param.set", { path: "song.mode", value: 0 });
 });
 
+test("arrangement editing: place from the pool, move, resize, copy, and delete by dragging, one undo step each", async () => {
+  const { page, rpc } = h;
+  type P = { clip: number; start: number; length: number; offset: number };
+  const song = async (): Promise<P[]> =>
+    (await rpc("song.get", {})).tracks.find((t: { instrument: string }) => t.instrument === "drums")!.arrangement;
+  await rpc("clip.new", { instrument: "drums", name: "Fill", length: 384, select: false });
+  await expect(page.getByTestId("pool-drums-2")).toBeVisible();
+  // 96 pixels per bar, snapped to the bar (an earlier test may have
+  // changed either).
+  await page.getByTestId("arr-zoom").selectOption("96");
+  await page.getByTestId("arr-snap").selectOption("384");
+  const bar = 96;
+  // The mouse goes to page coordinates: bring the arrangement on screen and
+  // measure afresh before each drag (undo/redo clicks scroll the page).
+  const lane = async () => {
+    await page.getByTestId("arrangement").scrollIntoViewIfNeeded();
+    return (await page.getByTestId("lane-drums").boundingBox())!;
+  };
+  const drag = async (from: { x: number; y: number }, to: { x: number; y: number }, alt = false) => {
+    await page.mouse.move(from.x, from.y);
+    if (alt) await page.keyboard.down("Alt");
+    await page.mouse.down();
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2);
+    await page.mouse.move(to.x, to.y);
+    await page.mouse.up();
+    if (alt) await page.keyboard.up("Alt");
+  };
+  const center = async (testid: string) => {
+    await lane();
+    const b = (await page.getByTestId(testid).boundingBox())!;
+    return { x: b.x + Math.min(20, b.width / 2), y: b.y + b.height / 2 };
+  };
+  // Each action is one undo step: undo brings back what was before, redo
+  // what it made.
+  const oneStep = async (before: P[], after: P[]) => {
+    await expect.poll(song).toEqual(after);
+    await page.getByTestId("undo").click();
+    await expect.poll(song).toEqual(before);
+    await page.getByTestId("redo").click();
+    await expect.poll(song).toEqual(after);
+  };
+
+  // Drag the Fill clip from the pool into bar 3.
+  const chip = await center("pool-drums-2");
+  let l = await lane();
+  await drag(chip, { x: l.x + 2 * bar + 40, y: l.y + l.height / 2 });
+  const placed = [{ clip: 2, start: 768, length: 384, offset: 0 }];
+  await oneStep([], placed);
+  // Move it two bars later.
+  await expect(page.getByTestId("placement-drums-768")).toBeVisible();
+  let from = await center("placement-drums-768");
+  await drag(from, { x: from.x + 2 * bar, y: from.y });
+  const moved = [{ clip: 2, start: 1536, length: 384, offset: 0 }];
+  await oneStep(placed, moved);
+  // Drag its right edge two bars longer: it loops the clip.
+  await expect(page.getByTestId("placement-drums-1536")).toBeVisible();
+  await lane();
+  let edge = (await page.getByTestId("placement-edge-drums-1536").boundingBox())!;
+  await drag({ x: edge.x + 2, y: edge.y + 10 }, { x: edge.x + 2 + 2 * bar, y: edge.y + 10 });
+  const longer = [{ clip: 2, start: 1536, length: 3 * 384, offset: 0 }];
+  await oneStep(moved, longer);
+  // And a bar shorter (a remove and a place, in one batch).
+  await expect(page.getByTestId("placement-drums-1536")).toHaveAttribute("data-length", String(3 * 384));
+  await lane();
+  edge = (await page.getByTestId("placement-edge-drums-1536").boundingBox())!;
+  await drag({ x: edge.x + 2, y: edge.y + 10 }, { x: edge.x + 2 - bar, y: edge.y + 10 });
+  const shorter = [{ clip: 2, start: 1536, length: 2 * 384, offset: 0 }];
+  await oneStep(longer, shorter);
+  // Alt-drag copies it three bars later; the original stays.
+  await expect(page.getByTestId("placement-drums-1536")).toHaveAttribute("data-length", String(2 * 384));
+  from = await center("placement-drums-1536");
+  await drag(from, { x: from.x + 3 * bar, y: from.y }, true);
+  const copied = [...shorter, { clip: 2, start: 2688, length: 2 * 384, offset: 0 }];
+  await oneStep(shorter, copied);
+  // Click the copy to select it; Delete removes it.
+  await expect(page.getByTestId("placement-drums-2688")).toBeVisible();
+  from = await center("placement-drums-2688");
+  await page.mouse.click(from.x, from.y);
+  await expect(page.getByTestId("placement-drums-2688")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Delete");
+  await oneStep(copied, shorter);
+  // A clip dropped off its own lane places nothing.
+  l = await lane();
+  const c1 = await center("pool-drums-1");
+  await drag(c1, { x: l.x + 10 * bar, y: l.y - 60 });
+  await page.waitForTimeout(100);
+  expect(await song()).toEqual(shorter);
+});
+
 test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, and take notes", async () => {
   const { page, rpc } = h;
   const clip = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).events;
