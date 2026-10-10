@@ -1856,11 +1856,11 @@ impl Core {
             return self.dispatch(req, origin, client, &user);
         }
         // A transport request that ends or restarts a take writes it first,
-        // as its own entry before the request's (if the request is valid).
-        if let Request::TransportRecord(p) = &req {
-            RecordSettings::default().update(p)?;
+        // as its own entry before the request's. An invalid one changes
+        // nothing (it fails, journaled, below).
+        if !matches!(&req, Request::TransportRecord(p) if RecordSettings::default().update(p).is_err()) {
+            self.settle_take(&req, origin, client);
         }
-        self.settle_take(&req, origin, client);
         // A layout is journaled with the ports it applies (see
         // `SeatApplyLayoutParams`).
         let req = match req {

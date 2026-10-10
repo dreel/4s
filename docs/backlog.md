@@ -76,6 +76,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   step (`play_tick + TICKS_PER_STEP`), including the part the playhead had
   not reached; bound the cleared span by the heard tick
   (`crates/daemon/src/core/record.rs`, `end_take`/`restart_take`).
+- (2026-10-10, recording branch review) recording: while the command queue
+  stays full, a pass write is retried every step and each failed try is a
+  journal entry; retry at the next pass instead, or journal only the first
+  failure.
 
 ## Follow-ups
 
