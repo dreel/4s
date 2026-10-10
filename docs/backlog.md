@@ -166,6 +166,17 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, song branch review) `song.loop_start` and `song.loop_end`
   are set separately, so `start >= end` is accepted and the loop silently
   does nothing; the CLI checks it, the UI inputs and `param.set` do not.
+- (2026-10-10, song branch review) turning `song.mode` on while playing
+  goes on from the locate point plus the time played (the engine's song
+  position counts in pattern mode too), not from the locate point.
+- (2026-10-10, song branch review) `apply_sets`' clip-table check counts a
+  restored instrument's clip 1 twice (conservative: with exactly enough
+  free entries the undo is refused); `validate_project` covers the load's
+  `Locate` and per-instrument select commands only by slack.
+- (2026-10-10, song branch review) a project load resets the song start to
+  bar 1 without a `located` event (clients catch up through `reset`).
+- (2026-10-10, song branch review) `batch` allows `project.save` and
+  `midi.input`; `BatchParams` docs don't say so.
 - (2026-10-10, song branch) `song.loop` is an integer parameter (0 off, 1
   song, 2 bars); the registry has no enum kind, so `4s params` and generic
   controls show a number. Add a choice kind with labels.
