@@ -261,6 +261,12 @@ async fn render(core: &Shared, p: RenderParams, client: &str) -> Result<Value, R
     };
     // The click is heard only when asked for, whatever `metronome.on` is.
     spec.globals[params::METRONOME] = if p.metronome == Some(true) { 1.0 } else { 0.0 };
+    if let Some(from) = p.from {
+        if from >= MAX_SONG_TICKS {
+            return Err(RpcError::invalid(format!("from must be under tick {MAX_SONG_TICKS}")));
+        }
+        spec.start = from;
+    }
     let bars = p.bars.unwrap_or(1.0);
     if !(0.0..=64.0).contains(&bars) {
         return Err(RpcError::invalid("bars must be 0..64"));
@@ -269,7 +275,7 @@ async fn render(core: &Shared, p: RenderParams, client: &str) -> Result<Value, R
     let sr = p.sample_rate.unwrap_or(48000).clamp(8000, 192000);
     tokio::task::spawn_blocking(move || {
         let r = offline::render_graph(&spec, sr, bars, tail, &input.notes);
-        let recorded = input.record.map(|rec| rec.clip(&r.feedback));
+        let recorded = input.record.map(|rec| rec.clips(&r.feedback)).unwrap_or_default();
         let a = offline::analyze(&r.samples, sr);
         let (lp, lr) = offline::lane_level(&r.samples, 0);
         let (rp, rr) = offline::lane_level(&r.samples, 1);

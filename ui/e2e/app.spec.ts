@@ -364,13 +364,13 @@ test("a known device model plays with its default layout until the seat edits it
 test("clips: a note off the step grid shows as a note in the editor, and steps still edit the clip", async () => {
   const { page, rpc } = h;
   await page.getByTestId("step-kick-0").click();
-  await expect.poll(async () => (await rpc("clip.get", { instrument: "drums" })).events).toEqual([
+  await expect.poll(async () => (await rpc("clip.get", { instrument: "drums", clip: null })).events).toEqual([
     { tick: 0, len: 24, note: 36, velocity: 89 },
   ]);
   await expect(page.getByTestId("clip-note-drums")).toHaveCount(0);
-  await rpc("clip.add", { instrument: "drums", events: [{ tick: 36, len: 6, note: 38, velocity: 100 }] });
+  await rpc("clip.add", { instrument: "drums", clip: null, events: [{ tick: 36, len: 6, note: 38, velocity: 100 }] });
   await expect(page.getByTestId("clip-note-drums")).toHaveText("1 note off the step grid (not shown here)");
-  await rpc("clip.length", { instrument: "drums", length: 72 });
+  await rpc("clip.length", { instrument: "drums", clip: null, length: 72 });
   await expect(page.getByTestId("clip-note-drums")).toContainText("loops every 3 steps");
 });
 
@@ -405,9 +405,9 @@ test("record: settings and the take from the UI; notes played elsewhere land qua
   await rpc("voice.trigger", { voice: "snare", instrument: null, note: null, velocity: null });
   // Written one step before the loop's end, so it plays in the next pass.
   await expect
-    .poll(async () => (await rpc("clip.get", { instrument: "drums" })).events, { timeout: 3000 })
+    .poll(async () => (await rpc("clip.get", { instrument: "drums", clip: null })).events, { timeout: 3000 })
     .toEqual([expect.objectContaining({ note: 38 })]);
-  const [e] = (await rpc("clip.get", { instrument: "drums" })).events;
+  const [e] = (await rpc("clip.get", { instrument: "drums", clip: null })).events;
   expect(e.tick % 24).toBe(0);
 
   await page.getByTestId("record-toggle").click();
@@ -424,6 +424,46 @@ test("record: settings and the take from the UI; notes played elsewhere land qua
     count_in: 1,
     offset_ms: null,
   });
+});
+
+test("clip pool and song mode: the step editor edits the selected clip; song controls set the song", async () => {
+  const { page, rpc } = h;
+  const clip = async (id: number) => (await rpc("clip.get", { instrument: "drums", clip: id })).events;
+  await page.getByTestId("step-kick-0").click();
+  await page.getByTestId("clip-new-drums").click();
+  await expect(page.getByTestId("clip-drums-2")).toHaveAttribute("data-selected", "true");
+  // The new clip is empty, and step edits go to it.
+  await expect(page.getByTestId("step-kick-0")).toHaveAttribute("data-level", "0");
+  await page.getByTestId("step-snare-4").click();
+  await expect.poll(() => clip(2)).toEqual([{ tick: 96, len: 24, note: 38, velocity: 89 }]);
+  expect(await clip(1)).toEqual([{ tick: 0, len: 24, note: 36, velocity: 89 }]);
+  // Selecting clip 1 shows it again; a daemon-side rename shows up.
+  await page.getByTestId("clip-drums-1").click();
+  await expect(page.getByTestId("step-kick-0")).toHaveAttribute("data-level", "1");
+  await rpc("clip.rename", { instrument: "drums", clip: 2, name: "Fill" });
+  await expect(page.getByTestId("clip-drums-2")).toContainText("Fill");
+  // Deleting asks once.
+  await page.getByTestId("clip-drums-2").click();
+  await page.getByTestId("clip-delete-drums").click();
+  await page.getByTestId("clip-delete-drums").click();
+  await expect(page.getByTestId("clip-drums-2")).toHaveCount(0);
+
+  // Song mode, a bar loop, and the start point.
+  await page.getByTestId("mode-toggle").click();
+  await expect.poll(async () => (await rpc("param.get", { path: "song.mode" })).value).toBe(1);
+  await page.getByTestId("song-loop").selectOption("2");
+  await page.getByTestId("loop-end").fill("2");
+  await expect.poll(async () => (await rpc("state.get", {})).params).toMatchObject({ "song.loop": 2, "song.loop_end": 2 });
+  await page.getByTestId("locate").fill("3");
+  await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(768);
+  await rpc("transport.locate", { tick: 0 });
+  await expect(page.getByTestId("locate")).toHaveValue("1");
+  // Playing in song mode shows bar.beat.
+  await rpc("song.place", { instrument: "drums", clip: 1, start: 0, length: 768, offset: null });
+  await rpc("transport.play", {});
+  await expect(page.getByTestId("playhead")).toHaveText(/^\d+\.\d$/);
+  await rpc("transport.stop", {});
+  await rpc("param.set", { path: "song.mode", value: 0 });
 });
 
 test("virtual Livid Block pads, LEDs, and knobs", async () => {

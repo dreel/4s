@@ -11,6 +11,10 @@ export type ClipUpdateParams = {
  */
 instrument: string | null, 
 /**
+ * Clip in the instrument's pool; default: its selected clip.
+ */
+clip: number | null, 
+/**
  * Events to remove first.
  */
 remove: Array<EventKey>, 

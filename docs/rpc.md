@@ -46,10 +46,14 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 ### Structural methods
 
 Explicit methods for things that are not a single parameter: transport
-(`transport.play/stop`), recording (`transport.record`, RFC 0008), the
+(`transport.play/stop/locate`), recording (`transport.record`, RFC 0008),
+the song (`song.*`: each track's arrangement, RFC 0008), the
 instrument graph (`instrument.*`, `channel.*`,
 `route.set`), clips (`clip.*`: timed note events, RFC 0007; `clip.update`
-removes and adds in one step, and is how recorded takes are journaled) and their step
+removes and adds in one step, and is how recorded takes are journaled;
+`clip.new/duplicate/rename/delete/select` manage each instrument's pool,
+and the others take an optional `clip`, default the selected one),
+`batch` (several requests as one journal entry and undo step) and their step
 views (`pattern.*`, drum steps and note steps),
 auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
 seats and their bindings (`seat.*`, RFC 0007), undo and the journal
@@ -88,7 +92,9 @@ current parameter set.
 - Pattern and trigger events name their instrument (`step_changed`,
   `pattern_changed`, `notes_changed`, `trigger`), so clients know which
   instrument an edit or hit belongs to. `clip_changed` carries a whole clip
-  after any edit to it, `seats` the seats and who sits where, and `record`
+  after any edit to it (`clip_deleted` when one goes), `track` a pool,
+  selection, or arrangement change, `located` a new song start point,
+  `seats` the seats and who sits where, and `record`
   the recording state (a take running, and the next take's settings), which
   is also in the snapshot. Record settings are shared by everyone on the
   engine (session state, not saved), and one take runs at a time.

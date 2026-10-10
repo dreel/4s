@@ -1,6 +1,6 @@
 # Engine
 
-Status: v3 (RFC 0004, RFC 0007, RFC 0008 phase A). Instruments added and removed at runtime (a
+Status: v3 (RFC 0004, RFC 0007, RFC 0008 phases A and B). Instruments added and removed at runtime (a
 TR-808-style drum machine and a TB-303-style bass synth), each played by a
 clip of timed note events on a shared tick clock with swing, and a
 multi-channel stereo mixer. Code: `crates/engine`.
@@ -147,6 +147,18 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
   mixed after the master fader and its meter, while `metronome.on`, and
   always during a count-in. `Play { count_in }` runs whole bars of clicks
   before tick 0.
+- **Clip table and song mode** (RFC 0008 phase B): clips live in one
+  preallocated table (`MAX_CLIPS` = 256, each `MAX_EVENTS`) shared by all
+  slots; each slot has a selected clip and up to `MAX_PLACEMENTS` = 256
+  placements `{start, length, offset, clip}`. Pattern mode
+  (`song.mode` off) plays each slot's selected clip as above. Song mode
+  plays, per slot, the placement under the song position, from `offset`
+  into its clip and looping at the clip's length; its notes end with the
+  placement. It plays from the locate point (`Locate`), and at the song's
+  end (the last placement's end) loops the whole song (`song.loop` 1),
+  loops bars `song.loop_start..song.loop_end` when the playhead reaches
+  the range's end (2), or reports `SongEnd` (0) and the daemon stops
+  (unless recording, which goes on past it).
 - Step patterns are views over clips (`crates/protocol/src/clip.rs`): a
   drum step is an event on the step's first tick at the voice's GM note,
   velocity 89 (on, 0.7) or 127 (accent), one step long; a 303 step is an
@@ -163,6 +175,9 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 | `mixer.master.volume` | 0-1 | 0.8 |
 | `metronome.on` | toggle (not undone) | off |
 | `metronome.level` | 0-1 (squared taper) | 0.6 |
+| `song.mode` | toggle (off pattern, on song) | off |
+| `song.loop` | 0 off, 1 the song, 2 bars (integer) | 1 |
+| `song.loop_start` / `song.loop_end` | bars from 0, end exclusive (integer) | 0 / 4 |
 | `mixer.<n>.volume` | 0-1 (squared taper) | 1.0 (unity) |
 | `mixer.<n>.pan` | -1..1 (pan for mono sources, balance for stereo) | 0 |
 | `mixer.<n>.mute` / `.solo` | toggle | off |

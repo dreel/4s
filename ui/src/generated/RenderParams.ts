@@ -16,6 +16,10 @@ tail: number | null,
  */
 path: string | null, sample_rate: number | null, 
 /**
+ * Song tick to start from, in song mode (default: the locate point).
+ */
+from: number | null, 
+/**
  * Include the metronome click (default off, whatever `metronome.on` is).
  */
 metronome: boolean | null, 

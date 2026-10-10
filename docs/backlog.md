@@ -126,7 +126,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-09, #24/#25 follow-up) auto-connect of model ports and
   auto-reconnect of hand-connected ports have no e2e (the e2e daemons run
   with `--no-midi`).
-- (2026-10-09, #24 follow-up) `Command::ClearClip` is unused by the daemon.
 - (2026-10-09, #25 follow-up) the 303 note-stack unit test duplicates the
   e2e legato checks.
 - (2026-10-10, recording branch review) record UI: while someone else's take
@@ -150,6 +149,56 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, recording branch) SMF import/export (RFC 0007 phase 3) is not
   built; and live take progress (notes shown while recording) waits for the
   piano roll (RFC 0008 phase B).
+
+- (2026-10-10, song branch review) a song-mode take is written as a
+  `batch` that is not atomic: if `clip.new` succeeds and a later request
+  fails with a busy engine, the retry next pass makes another clip, leaving
+  an empty, unplaced one (`crates/daemon/src/core/record.rs`,
+  `write_take`). Make `batch` all or nothing, or check room for the whole
+  write first.
+- (2026-10-10, song branch review) a song-mode take's `Write::New` relies
+  on `clip.new` giving the id `make_clip` computed (`next_id`); a partial
+  write that failed shifts it (same fix as the item above).
+- (2026-10-10, song branch review) recording: a note heard in the output
+  latency just after a `transport.locate` jump gets a song position before
+  the new point (the engine's heard position does not know the jump); the
+  restarted take then places it before where it starts.
+- (2026-10-10, song branch review) `song.loop_start` and `song.loop_end`
+  are set separately, so `start >= end` is accepted and the loop silently
+  does nothing; the CLI checks it, the UI inputs and `param.set` do not.
+- (2026-10-10, song branch review) turning `song.mode` on while playing
+  goes on from the locate point plus the time played (the engine's song
+  position counts in pattern mode too), not from the locate point.
+- (2026-10-10, song branch review) `apply_sets`' clip-table check counts a
+  restored instrument's clip 1 twice (conservative: with exactly enough
+  free entries the undo is refused); `validate_project` covers the load's
+  `Locate` and per-instrument select commands only by slack.
+- (2026-10-10, song branch review) a project load resets the song start to
+  bar 1 without a `located` event (clients catch up through `reset`).
+- (2026-10-10, song branch review) `batch` allows `project.save`,
+  `midi.input`, `seat.claim/leave`, and `voice.*`; `BatchParams` docs don't
+  say so.
+- (2026-10-10, song branch review) `apply_clip_sets` renames a clip before
+  `edit_clip`, which can still fail (full queue), leaving the name changed;
+  `new_clip` with `select` sends `track` twice; `ADD_COMMANDS` (96) should
+  be re-checked against the largest instrument plus the track's commands.
+- (2026-10-10, song branch review) recording, smaller cases: the offline
+  recorder skips the live `offset_ms` loop-wrap correction
+  (`record_feedback`); `settle_take` writes a take before a
+  `transport.locate` is validated; a song loop of 2 steps or less is due at
+  its end tick, after it wrapped; if the clip a take made is deleted or
+  moved during the take, later grow writes fail as invalid and drop that
+  pass.
+- (2026-10-10, song branch review) `delete_clip` selects another clip
+  before `set_arrangement`, which can still fail (full queue).
+- (2026-10-10, song branch) `song.loop` is an integer parameter (0 off, 1
+  song, 2 bars); the registry has no enum kind, so `4s params` and generic
+  controls show a number. Add a choice kind with labels.
+- (2026-10-10, song branch) placing clips has no UI until the arrangement
+  view (RFC 0008 phase C); the CLI and RPC place them.
+- (2026-10-10, song branch) the transport row is crowded (record, song, and
+  tempo controls in one line); give it a layout pass with the arrangement
+  view.
 
 ## Mismatches
 

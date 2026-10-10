@@ -14,6 +14,6 @@ pub mod tb303;
 pub mod tr808;
 pub mod voices;
 
-pub use engine::{Command, Engine, Feedback, ParamTarget};
+pub use engine::{Command, Engine, Feedback, ParamTarget, Placement};
 pub use instrument::Instrument;
 pub use rt::{EngineLink, RETURN_CAPACITY, RtEngine};

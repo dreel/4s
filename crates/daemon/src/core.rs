@@ -12,16 +12,17 @@
 mod clips;
 pub(crate) mod record;
 mod seats;
+mod song;
 
 use crate::controller::{BlockInput, BlockMap, Controller, decode_block};
 use crate::hardware::{self, Hardware};
 use crate::journal::{self, Doc, History, Journal};
 use crate::midi::{Midi, MidiMessage, list_ports};
-use clips::ClipState;
+use clips::{ClipSets, TrackState};
 use record::{LiveTake, RecordSettings};
 use seats::{ClientState, Held, InputEffect, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
-use fours_engine::offline::{RenderInstrument, RenderSpec};
+use fours_engine::offline::{RenderClip, RenderInstrument, RenderSpec};
 use fours_engine::params::{self, CHANNEL_PARAMS, NUM_GLOBALS};
 use fours_engine::{Command, Feedback, ParamTarget, RETURN_CAPACITY};
 use fours_protocol::*;
@@ -82,7 +83,14 @@ pub struct Core {
     channels: Vec<ChannelInfo>,
     routes: BTreeMap<String, u32>,
     /// Each instrument's clip (RFC 0007).
-    clips: HashMap<String, ClipState>,
+    /// Each instrument's track: clip pool, selection, arrangement (RFC 0008).
+    tracks: HashMap<String, TrackState>,
+    /// Entries of the engine's clip table in use.
+    clip_used: [bool; MAX_CLIPS],
+    /// Where song mode plays from (`transport.locate`).
+    locate: u32,
+    /// The song tick playing (song mode), while playing.
+    song_pos: Option<u32>,
     slot_used: [bool; MAX_INSTRUMENTS],
     /// Removed instruments not yet handed back by the audio thread.
     in_flight: usize,
@@ -157,7 +165,10 @@ impl Core {
             instruments: Vec::new(),
             channels: Vec::new(),
             routes: BTreeMap::new(),
-            clips: HashMap::new(),
+            tracks: HashMap::new(),
+            clip_used: [false; MAX_CLIPS],
+            locate: 0,
+            song_pos: None,
             slot_used: [false; MAX_INSTRUMENTS],
             in_flight: 0,
             sample_rate: audio.sample_rate,
@@ -264,17 +275,22 @@ impl Core {
         self.global(params::LENGTH) as u32
     }
 
+    /// The host focus's selected clip's own length, if it has one.
+    fn focus_clip_length(&self) -> Option<u32> {
+        self.drum_focus(&self.host_seat).and_then(|id| self.tracks.get(&id).and_then(|t| t.selected().length))
+    }
+
     /// Steps the Block grid shows: the host focus clip's own length (whole
     /// steps, rounded up), else `sequencer.length`.
     fn grid_length(&self) -> u32 {
-        let own = self.drum_focus(&self.host_seat).and_then(|id| self.clips.get(&id).and_then(|c| c.length));
+        let own = self.focus_clip_length();
         own.map(|l| l.div_ceil(TICKS_PER_STEP).min(MAX_STEPS as u32)).unwrap_or_else(|| self.length())
     }
 
     /// The Block grid's playhead: the step of the host's focus clip, which
     /// loops from play at its own length when it has one.
     fn grid_playhead(&self) -> Option<u32> {
-        let own = self.drum_focus(&self.host_seat).and_then(|id| self.clips.get(&id).and_then(|c| c.length));
+        let own = self.focus_clip_length();
         match own {
             Some(l) => self.playhead.map(|_| (self.play_tick % l.max(1) as u64) as u32 / TICKS_PER_STEP),
             None => self.playhead,
@@ -429,6 +445,9 @@ impl Core {
             None
         };
         self.ensure_room(ADD_COMMANDS)?;
+        if self.free_clips() == 0 {
+            return Err(RpcError::failed(format!("at most {MAX_CLIPS} clips in a project; delete some first")));
+        }
 
         let name = check_name(p.name)?.unwrap_or_else(|| match id.strip_prefix(p.kind.default_id()) {
             Some(n) if auto_id && !n.is_empty() => format!("{} {n}", p.kind.label()),
@@ -461,7 +480,7 @@ impl Core {
             slot,
             outputs: instrument::outputs(kind, id, name),
         });
-        self.clips.insert(id.to_string(), ClipState::new(kind));
+        self.add_track_unchecked(id, kind, slot);
     }
 
     /// Send every parameter of an instrument to the engine.
@@ -513,7 +532,7 @@ impl Core {
         self.send(Command::RemoveInstrument { slot: inst.slot });
         self.slot_used[inst.slot as usize] = false;
         self.in_flight += 1;
-        self.clips.remove(&inst.id);
+        self.remove_track(&inst.id);
         // However it goes (removal, undo, redo), a take into it ends.
         if self.take.as_ref().is_some_and(|t| t.instrument == inst.id) {
             self.drop_take(origin);
@@ -737,7 +756,7 @@ impl Core {
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             seq: self.seq,
-            transport: TransportState { playing: self.playing, step: self.playhead },
+            transport: self.transport_state(),
             record: self.record_state(),
             params: self.params.iter().map(|p| (p.info.path.clone(), p.value)).collect(),
             graph: self.graph(),
@@ -746,7 +765,12 @@ impl Core {
                 .iter()
                 .map(|i| InstrumentPattern { instrument: i.id.clone(), pattern: self.pattern_data(&i.id) })
                 .collect(),
-            clips: self.instruments.iter().map(|i| self.clip(&i.id)).collect(),
+            tracks: self.instruments.iter().map(|i| self.track_info(&i.id)).collect(),
+            clips: self
+                .instruments
+                .iter()
+                .flat_map(|i| self.track(&i.id).clips.keys().map(|n| self.clip(&i.id, *n)))
+                .collect(),
             controller: self.controller_state(),
             midi: self.midi.connections(),
             seats: self.seats_state(),
@@ -811,18 +835,28 @@ impl Core {
                     .map(|p| p.value as f32)
                     .collect();
                 let routes = i.outputs.iter().map(|o| self.routes.get(&o.source).map(|n| (n - 1) as u8)).collect();
-                let c = &self.clips[&i.id];
-                RenderInstrument {
-                    id: i.id.clone(),
-                    kind: i.kind,
-                    params,
-                    routes,
-                    clip_length: c.length,
-                    events: c.events.clone(),
-                }
+                let t = self.track(&i.id);
+                let placements = t
+                    .placements
+                    .iter()
+                    .map(|p| fours_engine::Placement {
+                        start: p.start,
+                        length: p.length,
+                        offset: p.offset,
+                        clip: t.clips[&p.clip].engine,
+                    })
+                    .collect();
+                RenderInstrument { id: i.id.clone(), kind: i.kind, params, routes, selected: Some(t.selected().engine), placements }
             })
             .collect();
-        RenderSpec { globals, channels, instruments }
+        // The clips keep their indexes in the engine's table.
+        let clips = self
+            .tracks
+            .values()
+            .flat_map(|t| t.clips.values())
+            .map(|c| RenderClip { index: c.engine, length: c.length, events: c.events.clone() })
+            .collect();
+        RenderSpec { globals, channels, instruments, clips, start: self.locate }
     }
 
     // ---- parameters --------------------------------------------------------
@@ -854,6 +888,15 @@ impl Core {
 
     // ---- transport ---------------------------------------------------------
 
+    fn transport_state(&self) -> TransportState {
+        TransportState {
+            playing: self.playing,
+            step: self.playhead,
+            tick: self.song_pos.filter(|_| self.playing),
+            start: self.locate,
+        }
+    }
+
     fn play(&mut self, origin: &str) -> TransportState {
         self.start(origin, 0)
     }
@@ -866,11 +909,12 @@ impl Core {
             Err(_) => tracing::warn!("engine command queue full; dropped Play"),
         }
         self.play_tick = 0;
+        self.song_pos = None;
         if !self.playing {
             self.playing = true;
             self.emit(origin, Event::Transport { playing: true });
         }
-        TransportState { playing: true, step: self.playhead }
+        self.transport_state()
     }
 
     fn stop(&mut self, origin: &str) -> TransportState {
@@ -883,10 +927,11 @@ impl Core {
         if self.playing {
             self.playing = false;
             self.playhead = None;
+            self.song_pos = None;
             self.emit(origin, Event::Transport { playing: false });
             self.refresh_controller(origin, false);
         }
-        TransportState { playing: false, step: None }
+        self.transport_state()
     }
 
     // ---- held notes ----------------------------------------------------------
@@ -1183,19 +1228,20 @@ impl Core {
 
     pub fn handle_feedback(&mut self, fb: Feedback) {
         match fb {
-            Feedback::Step { step, tick, time } => {
+            Feedback::Step { step, tick, pos, time } => {
                 if !self.playing || self.starting > 0 {
                     return;
                 }
                 self.play_tick = tick;
-                self.record_step(tick);
+                self.song_pos = self.song_mode().then_some(pos as u32);
+                self.record_step(tick, pos);
                 self.playhead = Some(step);
                 if self.controller.follow
                     && let Some(at) = self.grid_playhead()
                 {
                     self.controller.page = at / crate::controller::GRID as u32;
                 }
-                self.emit("engine", Event::Playhead { step, time });
+                self.emit("engine", Event::Playhead { step, tick: pos as u32, time });
                 self.refresh_controller("engine", false);
             }
             Feedback::Trigger { slot, voice, note, velocity, time, .. } => {
@@ -1205,10 +1251,17 @@ impl Core {
                     self.emit("engine", Event::Trigger { instrument, voice, note, velocity, time });
                 }
             }
-            Feedback::Live { slot, note, velocity, on, gate, tick: Some(tick), .. } if self.starting == 0 => {
-                self.record_note(slot, note, velocity, on, gate, tick);
+            Feedback::Live { slot, note, velocity, on, gate, tick: Some(tick), pos: Some(pos), .. } if self.starting == 0 => {
+                self.record_note(slot, note, velocity, on, gate, tick, pos);
             }
             Feedback::Started { .. } => self.starting = self.starting.saturating_sub(1),
+            // Song mode without a loop stops at the song's end, unless
+            // recording (which can go on past it, making the song longer).
+            Feedback::SongEnd { .. } => {
+                if self.playing && self.starting == 0 && self.take.is_none() {
+                    self.stop("engine");
+                }
+            }
             Feedback::Live { .. } | Feedback::Stopped { .. } => {}
             Feedback::Meters { channels, master } => {
                 let levels: Vec<ChannelLevel> = self
@@ -1253,18 +1306,22 @@ impl Core {
 
     fn to_project_file(&self) -> ProjectFile {
         let length = self.length() as usize;
-        let (mut patterns, mut clips) = (BTreeMap::new(), BTreeMap::new());
-        for i in &self.instruments {
-            match clips::project_entry(&self.clips[&i.id], length) {
-                (Some(p), _) => {
-                    patterns.insert(i.id.clone(), p);
-                }
-                (_, Some(c)) => {
-                    clips.insert(i.id.clone(), c);
-                }
-                _ => {}
-            }
-        }
+        let tracks = self
+            .instruments
+            .iter()
+            .filter_map(|i| {
+                let t = self.track(&i.id);
+                let clips: BTreeMap<u32, ProjectClip> =
+                    t.clips.iter().map(|(n, c)| (*n, clips::project_entry(i.kind, *n, c, length))).collect();
+                // A new instrument's track (one empty clip) is left out.
+                let untouched = t.selected == 1
+                    && t.placements.is_empty()
+                    && clips.len() == 1
+                    && clips.get(&1).is_some_and(|c| *c == ProjectClip::default());
+                (!untouched)
+                    .then(|| (i.id.clone(), ProjectTrack { selected: t.selected, clips, arrangement: t.placements.clone() }))
+            })
+            .collect();
         ProjectFile {
             format_version: PROJECT_FORMAT_VERSION,
             instruments: self
@@ -1275,8 +1332,7 @@ impl Core {
             channels: self.channels.clone(),
             routes: self.routes.clone(),
             params: self.params.iter().map(|p| (p.info.path.clone(), p.value)).collect(),
-            patterns,
-            clips,
+            tracks,
             controller: ProjectController { follow: self.controller.follow },
             // Seats with nothing set are left out; they come back by
             // themselves for whoever uses the project.
@@ -1329,17 +1385,29 @@ impl Core {
         // routes, and globals.
         let instrument_params: usize =
             file.instruments.iter().map(|i| instrument::params(i.kind, &i.id).len()).sum();
-        let events: usize = file
-            .instruments
-            .iter()
-            .filter_map(|i| clips::from_project(i.kind, file.patterns.get(&i.id), file.clips.get(&i.id)).ok())
-            .map(|(_, e)| e.len())
-            .sum();
+        let mut clip_count = 0;
+        let mut track_commands = 0;
+        for i in &file.instruments {
+            match file.tracks.get(&i.id).map(|t| clips::load_track(i.kind, t)) {
+                Some(Ok(t)) => {
+                    clip_count += t.clips.len();
+                    track_commands += t.clips.iter().map(|c| c.3.len() + 3).sum::<usize>() + t.placements.len() + 2;
+                }
+                // Loaded as an empty track (with a warning).
+                _ => {
+                    clip_count += 1;
+                    track_commands += 3;
+                }
+            }
+        }
+        if clip_count > MAX_CLIPS {
+            return Err(RpcError::invalid(format!("project has more than {MAX_CLIPS} clips")));
+        }
         let needed = self.instruments.len()
             + self.channels.len()
             + file.channels.len() * (1 + CHANNEL_PARAMS)
             + file.instruments.len() * 2
-            + events
+            + track_commands
             + instrument_params
             + file.routes.len()
             + NUM_GLOBALS;
@@ -1365,7 +1433,8 @@ impl Core {
         self.held.clear();
         self.pickups.clear();
         self.routes.clear();
-        self.clips.clear();
+        self.tracks.clear();
+        self.clip_used = [false; MAX_CLIPS];
         self.params.clear();
 
         // Build.
@@ -1394,29 +1463,24 @@ impl Core {
         for c in cmds {
             self.send(c);
         }
-        for id in file.patterns.keys().chain(file.clips.keys()) {
-            if !self.clips.contains_key(id) {
-                warnings.push(format!("ignored the sequence of '{id}' (no such instrument)"));
+        for id in file.tracks.keys() {
+            if !self.tracks.contains_key(id) {
+                warnings.push(format!("ignored the track of '{id}' (no such instrument)"));
             }
         }
         for i in &file.instruments {
-            let (pattern, clip) = (file.patterns.get(&i.id), file.clips.get(&i.id));
-            match clips::from_project(i.kind, pattern, clip) {
-                Ok((length, events)) => {
-                    let slot = self.slot_of(&i.id).unwrap_or_default();
-                    for e in &events {
-                        self.send(Command::AddEvent { slot, event: *e });
+            match file.tracks.get(&i.id).map(|t| clips::load_track(i.kind, t)) {
+                None => {}
+                Some(Ok(t)) => {
+                    if let Err(e) = self.load_track(&i.id, t) {
+                        warnings.push(format!("{}: {}", i.id, e.message));
                     }
-                    if length.is_some() {
-                        self.send(Command::SetClipLength { slot, length });
-                    }
-                    let c = self.clips.get_mut(&i.id).expect("just added");
-                    c.events = events;
-                    c.length = length;
                 }
-                Err(e) => warnings.push(format!("{}: {e}", i.id)),
+                Some(Err(e)) => warnings.push(format!("{}: {e}", i.id)),
             }
         }
+        self.locate = 0;
+        self.send(Command::Locate { tick: 0 });
 
         self.controller.follow = file.controller.follow;
         self.controller.page = 0;
@@ -1638,9 +1702,7 @@ impl Core {
         let mut order: Option<Vec<u32>> = None;
         let mut routes: Vec<(String, Option<u32>)> = Vec::new();
         let mut params: Vec<(String, Option<f64>)> = Vec::new();
-        // Per instrument: (tick, note, Some((len, velocity)) or None to remove).
-        let mut events: BTreeMap<String, Vec<(u32, u8, Option<(u32, u8)>)>> = BTreeMap::new();
-        let mut lengths: Vec<(String, Option<u32>)> = Vec::new();
+        let mut clip_sets = ClipSets::default();
         let mut seats: Vec<(String, SeatConfig)> = Vec::new();
         let mut skipped = Vec::new();
         for (key, v) in sets {
@@ -1659,24 +1721,7 @@ impl Core {
                 "channels" => serde_json::from_value(v.clone()).ok().map(|o| order = Some(o)),
                 "route" => Some(routes.push((rest.to_string(), v.as_u64().map(|n| n as u32)))),
                 "param" => Some(params.push((rest.to_string(), v.as_f64()))),
-                "event" => {
-                    // `<id>.<tick>.<note>`; ids have no dots.
-                    let mut parts = rest.splitn(3, '.');
-                    match (parts.next(), parts.next().and_then(|t| t.parse().ok()), parts.next().and_then(|n| n.parse().ok())) {
-                        (Some(id), Some(tick), Some(note)) => {
-                            let val = match v {
-                                Value::Null => None,
-                                v => Some((
-                                    v.get("len").and_then(Value::as_u64).unwrap_or(TICKS_PER_STEP as u64) as u32,
-                                    v.get("velocity").and_then(Value::as_u64).unwrap_or(VEL_ON as u64) as u8,
-                                )),
-                            };
-                            Some(events.entry(id.to_string()).or_default().push((tick, note, val)))
-                        }
-                        _ => None,
-                    }
-                }
-                "clip" => Some(lengths.push((rest.to_string(), v.as_u64().map(|l| l as u32)))),
+                "clip" | "event" | "selected" | "place" => clip_sets.parse(kind, rest, v),
                 "seat" => match v {
                     Value::Null => Some(seats.push((rest.to_string(), SeatConfig::default()))),
                     v => serde_json::from_value(v.clone()).ok().map(|c| seats.push((rest.to_string(), c))),
@@ -1697,8 +1742,7 @@ impl Core {
         let owned = |key: &str| removing.iter().any(|id| key == id || key.starts_with(&format!("{id}.")));
         routes.retain(|(s, _)| !owned(s));
         params.retain(|(p, _)| !owned(p));
-        events.retain(|id, _| !owned(id));
-        lengths.retain(|(id, _)| !owned(id));
+        clip_sets.retain_not(&removing);
         let adding: Vec<&(String, Option<(InstrumentType, String)>)> = instruments
             .iter()
             .filter(|(id, v)| v.is_some() && !self.instruments.iter().any(|i| &i.id == id))
@@ -1706,6 +1750,16 @@ impl Core {
         let free = self.slot_used.iter().filter(|u| !**u).count();
         if adding.len() > free {
             return Err(RpcError::failed(format!("at most {MAX_INSTRUMENTS} instruments")));
+        }
+        // Each instrument it makes has a clip, and so does each clip it
+        // brings back.
+        let new_clips = clip_sets
+            .clips
+            .iter()
+            .filter(|((id, n), v)| v.is_some() && !self.tracks.get(id).is_some_and(|t| t.clips.contains_key(n)))
+            .count();
+        if adding.len() + new_clips > self.free_clips() {
+            return Err(RpcError::failed(format!("at most {MAX_CLIPS} clips in a project")));
         }
         if self.in_flight + removing.len() > RETURN_CAPACITY {
             return Err(RpcError::failed(format!(
@@ -1723,8 +1777,7 @@ impl Core {
                 + channels.len()
                 + routes.len()
                 + params.len()
-                + events.values().map(Vec::len).sum::<usize>()
-                + lengths.len(),
+                + clip_sets.commands(),
         )?;
 
         let mut graph = false;
@@ -1792,7 +1845,7 @@ impl Core {
                 None => skipped.push(format!("param:{path}")),
             }
         }
-        skipped.extend(self.apply_clip_sets(events, lengths, origin));
+        skipped.extend(self.apply_clip_sets(clip_sets, &added, origin));
         if !seats.is_empty() {
             for (name, config) in seats {
                 // A session-only seat of the same name is someone else's:
@@ -1966,6 +2019,10 @@ impl Core {
             Ok(r) => return r,
             Err(req) => req,
         };
+        let req = match self.handle_song(req, origin, client) {
+            Ok(r) => return r,
+            Err(req) => req,
+        };
         match req {
             Request::StateGet(_) => ok(self.snapshot()),
             Request::ParamList(p) => {
@@ -1986,6 +2043,20 @@ impl Core {
             Request::TransportPlay(_) => ok(self.play(origin)),
             Request::TransportStop(_) => ok(self.stop(origin)),
             Request::TransportRecord(p) => ok(self.transport_record(p, origin, client, user)?),
+            Request::Batch(p) => {
+                let mut results = Vec::new();
+                for (i, v) in p.requests.into_iter().enumerate() {
+                    let method = v.get("method").and_then(Value::as_str).unwrap_or_default().to_string();
+                    let req = parse_request(&method, v.get("params").cloned())
+                        .map_err(|e| RpcError::invalid(format!("batch request {}: {e}", i + 1)))?;
+                    if !batchable(&req) {
+                        return Err(RpcError::invalid(format!("batch request {}: '{method}' cannot be in a batch", i + 1)));
+                    }
+                    let r = self.dispatch(req, origin, client, user);
+                    results.push(r.map_err(|e| RpcError { message: format!("batch request {} ({method}): {}", i + 1, e.message), ..e })?);
+                }
+                ok(BatchResult { results })
+            }
             Request::InstrumentTypes(_) => ok(self.instrument_types()),
             Request::InstrumentList(_) => ok(InstrumentListResult { instruments: self.graph().instruments }),
             Request::InstrumentAdd(p) => ok(self.instrument_add(p, origin)?),
@@ -2139,7 +2210,17 @@ impl Core {
             | Request::SeatLearnCc(_)
             | Request::SeatFollowKnobs(_)
             | Request::SeatApplyLayout(_) => unreachable!("handled by handle_seat"),
-            Request::ClipGet(_)
+            Request::SongGet(_)
+            | Request::SongPlace(_)
+            | Request::SongRemove(_)
+            | Request::SongMove(_)
+            | Request::TransportLocate(_) => unreachable!("handled by handle_song"),
+            Request::ClipNew(_)
+            | Request::ClipDuplicate(_)
+            | Request::ClipRename(_)
+            | Request::ClipDelete(_)
+            | Request::ClipSelect(_)
+            | Request::ClipGet(_)
             | Request::ClipSet(_)
             | Request::ClipAdd(_)
             | Request::ClipRemove(_)
@@ -2151,6 +2232,37 @@ impl Core {
     }
 }
 
+/// Requests a `batch` can hold: not another batch, nor what a connection,
+/// the journal, a project load, or the transport (which settles a running
+/// take before it is journaled) handles on its own.
+fn batchable(req: &Request) -> bool {
+    use Request::*;
+    !matches!(
+        req,
+        Batch(_)
+            | Hello(_)
+            | EventsSubscribe(_)
+            | EventsUnsubscribe(_)
+            | RenderOffline(_)
+            | DaemonInfo(_)
+            | DaemonShutdown(_)
+            | HistoryUndo(_)
+            | HistoryRedo(_)
+            | HistoryGet(_)
+            | JournalGet(_)
+            | JournalExport(_)
+            | ProjectNew(_)
+            | ProjectLoad(_)
+            | ProjectImport(_)
+            | TransportRecord(_)
+            | TransportPlay(_)
+            | TransportStop(_)
+            | TransportLocate(_)
+            // Journaled with the ports it applies, filled in by `handle`.
+            | SeatApplyLayout(_)
+    )
+}
+
 /// Requests that cannot change state, so are not journaled. An exhaustive
 /// match: a new method must be classified here.
 fn read_only(req: &Request) -> bool {
@@ -2159,8 +2271,10 @@ fn read_only(req: &Request) -> bool {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
-        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) => true,
-        ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
+        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) => true,
+        ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
+        | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | SongPlace(_) | SongRemove(_) | SongMove(_)
+        | Batch(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
         | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
         | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
         | PatternSetNote(_) | VoiceTrigger(_) | VoiceNoteOn(_) | VoiceNoteOff(_) | ControllerPress(_)
@@ -2186,6 +2300,7 @@ impl Core {
                 Request::TransportPlay(_)
                     | Request::TransportStop(_)
                     | Request::TransportRecord(_)
+                    | Request::TransportLocate(_)
                     | Request::VoiceTrigger(_)
                     | Request::VoiceNoteOn(_)
                     | Request::VoiceNoteOff(_)
@@ -2223,8 +2338,7 @@ fn default_project() -> ProjectFile {
         channels: vec![ChannelInfo { n: 1, name: "Drums".into() }],
         routes: BTreeMap::from([("drums".to_string(), 1)]),
         params: BTreeMap::new(),
-        patterns: BTreeMap::new(),
-        clips: BTreeMap::new(),
+        tracks: BTreeMap::new(),
         controller: ProjectController { follow: true },
         seats: BTreeMap::new(),
     }

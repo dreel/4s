@@ -2,9 +2,13 @@
 import type { ClipEvent } from "./ClipEvent";
 
 /**
- * An instrument's clip.
+ * A clip in an instrument's pool.
  */
 export type Clip = { instrument: string, 
+/**
+ * Its id in the instrument's pool (1, 2, ...).
+ */
+id: number, name: string, 
 /**
  * Length in ticks; `None` follows `sequencer.length`.
  */

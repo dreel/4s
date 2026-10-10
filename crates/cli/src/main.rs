@@ -201,6 +201,10 @@ enum Cmd {
         out: Option<String>,
         #[arg(long)]
         sample_rate: Option<u32>,
+        /// In song mode, the bar (or bar.beat) to start from (default: the
+        /// locate point).
+        #[arg(long)]
+        from: Option<String>,
         /// Include the metronome click.
         #[arg(long)]
         metronome: bool,
@@ -236,9 +240,24 @@ enum Cmd {
     /// Show or edit an instrument's clip: timed note events (RFC 0007).
     /// Ticks: 96 per quarter note, 24 per step. `4s clip` shows your focus.
     Clip {
+        /// Which clip in the instrument's pool (default: its selected clip).
+        #[arg(long, global = true)]
+        clip: Option<u32>,
         #[command(subcommand)]
         cmd: Option<ClipCmd>,
     },
+    /// The song (RFC 0008): each track's arrangement of clips. `4s song`
+    /// shows it. Positions are bars, or bar.beat (`3.2`), from 1.
+    Song {
+        #[command(subcommand)]
+        cmd: Option<SongCmd>,
+    },
+    /// Where song mode plays from, e.g. `4s locate 5` (bar 5) or `5.3`.
+    Locate { at: String },
+    /// Several requests as one journal entry and undo step: a JSON array
+    /// of `{"method": ..., "params": ...}`, e.g.
+    /// `4s batch '[{"method":"tempo"...}]'` (or `-` to read it from stdin).
+    Batch { requests: String },
     /// Seats: each performer's focus, bindings, and CC maps (RFC 0007).
     /// `4s seat` lists them.
     Seat {
@@ -582,9 +601,66 @@ fn device_profile(p: ProfileArg) -> DeviceProfile {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+enum SongCmd {
+    /// Show every track's arrangement.
+    Show,
+    /// Place a clip (default: the selected one) on a track at a bar, e.g.
+    /// `4s song place drums --at 1 --bars 4`; it cuts what it overlaps.
+    Place {
+        instrument: String,
+        #[arg(long)]
+        at: String,
+        /// Bars long (default: the clip's length).
+        #[arg(long)]
+        bars: Option<f64>,
+        /// Ticks into the clip it starts at.
+        #[arg(long)]
+        offset: Option<u32>,
+        /// Which clip (default: the selected one).
+        #[arg(long)]
+        clip: Option<u32>,
+    },
+    /// Remove the placement that starts at a bar.
+    Rm { instrument: String, at: String },
+    /// Move the placement that starts at a bar to another.
+    Mv { instrument: String, at: String, to: String },
+    /// Song mode plays the arrangement; pattern mode loops each track's
+    /// selected clip.
+    Mode { mode: String },
+    /// What song mode loops: `song`, `off` (stop at the end), or bars, e.g.
+    /// `4s song loop 2 5` for bars 2 to 5 (playing from past bar 5 goes on
+    /// without looping).
+    Loop {
+        what: String,
+        to: Option<u32>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
 enum ClipCmd {
     /// Show a clip (default: your focus).
     Show { instrument: Option<String> },
+    /// The clips in an instrument's pool (default: every instrument's).
+    List { instrument: Option<String> },
+    /// A new empty clip, selected unless --keep.
+    New {
+        instrument: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        /// Steps (default: follow sequencer.length).
+        #[arg(long)]
+        steps: Option<u32>,
+        /// Keep the selected clip selected.
+        #[arg(long)]
+        keep: bool,
+    },
+    /// Copy a clip into a new one, and select it.
+    Dup { instrument: Option<String> },
+    Rename { instrument: String, name: String },
+    /// Delete a clip and its placements.
+    Del { instrument: String },
+    /// Select the clip pattern mode plays and the step editors edit.
+    Select { instrument: String, id: u32 },
     /// Replace a clip's events: `tick:note[:len[:vel]]` tokens, e.g.
     /// `4s clip set bass "0:C2:12 24:D#2:25:127 36:G1"`.
     Set {
@@ -801,6 +877,73 @@ fn grid_arg(s: &str) -> Result<Option<u32>> {
     Ok(Some(TICKS_PER_BAR / d))
 }
 
+/// A song position: bar (`3`) or bar.beat (`3.2`), from 1, as ticks.
+fn pos_arg(s: &str) -> Result<u32> {
+    let bad = || anyhow!("invalid position '{s}' (a bar, or bar.beat, from 1: `3`, `3.2`)");
+    let (bar, beat) = match s.split_once('.') {
+        Some((b, t)) => (b.parse::<u32>().map_err(|_| bad())?, t.parse::<u32>().map_err(|_| bad())?),
+        None => (s.parse::<u32>().map_err(|_| bad())?, 1),
+    };
+    if bar == 0 || bar > 999 || !(1..=4).contains(&beat) {
+        return Err(anyhow!("invalid position '{s}' (bars 1..999, beats 1..4: `3`, `3.2`)"));
+    }
+    Ok((bar - 1) * TICKS_PER_BAR + (beat - 1) * PPQ)
+}
+
+/// A song tick as bar.beat (`3.2`), with any leftover ticks (`3.2+12`).
+fn fmt_pos(tick: u32) -> String {
+    let (bar, beat, rest) = (tick / TICKS_PER_BAR + 1, tick % TICKS_PER_BAR / PPQ + 1, tick % PPQ);
+    match (beat, rest) {
+        (1, 0) => format!("{bar}"),
+        (_, 0) => format!("{bar}.{beat}"),
+        _ => format!("{bar}.{beat}+{rest}"),
+    }
+}
+
+/// A length in ticks as bars (`4 bars`), else ticks.
+fn fmt_bars(ticks: u32) -> String {
+    if ticks % TICKS_PER_BAR == 0 {
+        let n = ticks / TICKS_PER_BAR;
+        format!("{n} bar{}", if n == 1 { "" } else { "s" })
+    } else {
+        format!("{ticks} ticks")
+    }
+}
+
+fn print_track(t: &TrackInfo) {
+    let clips: Vec<String> = t
+        .clips
+        .iter()
+        .map(|c| {
+            let sel = if c.id == t.selected { "*" } else { "" };
+            if c.name == c.id.to_string() { format!("{sel}{}", c.id) } else { format!("{sel}{} \"{}\"", c.id, c.name) }
+        })
+        .collect();
+    println!("{}: clips {}", t.instrument, clips.join(", "));
+    for p in &t.arrangement {
+        let name = t.clips.iter().find(|c| c.id == p.clip).map(|c| c.name.as_str()).unwrap_or("?");
+        let offset = if p.offset > 0 { format!(" from tick {}", p.offset) } else { String::new() };
+        println!("  bar {:<7} clip {} ({name}), {}{offset}", fmt_pos(p.start), p.clip, fmt_bars(p.length));
+    }
+}
+
+fn print_song(s: &SongInfo, snap: Option<&Snapshot>) {
+    if let Some(snap) = snap {
+        let p = |k: &str| snap.params.get(k).copied().unwrap_or(0.0);
+        let mode = if p("song.mode") >= 0.5 { "song" } else { "pattern" };
+        let looping = match p("song.loop") as i32 {
+            0 => "off".to_string(),
+            1 => "the song".to_string(),
+            _ => format!("bars {} to {}", p("song.loop_start") as u32 + 1, p("song.loop_end") as u32),
+        };
+        println!("mode {mode}, loop {looping}, plays from bar {}", fmt_pos(snap.transport.start));
+    }
+    println!("song: {}", if s.length == 0 { "empty".to_string() } else { fmt_bars(s.length.div_ceil(TICKS_PER_BAR) * TICKS_PER_BAR) });
+    for t in &s.tracks {
+        print_track(t);
+    }
+}
+
 /// `secs:note[:dur[:vel]]` tokens: notes to play into a render.
 fn parse_input(s: &str) -> Result<Vec<RenderNote>> {
     s.split_whitespace()
@@ -993,13 +1136,14 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             }),
             Request::EventsUnsubscribe(e),
         ],
-        Cmd::Render { bars, tail, out, sample_rate, metronome, input, record, to, settings } => {
+        Cmd::Render { bars, tail, out, sample_rate, from, metronome, input, record, to, settings } => {
             let record = (*record || to.is_some()).then(|| settings.params(None, to.clone())).transpose()?;
             vec![Request::RenderOffline(RenderParams {
                 bars: Some(*bars),
                 tail: *tail,
                 path: out.clone(),
                 sample_rate: *sample_rate,
+                from: from.as_deref().map(pos_arg).transpose()?,
                 metronome: metronome.then_some(true),
                 input: input.as_deref().map(parse_input).transpose()?,
                 record,
@@ -1072,14 +1216,31 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 follow,
             })],
         },
-        Cmd::Clip { cmd } => vec![match cmd.clone().unwrap_or(ClipCmd::Show { instrument: None }) {
-            ClipCmd::Show { instrument } => Request::ClipGet(ClipGetParams { instrument }),
+        Cmd::Clip { clip, cmd } => vec![match cmd.clone().unwrap_or(ClipCmd::Show { instrument: None }) {
+            ClipCmd::Show { instrument } => Request::ClipGet(ClipGetParams { instrument, clip: *clip }),
+            ClipCmd::List { .. } => Request::SongGet(e),
+            ClipCmd::New { instrument, name, steps, keep } => Request::ClipNew(ClipNewParams {
+                instrument,
+                name,
+                length: steps.map(|s| s * TICKS_PER_STEP),
+                select: Some(!keep),
+            }),
+            ClipCmd::Dup { instrument } => Request::ClipDuplicate(ClipRefParams { instrument, clip: *clip }),
+            ClipCmd::Rename { instrument, name } => {
+                Request::ClipRename(ClipRenameParams { instrument: Some(instrument), clip: *clip, name })
+            }
+            ClipCmd::Del { instrument } => Request::ClipDelete(ClipRefParams { instrument: Some(instrument), clip: *clip }),
+            ClipCmd::Select { instrument, id } => {
+                Request::ClipSelect(ClipRefParams { instrument: Some(instrument), clip: Some(id) })
+            }
             ClipCmd::Set { instrument, events } => Request::ClipSet(ClipEventsParams {
                 instrument: Some(instrument),
+                clip: *clip,
                 events: parse_events(&events).map_err(|e| anyhow!(e))?,
             }),
             ClipCmd::Add { instrument, tick, note, len, vel } => Request::ClipAdd(ClipEventsParams {
                 instrument: Some(instrument),
+                clip: *clip,
                 events: vec![ClipEvent {
                     tick,
                     note: note_arg(&note)?,
@@ -1089,10 +1250,12 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             }),
             ClipCmd::Rm { instrument, tick, note } => Request::ClipRemove(ClipRemoveParams {
                 instrument: Some(instrument),
+                clip: *clip,
                 events: vec![EventKey { tick, note: note_arg(&note)? }],
             }),
             ClipCmd::Update { instrument, rm, add } => Request::ClipUpdate(ClipUpdateParams {
                 instrument: Some(instrument),
+                clip: *clip,
                 remove: rm
                     .as_deref()
                     .unwrap_or_default()
@@ -1110,6 +1273,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             }),
             ClipCmd::Length { instrument, steps } => Request::ClipLength(ClipLengthParams {
                 instrument: Some(instrument),
+                clip: *clip,
                 length: match steps.as_str() {
                     "auto" => None,
                     n => match n.parse::<u32>() {
@@ -1118,13 +1282,72 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                     },
                 },
             }),
-            ClipCmd::Clear { instrument } => Request::ClipClear(ClipGetParams { instrument: Some(instrument) }),
+            ClipCmd::Clear { instrument } => Request::ClipClear(ClipGetParams { instrument: Some(instrument), clip: *clip }),
             ClipCmd::Quantize { instrument, grid, strength } => Request::ClipQuantize(ClipQuantizeParams {
                 instrument: Some(instrument),
+                clip: *clip,
                 grid: grid_arg(&grid)?.ok_or_else(|| anyhow!("quantize needs a grid"))?,
                 strength: strength.as_deref().map(|v| parse_value(v).map(|v| v as f32)).transpose()?,
             }),
         }],
+        Cmd::Song { cmd } => match cmd.clone().unwrap_or(SongCmd::Show) {
+            SongCmd::Show => vec![Request::StateGet(e.clone()), Request::SongGet(e)],
+            SongCmd::Place { instrument, at, bars, offset, clip } => vec![Request::SongPlace(SongPlaceParams {
+                instrument: Some(instrument),
+                clip,
+                start: pos_arg(&at)?,
+                length: bars.map(|b| (b * TICKS_PER_BAR as f64).round() as u32),
+                offset,
+            })],
+            SongCmd::Rm { instrument, at } => {
+                vec![Request::SongRemove(SongRemoveParams { instrument: Some(instrument), start: pos_arg(&at)? })]
+            }
+            SongCmd::Mv { instrument, at, to } => vec![Request::SongMove(SongMoveParams {
+                instrument: Some(instrument),
+                start: pos_arg(&at)?,
+                to: pos_arg(&to)?,
+            })],
+            SongCmd::Mode { mode } => {
+                let value = match mode.as_str() {
+                    "song" | "on" => 1.0,
+                    "pattern" | "off" => 0.0,
+                    _ => bail!("mode is `song` or `pattern`"),
+                };
+                vec![
+                    Request::ParamSet(ParamSetParams { path: "song.mode".into(), value }),
+                    Request::StateGet(e.clone()),
+                    Request::SongGet(e),
+                ]
+            }
+            SongCmd::Loop { what, to } => {
+                let set = |path: &str, value: f64| Request::ParamSet(ParamSetParams { path: path.into(), value });
+                let mut reqs = match (what.as_str(), to) {
+                    ("off", None) => vec![set("song.loop", 0.0)],
+                    ("song", None) => vec![set("song.loop", 1.0)],
+                    (from, Some(to)) => {
+                        let from: u32 = from.parse().map_err(|_| anyhow!("loop `off`, `song`, or <from bar> <to bar>"))?;
+                        if from == 0 || to < from {
+                            bail!("bars count from 1, and the loop ends at or after it starts");
+                        }
+                        // One undo step for the range.
+                        let sets = [set("song.loop_start", (from - 1) as f64), set("song.loop_end", to as f64), set("song.loop", 2.0)];
+                        let requests = sets.iter().map(serde_json::to_value).collect::<Result<_, _>>()?;
+                        vec![Request::Batch(BatchParams { requests })]
+                    }
+                    _ => bail!("loop `off`, `song`, or <from bar> <to bar>"),
+                };
+                reqs.push(Request::StateGet(e.clone()));
+                reqs.push(Request::SongGet(e));
+                reqs
+            }
+        },
+        Cmd::Locate { at } => vec![Request::TransportLocate(LocateParams { tick: pos_arg(at)? })],
+        Cmd::Batch { requests } => {
+            let text = if requests == "-" { std::io::read_to_string(std::io::stdin())? } else { requests.clone() };
+            let requests: Vec<serde_json::Value> =
+                serde_json::from_str(&text).map_err(|e| anyhow!("batch: a JSON array of requests: {e}"))?;
+            vec![Request::Batch(BatchParams { requests })]
+        }
         Cmd::Seat { cmd } => vec![match cmd.clone().unwrap_or(SeatCmd::List) {
             SeatCmd::List => Request::SeatList(e),
             SeatCmd::Claim { name } => Request::SeatClaim(SeatNameParams { name }),
@@ -1394,7 +1617,8 @@ fn print_clip(c: &Clip) {
         Some(l) => format!("{l} ticks"),
         None => "sequencer.length".into(),
     };
-    println!("{}: {} notes, length {length}", c.instrument, c.events.len());
+    let name = if c.name == c.id.to_string() { String::new() } else { format!(" \"{}\"", c.name) };
+    println!("{} clip {}{name}: {} notes, length {length}", c.instrument, c.id, c.events.len());
     for e in &c.events {
         let (step, sub) = (e.tick / TICKS_PER_STEP + 1, e.tick % TICKS_PER_STEP);
         let at = if sub == 0 { format!("step {step}") } else { format!("step {step} +{sub}") };
@@ -1490,7 +1714,10 @@ fn print_event(e: &EventEnvelope, json: bool) {
             Some(i) if state.recording => format!("recording into {i}"),
             _ => "not recording".into(),
         },
-        Event::Playhead { step, time } => format!("step {} @ {time:.3}s", step + 1),
+        Event::Playhead { step, tick, time } => format!("step {} (bar {}) @ {time:.3}s", step + 1, fmt_pos(*tick)),
+        Event::Track { track } => format!("{}: {} clips, {} placed", track.instrument, track.clips.len(), track.arrangement.len()),
+        Event::ClipDeleted { instrument, id } => format!("{instrument} clip {id} deleted"),
+        Event::Located { tick } => format!("song plays from bar {}", fmt_pos(*tick)),
         Event::Trigger { instrument, voice, note, velocity, time } => {
             let what = match (voice, note) {
                 (Some(v), _) => v.id().to_string(),
@@ -1722,7 +1949,7 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             );
             let onsets: Vec<String> = r.onsets.iter().map(|t| format!("{t:.3}")).collect();
             println!("onsets (s): {}", onsets.join(" "));
-            if let Some(c) = &r.recorded {
+            for c in &r.recorded {
                 print!("recorded ");
                 print_clip(c);
             }
@@ -1788,7 +2015,31 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             println!("devices play in seat: {}{pinned}", r.seat);
         }
         Cmd::Controller { .. } => print_leds(&serde_json::from_value(last)?),
+        Cmd::Clip { cmd: Some(ClipCmd::List { instrument }), .. } => {
+            let song: SongInfo = serde_json::from_value(last)?;
+            for t in song.tracks.iter().filter(|t| instrument.as_deref().is_none_or(|w| w == t.instrument)) {
+                print_track(t);
+            }
+        }
+        Cmd::Clip { cmd: Some(ClipCmd::Del { .. } | ClipCmd::Select { .. }), .. } => {
+            print_track(&serde_json::from_value(last)?)
+        }
         Cmd::Clip { .. } => print_clip(&serde_json::from_value(last)?),
+        Cmd::Song { cmd: Some(SongCmd::Place { .. } | SongCmd::Rm { .. } | SongCmd::Mv { .. }) } => {
+            print_track(&serde_json::from_value(last)?)
+        }
+        Cmd::Song { .. } => {
+            let snap: Snapshot = serde_json::from_value(results[results.len() - 2].clone())?;
+            print_song(&serde_json::from_value(last)?, Some(&snap));
+        }
+        Cmd::Locate { .. } => {
+            let t: TransportState = serde_json::from_value(last)?;
+            println!("song plays from bar {}", fmt_pos(t.start));
+        }
+        Cmd::Batch { .. } => {
+            let r: BatchResult = serde_json::from_value(last)?;
+            println!("{} requests applied", r.results.len());
+        }
         Cmd::Seat { .. } => {
             let r: SeatListResult = serde_json::from_value(last)?;
             if r.seats.is_empty() {
@@ -2187,7 +2438,10 @@ mod tests {
             "cc unmap knobs 21", "cc learn bass.cutoff", "knobs page decay", "knobs follow knobs 21 22",
             "daemon status", "daemon stop", "undo", "redo", "history", "journal",
             "clip", "clip show bass", "clip set bass 0:C2:12", "clip add bass 36 C3 --len 6", "clip rm bass 36 C3",
-            "clip length bass 12", "clip clear bass", "clip quantize bass 1/8", "clip update bass --rm 0:C2", "record", "record --off",
+            "clip length bass 12", "clip clear bass", "clip quantize bass 1/8", "clip update bass --rm 0:C2", "clip new bass", "clip dup bass",
+            "clip rename bass B --clip 2", "clip del bass --clip 2", "clip select bass 1", "clip list", "song",
+            "song place drums --at 1 --bars 4", "song rm drums 1", "song mv drums 1 3", "locate 5",
+            "batch []", "record", "record --off",
             "metronome on", "render --record --input 0.5:C2",
             "midi models", "midi layout mpk --apply",
         ];

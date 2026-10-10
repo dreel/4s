@@ -17,6 +17,7 @@ onsets: Array<number>,
  */
 triggers: Array<RenderTrigger>, 
 /**
- * With `record`: the clip the take would leave.
+ * With `record`: the clips the take would leave (in song mode, a take
+ * can write several, and new ones).
  */
-recorded: Clip | null, };
+recorded: Array<Clip>, };

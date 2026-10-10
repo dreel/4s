@@ -2,6 +2,10 @@
 
 export type ClipQuantizeParams = { instrument: string | null, 
 /**
+ * Clip in the instrument's pool; default: its selected clip.
+ */
+clip: number | null, 
+/**
  * Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).
  */
 grid: number, 

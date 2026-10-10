@@ -14,7 +14,15 @@ pub const MASTER_VOLUME: usize = 3;
 /// a count-in).
 pub const METRONOME: usize = 4;
 pub const METRONOME_LEVEL: usize = 5;
-pub const NUM_GLOBALS: usize = 6;
+/// Song mode (RFC 0008): on plays the arrangement, off loops each track's
+/// selected clip (pattern mode).
+pub const SONG_MODE: usize = 6;
+/// What song mode loops: 0 nothing (stop at the song's end), 1 the whole
+/// song, 2 the range `LOOP_START..LOOP_END` (bars).
+pub const LOOP: usize = 7;
+pub const LOOP_START: usize = 8;
+pub const LOOP_END: usize = 9;
+pub const NUM_GLOBALS: usize = 10;
 
 /// Channel parameters, indexed by `ParamTarget::Channel`.
 pub const CH_VOLUME: usize = 0;
@@ -25,6 +33,16 @@ pub const CHANNEL_PARAMS: usize = 4;
 
 pub fn cont(path: String, label: String, min: f64, max: f64, default: f64, unit: Option<&str>) -> ParamInfo {
     ParamInfo { path, label, kind: ParamKind::Continuous { min, max }, default, unit: unit.map(str::to_string) }
+}
+
+fn integer(path: &str, label: &str, min: i32, max: i32, default: f64, unit: Option<&str>) -> ParamInfo {
+    ParamInfo {
+        path: path.into(),
+        label: label.into(),
+        kind: ParamKind::Integer { min, max },
+        default,
+        unit: unit.map(str::to_string),
+    }
 }
 
 pub fn toggle(path: String, label: String) -> ParamInfo {
@@ -46,6 +64,10 @@ pub fn globals() -> Vec<ParamInfo> {
         cont("mixer.master.volume".into(), "Master Volume".into(), 0.0, 1.0, 0.8, None),
         toggle("metronome.on".into(), "Metronome".into()),
         cont("metronome.level".into(), "Metronome Level".into(), 0.0, 1.0, 0.6, None),
+        toggle("song.mode".into(), "Song Mode".into()),
+        integer("song.loop", "Song Loop", 0, 2, 1.0, None),
+        integer("song.loop_start", "Loop Start", 0, 998, 0.0, Some("bar")),
+        integer("song.loop_end", "Loop End", 1, 999, 4.0, Some("bar")),
     ]
 }
 

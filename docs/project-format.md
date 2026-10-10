@@ -21,7 +21,7 @@ mysong.4s/
 snapshot; loading applies it. One set of types covers the API and the file, and
 agents can generate or edit projects directly.
 
-It contains (format version 4; RFC 0004, RFC 0007):
+It contains (format version 5; RFC 0004, RFC 0007, RFC 0008):
 
 - The graph: `instruments` (`{id, type, name}`, in creation order),
   `channels` (`{n, name}`, in display order), and `routes`
@@ -29,15 +29,14 @@ It contains (format version 4; RFC 0004, RFC 0007):
   Effects come later.
 - Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,
   `"bass.cutoff": 0.3`).
-- Each instrument's clip (RFC 0007), in the most readable form that says
-  exactly the same thing: `patterns` holds drum step strings per voice or
-  a note string; `clips` holds the rest as events (`tick:note:len:vel`
-  tokens, see `format_events`) with an optional own `length` in ticks. An
-  instrument is in one or the other.
-
-  ```json
-  "clips": { "lead": { "length": 72, "events": "0:C3:12:89 36:D#3:6:100" } }
-  ```
+- Each instrument's track (RFC 0008) under `tracks`: its clip pool by
+  id, the `selected` clip (what pattern mode plays), and its `arrangement`
+  (placements `{clip, start, length, offset}` in ticks, 384 a bar). Each
+  clip is in the most readable form that says exactly the same thing: a
+  `pattern` (drum step strings per voice, or a note string) or `events`
+  (`tick:note:len:vel` tokens, see `format_events`), with an optional own
+  `length` in ticks and a `name` when it is not its id. An instrument with
+  one empty clip is left out.
 - The controller: whether the grid page follows the playhead.
 - Seats (RFC 0007), by name: `focus`, `knob_page`, note `bindings`, `cc`
   maps, and `knobs` that follow the focus. Seats with nothing set are left
@@ -46,14 +45,28 @@ It contains (format version 4; RFC 0004, RFC 0007):
 - Transport: tempo, swing (as parameters).
 
 ```json
-"patterns": {
-  "bass": "C2! - C2 D#2~ G2 - C2 -",
-  "drums": { "kick": "X---x---X---x---", "snare": "----x-------x---" }
+"tracks": {
+  "bass": { "selected": 1, "clips": { "1": { "pattern": "C2! - C2 D#2~ G2 - C2 -" } } },
+  "drums": {
+    "selected": 2,
+    "clips": {
+      "1": { "pattern": { "kick": "X---x---X---x---", "snare": "----x-------x---" } },
+      "2": { "name": "Fill", "length": 72, "events": "0:C3:12:89 36:D#3:6:100" }
+    },
+    "arrangement": [
+      { "clip": 1, "start": 0, "length": 1536, "offset": 0 },
+      { "clip": 2, "start": 1536, "length": 384, "offset": 0 }
+    ]
+  }
 }
 ```
 
+Song mode and its loop are parameters (`song.mode`, `song.loop`,
+`song.loop_start`, `song.loop_end`), saved with the others.
+
 A project is applied all or nothing: it is validated (ids, channel numbers,
-pool limits of 16 instruments and 32 channels) before anything changes.
+pool limits of 16 instruments, 32 channels, 256 clips, and 256 placements
+a track) before anything changes.
 `examples/demo.4s` is a complete example.
 
 ## Git-friendly
@@ -76,7 +89,9 @@ pool limits of 16 instruments and 32 channels) before anything changes.
   format changes come with migrations.
 - v2 -> v3 (RFC 0007) drops the controller's `target` and `knob_mode` (now
   each seat's focus and knob page) and adds `seats`. v3 -> v4 adds `clips`
-  (step patterns load unchanged as clips). `focus` became a
+  (step patterns load unchanged as clips). v4 -> v5 (RFC 0008) moves each
+  instrument's pattern or clip into `tracks` as clip 1 of its pool,
+  selected, with no arrangement. `focus` became a
   reserved instrument id; a project with an instrument called `focus` must
   be renamed by hand.
 - Parameters are stored by path, so added params take their defaults from the

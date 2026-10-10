@@ -8,6 +8,7 @@ import type { MidiConnection } from "./MidiConnection";
 import type { ProjectInfo } from "./ProjectInfo";
 import type { RecordState } from "./RecordState";
 import type { SeatsState } from "./SeatsState";
+import type { TrackInfo } from "./TrackInfo";
 import type { TransportState } from "./TransportState";
 
 /**
@@ -19,6 +20,10 @@ export type Snapshot = { seq: number, transport: TransportState, record: RecordS
  */
 patterns: Array<InstrumentPattern>, 
 /**
- * One clip per instrument, in instrument order (RFC 0007).
+ * Each instrument's track (RFC 0008): pool, selection, arrangement.
+ */
+tracks: Array<TrackInfo>, 
+/**
+ * Every clip of every track.
  */
 clips: Array<Clip>, controller: ControllerState, midi: Array<MidiConnection>, seats: SeatsState, project: ProjectInfo, audio: AudioStatus, };
