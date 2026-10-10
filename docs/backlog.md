@@ -74,8 +74,12 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, recording branch review) recording: in `replace` mode the
   write when a take ends or restarts clears up to the end of the current
   step (`play_tick + TICKS_PER_STEP`), including the part the playhead had
-  not reached; bound the cleared span by the heard tick
-  (`crates/daemon/src/core/record.rs`, `end_take`/`restart_take`).
+  not reached (during a count-in, the first step); bound the cleared span
+  by the heard tick (`crates/daemon/src/core/record.rs`,
+  `end_take`/`restart_take`).
+- (2026-10-10, recording branch review) recording: `settle_take` runs after
+  only the settings are checked, so `transport.record {arm: false,
+  instrument: "nope"}` ends the take and then fails on the instrument.
 - (2026-10-10, recording branch review) recording: while the command queue
   stays full, a pass write is retried every step and each failed try is a
   journal entry; retry at the next pass instead, or journal only the first

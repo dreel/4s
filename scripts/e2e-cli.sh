@@ -648,6 +648,10 @@ check "clip set replaces the events" "seq: 1 notes" s clip set seq "0:60:96:127"
 check "clear" "seq: 0 notes" s clip clear seq
 check "quantize keeps a note past the longest clip on the grid" "1512:C2:6:89" bash -c "$BIN/4s clip set seq 1535:C2:6 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
 s clip clear seq >/dev/null
+check "clip update removes and adds in one edit" "0:C2:24:89 30:G2:24:89 48:E2:6:100" bash -c "$BIN/4s clip set seq '0:C2 24:D2' >/dev/null && $BIN/4s clip update seq --rm 24:D2 --add '48:E2:6:100 30:G2' | tail -1"
+check "...as one undo step" "0:C2:24:89 24:D2:24:89" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq | tail -1"
+check "quantize at half strength moves notes halfway" "0:C2:24:89 27:G2:24:89" bash -c "$BIN/4s clip set seq '0:C2 30:G2' >/dev/null && $BIN/4s clip quantize seq 1/16 --strength 50% | tail -1"
+s clip clear seq >/dev/null
 # Recording (RFC 0008). Offline first: the same take code over a render's
 # feedback, sample-accurate. At 120 bpm a second is 192 ticks: 0.51 s is
 # tick 97.9, 1.13 s is 217.
