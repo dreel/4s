@@ -147,6 +147,11 @@ impl Take {
         }
     }
 
+    /// Whether any note is held.
+    pub fn holding(&self) -> bool {
+        !self.open.is_empty()
+    }
+
     /// The notes not written yet, where they will go (unquantized; held
     /// notes as long as they are at tick `now`). In song mode, notes with no
     /// placement under them are left out (they make a clip when written).
@@ -738,6 +743,9 @@ impl Core {
         let due = self.take.as_ref().is_some_and(|t| t.take.due(tick, pos, &self.take_target(&t.instrument, t.song)));
         if due {
             self.write_take(tick as f64, pos as f64, false);
+        } else if self.take.as_ref().is_some_and(|t| t.take.holding()) {
+            // Held notes grow on screen, a step at a time.
+            self.emit_take_notes(tick as f64);
         }
     }
 

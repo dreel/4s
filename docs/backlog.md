@@ -199,6 +199,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   tempo controls in one line); give it a layout pass with the arrangement
   view.
 
+- (2026-10-10, piano-roll branch review) take notes are only events, not
+  in the snapshot: a client that reconnects during a take shows none until
+  the next note or step; the CLI e2e's `take_notes` check waits a fixed
+  0.2 s for `watch` to subscribe.
 - (2026-10-10, piano-roll branch) the piano roll has no copy/paste,
   keyboard nudging, or scroll-to-notes; its 808 view still shows the step
   editor below it (with the voices' knobs).

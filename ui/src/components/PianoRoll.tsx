@@ -126,7 +126,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
     if (!drag || !("notes" in drag) || !drag.notes.some((n) => key(n) === key(e))) return e;
     if (drag.kind === "move" || drag.kind === "copy") {
       const r = clamp(rowOf(e.note) + drag.dn, 0, rows.length - 1);
-      return { ...e, tick: clamp(e.tick + drag.dt, 0, MAX_TICKS - 1), note: rows[r] };
+      return { ...e, tick: clamp(e.tick + drag.dt, 0, Math.min(length, MAX_TICKS) - 1), note: rows[r] };
     }
     if (drag.kind === "resize") return { ...e, len: Math.max(1, e.len + drag.dl) };
     return { ...e, velocity: clamp(e.velocity + drag.dv, 1, 127) };
@@ -210,7 +210,8 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
   }
 
   const ghosts = taking.filter((n) => n.clip === clip.id && rowOf(n.note) >= 0);
-  const shown = events.map(moved);
+  // A copy leaves the originals where they are.
+  const shown = drag?.kind === "copy" ? events : events.map(moved);
   const copies = drag?.kind === "copy" ? drag.notes.map(moved) : [];
   const line = (every: number, color: string) =>
     `repeating-linear-gradient(to right, ${color} 0 1px, transparent 1px ${every * px}px)`;
@@ -262,11 +263,16 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
             min={1}
             max={64}
             placeholder={`${stepsLength}`}
-            value={clip.length === null ? "" : Math.round(clip.length / STEP)}
+            defaultValue={clip.length === null ? "" : Math.round(clip.length / STEP)}
+            key={`${clip.id}-${clip.length}`}
             data-testid="roll-length"
-            onChange={(e) => {
-              const v = e.target.value === "" ? null : Number(e.target.value) * STEP;
-              void act(client.call("clip.length", { instrument: id, clip: clip.id, length: v }));
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            onBlur={(e) => {
+              // Sent once, when done typing (one undo step).
+              const v = e.target.value === "" ? null : Math.min(64, Math.max(1, Math.round(Number(e.target.value)))) * STEP;
+              if (v !== clip.length && (v === null || Number.isFinite(v))) {
+                void act(client.call("clip.length", { instrument: id, clip: clip.id, length: v }));
+              }
             }}
           />
         </label>
