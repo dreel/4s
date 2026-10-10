@@ -81,7 +81,8 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 - (2026-10-09, #24 review) UI constants `TICKS_PER_STEP` and the GM drum
   notes are copied by hand into `ui/src/components/Editor.tsx` and
-  `voices.ts`; export them through the generated bindings.
+  `voices.ts` (and the record quantize grids into `Transport.tsx`, from
+  `clip.rs`'s `GRIDS`); export them through the generated bindings.
 - (2026-10-09, #24 review) editor: the hidden-note count misses extra 303
   chord notes on a step's first tick, and a clip length that isn't a whole
   number of steps shows as "loops every 2.5 steps".

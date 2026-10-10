@@ -449,9 +449,8 @@ impl Core {
             self.record_changed(origin);
             return;
         }
-        match req {
-            Request::TransportPlay(_) => self.restart_take(),
-            _ => {}
+        if matches!(req, Request::TransportPlay(_)) {
+            self.restart_take();
         }
     }
 

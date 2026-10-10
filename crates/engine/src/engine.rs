@@ -19,13 +19,13 @@
 //! mute/solo; channels sum into the master, which has a soft clipper.
 
 use crate::dsp::{Smoother, soft_clip};
-use std::f32::consts::TAU;
 use crate::instrument::{Instrument, MAX_BLOCK, MAX_OUTPUTS};
 use crate::params::*;
 use fours_protocol::{
     ClipEvent, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_EVENTS, MAX_INSTRUMENTS, MAX_STEPS, OutputWidth, PPQ, TICKS_PER_BAR,
     TICKS_PER_STEP,
 };
+use std::f32::consts::TAU;
 
 /// Most notes a clip can hold sounding at once.
 const MAX_ACTIVE: usize = 64;

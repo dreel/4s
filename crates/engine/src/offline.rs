@@ -130,11 +130,6 @@ pub fn render_graph(spec: &RenderSpec, sample_rate: u32, bars: f64, tail: f64, i
         engine.render(&mut samples[frame * 2..until * 2], 2, &mut |f| fb.push(f));
         frame = until;
     }
-    // Anything left (e.g. note-offs past the end) still reaches the engine,
-    // so recorded notes close.
-    for (_, _, cmd) in pending {
-        let _ = engine.apply(cmd, &mut |f| fb.push(f));
-    }
 
     let feedback = fb.iter().filter(|f| matches!(f, Feedback::Step { .. } | Feedback::Live { .. })).copied().collect();
     let triggers = fb
