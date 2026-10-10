@@ -94,6 +94,7 @@ current parameter set.
   instrument an edit or hit belongs to. `clip_changed` carries a whole clip
   after any edit to it (`clip_deleted` when one goes), `track` a pool,
   selection, or arrangement change, `located` a new song start point,
+  `take_notes` the notes a take has not written yet (for drawing them),
   `seats` the seats and who sits where, and `record`
   the recording state (a take running, and the next take's settings), which
   is also in the snapshot. Record settings are shared by everyone on the

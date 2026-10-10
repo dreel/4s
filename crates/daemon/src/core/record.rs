@@ -147,6 +147,34 @@ impl Take {
         }
     }
 
+    /// The notes not written yet, where they will go (unquantized; held
+    /// notes as long as they are at tick `now`). In song mode, notes with no
+    /// placement under them are left out (they make a clip when written).
+    pub fn preview(&self, now: f64, target: &TakeTarget) -> Vec<TakeNote> {
+        let held = self.open.iter().map(|p| (Played { end: now.max(p.tick + 1.0), ..*p }, true));
+        self.closed
+            .iter()
+            .map(|p| (*p, false))
+            .chain(held)
+            .filter_map(|(p, held)| {
+                let (clip, tick, clen) = match target {
+                    TakeTarget::Clip { clip, length } => {
+                        let l = (*length).max(1);
+                        (*clip, (p.tick.rem_euclid(l as f64).round() as u32) % l, l)
+                    }
+                    TakeTarget::Song { placements, .. } => {
+                        let at = p.pos.floor().max(0.0) as u32;
+                        let (q, clen) = placements.iter().find(|(q, _)| q.start <= at && at < q.end())?;
+                        let clen = (*clen).max(1);
+                        (q.clip, (((p.pos - q.start as f64).max(0.0).round() as u32) + q.offset) % clen, clen)
+                    }
+                };
+                let len = ((p.end - p.tick).round() as u32).clamp(1, clen);
+                Some(TakeNote { clip, tick, len, note: p.note, velocity: p.velocity, held })
+            })
+            .collect()
+    }
+
     /// Whether a pass is due to be written as the step at tick `tick` from
     /// play, song position `pos`, starts.
     pub fn due(&self, tick: u64, pos: u64, target: &TakeTarget) -> bool {
@@ -692,7 +720,16 @@ impl Core {
                 p += (le - ls) as f64;
             }
             t.take.note(on, gate, note, velocity, tick - offset, p);
+            self.emit_take_notes(tick - offset);
         }
+    }
+
+    /// Tell clients the notes the take has not written yet.
+    fn emit_take_notes(&mut self, now: f64) {
+        let Some(t) = &self.take else { return };
+        let notes = t.take.preview(now, &self.take_target(&t.instrument, t.song));
+        let instrument = t.instrument.clone();
+        self.emit(&t.origin.clone(), Event::TakeNotes { instrument, notes });
     }
 
     /// A step started at tick `tick` from play, song position `pos`: write
@@ -714,10 +751,12 @@ impl Core {
 
     /// End the take, writing the notes played (those still held end now).
     pub(super) fn end_take(&mut self) {
-        if self.take.is_some() {
+        if let Some(t) = &self.take {
+            let (instrument, origin) = (t.instrument.clone(), t.origin.clone());
             let (tick, pos) = self.take_upto();
             self.write_take(tick, pos, true);
             self.take = None;
+            self.emit(&origin, Event::TakeNotes { instrument, notes: Vec::new() });
         }
     }
 
@@ -764,6 +803,7 @@ impl Core {
             }
         }
         self.take = Some(t);
+        self.emit_take_notes(upto);
     }
 
     /// Before a transport request: stopping (or `record --off`) ends a
@@ -816,7 +856,8 @@ impl Core {
 
     /// Drop a take without writing it (its instrument or project went away).
     pub(super) fn drop_take(&mut self, origin: &str) {
-        if self.take.take().is_some() {
+        if let Some(t) = self.take.take() {
+            self.emit(origin, Event::TakeNotes { instrument: t.instrument, notes: Vec::new() });
             self.record_changed(origin);
         }
     }

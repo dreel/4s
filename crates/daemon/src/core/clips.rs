@@ -689,9 +689,10 @@ impl Core {
                 // the longest clip takes the last line before it. Events
                 // that land together keep the later.
                 let (strength, loop_len) = (p.strength.unwrap_or(1.0), self.clip_len(&id, n));
+                let only = |e: &ClipEvent| p.events.as_ref().is_none_or(|keys| keys.iter().any(|k| (k.tick, k.note) == e.key()));
                 let list: Vec<ClipEvent> = events(self, &id, n)
                     .iter()
-                    .map(|e| ClipEvent { tick: snap_tick(e.tick, p.grid, strength, loop_len), ..*e })
+                    .map(|e| if only(e) { ClipEvent { tick: snap_tick(e.tick, p.grid, strength, loop_len), ..*e } } else { *e })
                     .collect();
                 self.edit_clip(&id, n, list, None, origin)
             })),

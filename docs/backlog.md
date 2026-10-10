@@ -147,8 +147,7 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   recording; there is no way to play `--input` into a non-focus instrument
   without recording.
 - (2026-10-10, recording branch) SMF import/export (RFC 0007 phase 3) is not
-  built; and live take progress (notes shown while recording) waits for the
-  piano roll (RFC 0008 phase B).
+  built.
 
 - (2026-10-10, song branch review) a song-mode take is written as a
   `batch` that is not atomic: if `clip.new` succeeds and a later request
@@ -199,6 +198,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, song branch) the transport row is crowded (record, song, and
   tempo controls in one line); give it a layout pass with the arrangement
   view.
+
+- (2026-10-10, piano-roll branch) the piano roll has no copy/paste,
+  keyboard nudging, or scroll-to-notes; its 808 view still shows the step
+  editor below it (with the voices' knobs).
 
 ## Mismatches
 

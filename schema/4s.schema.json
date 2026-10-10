@@ -456,6 +456,30 @@
             "type": "object"
           },
           {
+            "description": "The notes a take has recorded but not written yet (empty once\nwritten), so editors can draw them as they are played.",
+            "properties": {
+              "instrument": {
+                "type": "string"
+              },
+              "notes": {
+                "items": {
+                  "$ref": "#/$defs/TakeNote"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "take_notes",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "instrument",
+              "notes"
+            ],
+            "type": "object"
+          },
+          {
             "description": "A clip was deleted (its track follows in a `track` event).",
             "properties": {
               "id": {
@@ -1457,6 +1481,51 @@
         ],
         "type": "object"
       },
+      "TakeNote": {
+        "description": "A note a take is recording, not written yet: where it will go (in\npattern mode, the selected clip; in song mode, the clip under it), at\nthe tick it was played (before quantize), held so far if still held.",
+        "properties": {
+          "clip": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "held": {
+            "description": "Still held.",
+            "type": "boolean"
+          },
+          "len": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "note": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "velocity": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip",
+          "tick",
+          "len",
+          "note",
+          "velocity",
+          "held"
+        ],
+        "type": "object"
+      },
       "TrackInfo": {
         "description": "An instrument's track: its clip pool, the selected clip, and its\narrangement (placements sorted by start, not overlapping).",
         "properties": {
@@ -2354,6 +2423,17 @@
             "minimum": 0,
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "events": {
+            "default": null,
+            "description": "Only these notes (default: all of them).",
+            "items": {
+              "$ref": "#/$defs/EventKey"
+            },
+            "type": [
+              "array",
               "null"
             ]
           },

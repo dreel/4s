@@ -8,6 +8,7 @@ import type { InstrumentInfo } from "../generated/InstrumentInfo";
 import { act, client, select, useApp, useSelected } from "../store";
 import { BassEditor } from "./BassEditor";
 import { DrumEditor } from "./DrumEditor";
+import { PianoRoll } from "./PianoRoll";
 import { GM_NOTES } from "./voices";
 
 /** Ticks per step (a 16th), as in the protocol's `TICKS_PER_STEP`. */
@@ -184,6 +185,12 @@ export function Editor() {
   const instruments = useApp((s) => s.snapshot?.graph.instruments ?? []);
   const selected = useSelected();
   const current = instruments.find((i) => i.id === selected);
+  // Steps or the piano roll, per instrument (a view choice, not state).
+  const [rolls, setRolls] = useState<Record<string, boolean>>({});
+  const roll = current ? (rolls[current.id] ?? false) : false;
+  const view = "px-2 py-0.5 rounded border";
+  const on = "bg-zinc-200 text-zinc-950 border-zinc-100";
+  const off = "border-zinc-700 text-zinc-400 hover:border-zinc-500";
   return (
     <section className="flex flex-col gap-3" data-testid="editor">
       <div className="flex items-center gap-1 text-xs">
@@ -193,8 +200,21 @@ export function Editor() {
         {current && <OutputSelect instrument={current} />}
       </div>
       {!current && <div className="text-xs text-zinc-500">No instruments. Add one from the console.</div>}
-      {current && <ClipBar id={current.id} />}
-      {current && <ClipNote id={current.id} drums={current.type === "tr808"} />}
+      {current && (
+        <div className="flex items-center gap-4">
+          <ClipBar id={current.id} />
+          <div className="flex gap-1 text-xs">
+            <button className={`${view} ${roll ? off : on}`} data-testid="view-steps" onClick={() => setRolls({ ...rolls, [current.id]: false })}>
+              steps
+            </button>
+            <button className={`${view} ${roll ? on : off}`} data-testid="view-roll" onClick={() => setRolls({ ...rolls, [current.id]: true })}>
+              piano roll
+            </button>
+          </div>
+        </div>
+      )}
+      {current && !roll && <ClipNote id={current.id} drums={current.type === "tr808"} />}
+      {current && roll && <PianoRoll id={current.id} drums={current.type === "tr808"} />}
       {current?.type === "tr808" && <DrumEditor id={current.id} />}
       {current?.type === "tb303" && <BassEditor id={current.id} />}
     </section>

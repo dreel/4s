@@ -811,6 +811,9 @@ pub enum Event {
     /// A track's pool (clips added or removed), selection, or arrangement
     /// changed.
     Track { track: crate::clip::TrackInfo },
+    /// The notes a take has recorded but not written yet (empty once
+    /// written), so editors can draw them as they are played.
+    TakeNotes { instrument: String, notes: Vec<crate::clip::TakeNote> },
     /// A clip was deleted (its track follows in a `track` event).
     ClipDeleted { instrument: String, id: u32 },
     /// Instruments, channels, or routes changed. Parameters may have been
@@ -858,6 +861,7 @@ impl Event {
             Event::ClipChanged { .. } => "clip_changed",
             Event::Track { .. } => "track",
             Event::ClipDeleted { .. } => "clip_deleted",
+            Event::TakeNotes { .. } => "take_notes",
             Event::Located { .. } => "located",
             Event::Graph { .. } => "graph",
             Event::Transport { .. } => "transport",

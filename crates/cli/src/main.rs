@@ -709,6 +709,9 @@ enum ClipCmd {
         /// 100%).
         #[arg(long)]
         strength: Option<String>,
+        /// Only these notes: `tick:note` tokens.
+        #[arg(long, allow_hyphen_values = true)]
+        notes: Option<String>,
     },
 }
 
@@ -875,6 +878,18 @@ fn grid_arg(s: &str) -> Result<Option<u32>> {
         bail!("grid 1/{d} is not a whole number of ticks");
     }
     Ok(Some(TICKS_PER_BAR / d))
+}
+
+/// `tick:note` tokens naming notes in a clip.
+fn event_keys(s: &str) -> Result<Vec<EventKey>> {
+    s.split_whitespace()
+        .map(|tok| match tok.split_once(':') {
+            Some((t, n)) => {
+                Ok(EventKey { tick: t.parse().map_err(|_| anyhow!("invalid tick in '{tok}'"))?, note: note_arg(n)? })
+            }
+            None => bail!("invalid event key '{tok}' (expected tick:note, e.g. 24:D#2)"),
+        })
+        .collect()
 }
 
 /// A song position: bar (`3`) or bar.beat (`3.2`), from 1, as ticks.
@@ -1256,18 +1271,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             ClipCmd::Update { instrument, rm, add } => Request::ClipUpdate(ClipUpdateParams {
                 instrument: Some(instrument),
                 clip: *clip,
-                remove: rm
-                    .as_deref()
-                    .unwrap_or_default()
-                    .split_whitespace()
-                    .map(|tok| match tok.split_once(':') {
-                        Some((t, n)) => Ok(EventKey {
-                            tick: t.parse().map_err(|_| anyhow!("invalid tick in '{tok}'"))?,
-                            note: note_arg(n)?,
-                        }),
-                        None => bail!("invalid event key '{tok}' (expected tick:note, e.g. 24:D#2)"),
-                    })
-                    .collect::<Result<_>>()?,
+                remove: event_keys(rm.as_deref().unwrap_or_default())?,
                 add: add.as_deref().map(parse_events).transpose().map_err(|e| anyhow!(e))?.unwrap_or_default(),
                 recorded: false,
             }),
@@ -1283,11 +1287,12 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 },
             }),
             ClipCmd::Clear { instrument } => Request::ClipClear(ClipGetParams { instrument: Some(instrument), clip: *clip }),
-            ClipCmd::Quantize { instrument, grid, strength } => Request::ClipQuantize(ClipQuantizeParams {
+            ClipCmd::Quantize { instrument, grid, strength, notes } => Request::ClipQuantize(ClipQuantizeParams {
                 instrument: Some(instrument),
                 clip: *clip,
                 grid: grid_arg(&grid)?.ok_or_else(|| anyhow!("quantize needs a grid"))?,
                 strength: strength.as_deref().map(|v| parse_value(v).map(|v| v as f32)).transpose()?,
+                events: notes.as_deref().map(event_keys).transpose()?,
             }),
         }],
         Cmd::Song { cmd } => match cmd.clone().unwrap_or(SongCmd::Show) {
@@ -1717,6 +1722,7 @@ fn print_event(e: &EventEnvelope, json: bool) {
         Event::Playhead { step, tick, time } => format!("step {} (bar {}) @ {time:.3}s", step + 1, fmt_pos(*tick)),
         Event::Track { track } => format!("{}: {} clips, {} placed", track.instrument, track.clips.len(), track.arrangement.len()),
         Event::ClipDeleted { instrument, id } => format!("{instrument} clip {id} deleted"),
+        Event::TakeNotes { instrument, notes } => format!("{instrument}: {} notes recorded, not written yet", notes.len()),
         Event::Located { tick } => format!("song plays from bar {}", fmt_pos(*tick)),
         Event::Trigger { instrument, voice, note, velocity, time } => {
             let what = match (voice, note) {

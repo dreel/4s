@@ -1,6 +1,6 @@
 # RFC 0008: Recording and the arrangement
 
-- Status: accepted (phases A and B1 implemented; see "Implementation notes")
+- Status: accepted (phases A, B1, and B2 implemented; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-09
 - Discussion: the PR that introduces this RFC.
@@ -187,4 +187,23 @@ above, these win:
 - **UI (B1)**: a clip bar in the editor (select, new, duplicate, delete,
   rename), and pattern/song mode, loop, and start bar in the transport.
   Placing clips in the UI comes with the arrangement view (phase C).
+
+## Implementation notes (phase B2: the piano roll)
+
+- A **piano roll** for any clip (the editor's "piano roll" view, beside
+  the step editor): rows are pitches (C1..C5, widened to fit; for the 808,
+  its voices and any other notes in the clip), columns ticks on a snap grid
+  (1/4..1/32, triplets, off) with a bar/beat ruler and zoom. Click to add,
+  drag to move (time and pitch), drag the right edge to resize, alt-drag to
+  copy, shift-click and box to select, Delete to remove, a velocity lane,
+  the clip's own length, and quantizing the selection (or every note).
+  Every edit is one `clip.update`, so one undo step.
+- `clip.quantize` takes `events`: only those notes.
+- **Take progress**: the `take_notes` event sends the notes a take has
+  recorded but not written yet (where they will go, unquantized; held
+  notes as long as they are so far), and an empty list once they are
+  written; the piano roll draws them faded. In song mode, notes with no
+  placement under them are not sent (they make a clip when written).
+- The playhead follows the clip where it plays: the selected clip in
+  pattern mode, the placement under the song position in song mode.
 
