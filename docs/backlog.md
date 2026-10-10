@@ -203,6 +203,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   in the snapshot: a client that reconnects during a take shows none until
   the next note or step; the CLI e2e's `take_notes` check waits a fixed
   0.2 s for `watch` to subscribe.
+- (2026-10-10, piano-roll branch review) smaller piano roll and take
+  cases: held take notes are drawn `offset_ms` too long (the step tick goes
+  to `emit_take_notes` without the offset, `record.rs`); `clip.quantize
+  --notes` ignores keys that are not in the clip instead of rejecting them;
+  dragging a selection against the grid's edge can land two notes on one
+  `tick:note`; take notes outside the rows (non-drum clips) are not drawn
+  until written; resizing is not clamped to the loop.
 - (2026-10-10, piano-roll branch) the piano roll has no copy/paste,
   keyboard nudging, or scroll-to-notes; its 808 view still shows the step
   editor below it (with the voices' knobs).
