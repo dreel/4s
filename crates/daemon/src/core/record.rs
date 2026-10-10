@@ -534,6 +534,9 @@ pub(super) struct LiveTake {
     pub instrument: String,
     pub slot: u8,
     pub user: String,
+    /// Recording into the arrangement (song mode when it started), else the
+    /// selected clip.
+    pub song: bool,
     /// The connection that started it (`conn:<id>`), whose seat the
     /// journal records.
     pub client: String,
@@ -573,7 +576,7 @@ impl Core {
                     instrument: id.clone(),
                     slot,
                     settings,
-                    target: self.take_target(&id),
+                    target: self.take_target(&id, self.song_mode()),
                     clips,
                     tempo: self.global(params::TEMPO),
                 })
@@ -583,10 +586,11 @@ impl Core {
     }
 
     /// Where a take into an instrument goes now: its selected clip in
-    /// pattern mode, its arrangement in song mode.
-    pub(super) fn take_target(&self, id: &str) -> TakeTarget {
+    /// pattern mode, its arrangement in song mode (`song`: which, fixed when
+    /// the take started).
+    pub(super) fn take_target(&self, id: &str, song: bool) -> TakeTarget {
         let t = self.track(id);
-        if self.song_mode() {
+        if song {
             TakeTarget::Song {
                 placements: t.placements.iter().map(|p| (*p, self.clip_len(id, p.clip))).collect(),
                 looping: self.song_loop(),
@@ -652,11 +656,11 @@ impl Core {
                         self.start(origin, self.record.count_in * TICKS_PER_BAR);
                     }
                     let take = Take::new(from.0, from.1);
-                    self.take =
-                        Some(LiveTake {
+                    self.take = Some(LiveTake {
                         take,
                         instrument: id,
                         slot,
+                        song: self.song_mode(),
                         user: user.to_string(),
                         client: client.to_string(),
                         origin: origin.to_string(),
@@ -683,7 +687,7 @@ impl Core {
     /// A step started at tick `tick` from play, song position `pos`: write
     /// a pass when one is due.
     pub(super) fn record_step(&mut self, tick: u64, pos: u64) {
-        let due = self.take.as_ref().is_some_and(|t| t.take.due(tick, pos, &self.take_target(&t.instrument)));
+        let due = self.take.as_ref().is_some_and(|t| t.take.due(tick, pos, &self.take_target(&t.instrument, t.song)));
         if due {
             self.write_take(tick as f64, pos as f64, false);
         }
@@ -708,7 +712,7 @@ impl Core {
 
     fn write_take(&mut self, upto: f64, upto_pos: f64, end: bool) {
         let Some(mut t) = self.take.take() else { return };
-        let (target, settings) = (self.take_target(&t.instrument), self.record.clone());
+        let (target, settings) = (self.take_target(&t.instrument, t.song), self.record.clone());
         let pool: BTreeMap<u32, Vec<ClipEvent>> =
             self.track(&t.instrument).clips.iter().map(|(n, c)| (*n, c.events.clone())).collect();
         let existing = |n: u32| pool.get(&n).cloned().unwrap_or_default();

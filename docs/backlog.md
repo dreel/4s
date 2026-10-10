@@ -150,6 +150,12 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   built; and live take progress (notes shown while recording) waits for the
   piano roll (RFC 0008 phase B).
 
+- (2026-10-10, song branch review) a song-mode take is written as a
+  `batch` that is not atomic: if `clip.new` succeeds and a later request
+  fails with a busy engine, the retry next pass makes another clip, leaving
+  an empty, unplaced one (`crates/daemon/src/core/record.rs`,
+  `write_take`). Make `batch` all or nothing, or check room for the whole
+  write first.
 - (2026-10-10, song branch) `song.loop` is an integer parameter (0 off, 1
   song, 2 bars); the registry has no enum kind, so `4s params` and generic
   controls show a number. Add a choice kind with labels.

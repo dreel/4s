@@ -662,7 +662,8 @@ impl Engine {
                     self.release_clip_notes(None);
                     self.song_pos = ls;
                 }
-                None if !self.ended && self.song_pos >= self.song_end() => {
+                // An empty song plays on (there is nothing to end).
+                None if !self.ended && self.song_end() > 0 && self.song_pos >= self.song_end() => {
                     self.ended = true;
                     emit(Feedback::SongEnd { time });
                 }

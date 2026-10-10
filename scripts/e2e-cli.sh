@@ -755,6 +755,10 @@ check "placing over a placement cuts it" "bar 1       clip 1 (1), 1 bar" s song 
 check "...and undo puts it back" "bar 1       clip 1 (1), 2 bars" bash -c "$BIN/4s undo >/dev/null && $BIN/4s song"
 check "moving a placement" "bar 5       clip 2 (B), 1 bar" s song mv song 3 5
 s song mv song 5 3 >/dev/null
+check "cutting a placement longer than its clip keeps the loop's place" "bar 8       clip 1 (1), 2 bars" bash -c "$BIN/4s song place song --at 5 --bars 5 --clip 1 >/dev/null && $BIN/4s song place song --at 7 --clip 2 | grep 'bar 8'"
+s undo >/dev/null
+s undo >/dev/null
+check "a bar loop is one undo step" "undid: batch: param.set" bash -c "$BIN/4s song loop 2 5 >/dev/null && $BIN/4s undo"
 check "deleting a clip removes its placements" "song: clips *1" bash -c "$BIN/4s clip del song --clip 2 | head -1"
 check "...and undo brings both back" "bar 3       clip 2 (B), 1 bar" bash -c "$BIN/4s undo >/dev/null && $BIN/4s song"
 check "pools and arrangements save with the project" '"arrangement": [{"clip": 1, "start": 0, "length": 768, "offset": 0}, {"clip": 2, "start": 768, "length": 384, "offset": 0}]' bash -c "$BIN/4s project save song >/dev/null && python3 -c \"import json;print(json.dumps(json.load(open('$FOURS_DATA_DIR/projects/song.4s/project.json'))['tracks']['song']))\""

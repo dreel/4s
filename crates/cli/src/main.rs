@@ -1328,7 +1328,10 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                         if from == 0 || to < from {
                             bail!("bars count from 1, and the loop ends at or after it starts");
                         }
-                        vec![set("song.loop_start", (from - 1) as f64), set("song.loop_end", to as f64), set("song.loop", 2.0)]
+                        // One undo step for the range.
+                        let sets = [set("song.loop_start", (from - 1) as f64), set("song.loop_end", to as f64), set("song.loop", 2.0)];
+                        let requests = sets.iter().map(serde_json::to_value).collect::<Result<_, _>>()?;
+                        vec![Request::Batch(BatchParams { requests })]
                     }
                     _ => bail!("loop `off`, `song`, or <from bar> <to bar>"),
                 };
