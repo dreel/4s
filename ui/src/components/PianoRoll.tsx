@@ -74,8 +74,8 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
       return [...GM_NOTES, ...extra];
     }
     const notes = events.map((e) => e.note);
-    const lo = Math.min(24, ...notes.map((n) => n - 2));
-    const hi = Math.max(72, ...notes.map((n) => n + 2));
+    const lo = Math.max(0, Math.min(24, ...notes.map((n) => n - 2)));
+    const hi = Math.min(127, Math.max(72, ...notes.map((n) => n + 2)));
     return Array.from({ length: hi - lo + 1 }, (_, i) => hi - i);
   }, [drums, events]);
   const rowOf = (note: number) => rows.indexOf(note);
@@ -99,7 +99,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (t && (["INPUT", "SELECT", "TEXTAREA"].includes(t.tagName) || t.isContentEditable)) return;
       if ((e.key === "Delete" || e.key === "Backspace") && selected.size) {
         e.preventDefault();
         void update(events.filter((x) => selected.has(key(x))).map((x) => ({ tick: x.tick, note: x.note })), []);
@@ -176,7 +176,8 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
         // A click on empty space: a new note there.
         const r = Math.floor(drag.y / ROW);
         const t = Math.floor(drag.x / px / snap) * snap;
-        if (r < 0 || r >= rows.length || t >= MAX_TICKS) return;
+        // Not past the clip's loop (it would never play).
+        if (r < 0 || r >= rows.length || t >= Math.min(length, MAX_TICKS)) return;
         const n = { tick: t, len: drums ? STEP : Math.max(snap, STEP / 2), note: rows[r], velocity: 100 };
         setSelected(new Set([key(n)]));
         void update([], [n]);

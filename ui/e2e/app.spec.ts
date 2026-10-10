@@ -508,7 +508,7 @@ test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, a
   // The velocity lane: drag the first bar up.
   await expect(page.getByTestId("note-192-39")).toBeVisible();
   const vel = (await page.getByTestId("vel-96-39").boundingBox())!;
-  await page.mouse.click(box.x + 600, box.y + 140); // clear the selection
+  await page.keyboard.press("Escape"); // clear the selection
   await drag({ x: vel.x + 2, y: vel.y + 4 }, { x: vel.x + 2, y: vel.y - 20 });
   await expect.poll(async () => (await clip())[0].velocity).toBe(127);
   // Box-select both and delete them: one undo brings both back.

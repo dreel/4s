@@ -170,7 +170,8 @@ async function resync() {
   app.set({ registry: registry.params, snapshot, history });
   // No seat after a (re)connect or a project load: ask.
   if (!mySeat(app.state)) app.set({ choosingSeat: true });
-  live.set({ channels: {} });
+  // Take notes come only as events: whatever was missed is stale.
+  live.set({ channels: {}, takeNotes: {} });
   for (const e of pending) if (e.seq > snapshot.seq) apply(e);
 }
 
