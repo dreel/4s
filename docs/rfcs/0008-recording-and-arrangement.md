@@ -264,7 +264,8 @@ above, these win:
 - Each track header has its clip pool as small chips: drag one into its
   own lane to place it (`song.place`, the clip's length) at the snap
   cell under the pointer; dropped anywhere else, nothing happens.
-- Delete in the arrangement does not reach the piano roll's selection
-  (the key is stopped there when a placement is selected).
+- The selection lasts while the arrangement has focus (clicking a
+  placement focuses it); Delete there does not reach the piano roll's
+  selection, and Delete in its selects or buttons does nothing.
 - No daemon changes. Moving a placement to another track, the loop brace,
   and the piano roll panel come next.

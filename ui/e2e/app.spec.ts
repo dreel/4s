@@ -617,6 +617,32 @@ test("arrangement editing: place from the pool, move, resize, copy, and delete b
   // Undo still takes back the delete: nothing else was journaled.
   await page.getByTestId("undo").click();
   await expect.poll(song).toEqual(copied);
+  // Nor on another track's lane.
+  await rpc("instrument.add", { type: "tb303", id: "bass", name: null, channel: null, no_channel: false });
+  await expect(page.getByTestId("lane-bass")).toBeVisible();
+  const c2 = await center("pool-drums-1");
+  const bassLane = (await page.getByTestId("lane-bass").boundingBox())!;
+  await drag(c2, { x: bassLane.x + 10 * bar, y: bassLane.y + bassLane.height / 2 });
+  // (Undo is shared by a user's local clients: adding the bass is still
+  // the last step.)
+  await page.waitForTimeout(100);
+  await expect(page.getByTestId("undo")).toHaveAttribute("title", /instrument\.add/);
+  expect(await song()).toEqual(copied);
+  // Escape, or a click on an empty lane, clears the selection.
+  const sel = page.getByTestId("placement-drums-2688");
+  from = await center("placement-drums-2688");
+  await page.mouse.click(from.x, from.y);
+  await expect(sel).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Escape");
+  await expect(sel).toHaveAttribute("data-selected", "false");
+  await page.mouse.click(from.x, from.y);
+  await expect(sel).toHaveAttribute("data-selected", "true");
+  l = await lane();
+  await page.mouse.click(l.x + 12 * bar + 10, l.y + l.height / 2);
+  await expect(sel).toHaveAttribute("data-selected", "false");
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(100);
+  expect(await song()).toEqual(copied);
 });
 
 test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, and take notes", async () => {

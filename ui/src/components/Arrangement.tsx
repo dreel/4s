@@ -49,6 +49,8 @@ type Handlers = {
   down: (e: React.PointerEvent, d: Drag) => void;
   move: (e: React.PointerEvent) => void;
   up: (e: React.PointerEvent) => void;
+  /** The pointer was taken away (a system gesture, the window lost focus). */
+  cancel: () => void;
 };
 
 /** A placement's clip drawn as notes, repeated where the placement loops it,
@@ -131,6 +133,7 @@ function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars:
         onPointerDown={at === null ? undefined : (e) => h.down(e, { kind: e.altKey ? "copy" : "move", id, p: track.arrangement.find((q) => q.start === at)!, x: e.clientX, dt: 0 })}
         onPointerMove={h.move}
         onPointerUp={h.up}
+        onPointerCancel={h.cancel}
       >
         <div className="px-1 text-[10px] leading-4 truncate">{clip?.name ?? p.clip}</div>
         <NotePreview placement={p} clip={clip} clipLength={lengthOf(p.clip)} px={px} />
@@ -201,6 +204,7 @@ function TrackHeader({ id, name, type, armed, selected, seated, h }: { id: strin
             onPointerDown={(e) => h.down(e, { kind: "pool", id, clip: c.id, start: null })}
             onPointerMove={h.move}
             onPointerUp={h.up}
+            onPointerCancel={h.cancel}
           >
             {c.name}
           </div>
@@ -283,6 +287,7 @@ export function Arrangement() {
       const d = drag && follow(drag, e);
       if (d) setDrag(d);
     },
+    cancel: () => setDrag(null),
     up: (e) => {
       if (!drag) return;
       setDrag(null);
@@ -315,7 +320,9 @@ export function Arrangement() {
   // Delete removes the selected placement; Escape clears the selection.
   const key = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
-    if (!picked || ["INPUT", "SELECT", "TEXTAREA"].includes(t.tagName) || t.isContentEditable) return;
+    // Only for the section itself (focused by a placement), not its buttons
+    // and fields.
+    if (!picked || t !== root.current) return;
     if (e.key === "Delete" || e.key === "Backspace") {
       // Not also the piano roll's selected notes.
       e.preventDefault();
@@ -337,6 +344,9 @@ export function Arrangement() {
       data-testid="arrangement"
       data-end={end}
       onKeyDown={key}
+      // The selection goes with the focus, so Delete elsewhere never
+      // removes a placement picked long ago.
+      onBlur={(e) => !root.current?.contains(e.relatedTarget as Node | null) && setPicked(null)}
     >
       <div className="flex items-center gap-3 text-xs text-zinc-400">
         <span className="text-zinc-300">arrangement</span>
