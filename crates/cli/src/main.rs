@@ -628,7 +628,8 @@ enum SongCmd {
     /// selected clip.
     Mode { mode: String },
     /// What song mode loops: `song`, `off` (stop at the end), or bars, e.g.
-    /// `4s song loop 2 5` for bars 2 to 5.
+    /// `4s song loop 2 5` for bars 2 to 5 (playing from past bar 5 goes on
+    /// without looping).
     Loop {
         what: String,
         to: Option<u32>,

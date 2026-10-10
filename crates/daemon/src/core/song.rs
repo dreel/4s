@@ -39,10 +39,11 @@ impl Core {
     /// overlapping, not too many); the engine gets only the difference.
     pub(super) fn set_arrangement(&mut self, id: &str, mut placements: Vec<Placement>) -> Result<(), RpcError> {
         placements.sort_by_key(|p| p.start);
-        // A placement loops its clip, so an offset past the clip's length
-        // (the right part of one that was cut) is the same as its remainder.
+        // A placement loops its clip, so an offset past the longest clip
+        // (the right part of a long one that was cut) is the same as its
+        // remainder at the clip's length.
         for p in &mut placements {
-            if self.track(id).clips.contains_key(&p.clip) {
+            if p.offset >= MAX_CLIP_TICKS && self.track(id).clips.contains_key(&p.clip) {
                 p.offset %= self.clip_len(id, p.clip).max(1);
             }
         }

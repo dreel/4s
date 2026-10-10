@@ -2248,6 +2248,8 @@ fn batchable(req: &Request) -> bool {
             | TransportPlay(_)
             | TransportStop(_)
             | TransportLocate(_)
+            // Journaled with the ports it applies, filled in by `handle`.
+            | SeatApplyLayout(_)
     )
 }
 
