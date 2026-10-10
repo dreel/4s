@@ -84,6 +84,8 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
     return drums && v >= 0 ? voiceShort(VOICES[v]) : noteName(note);
   };
 
+  // Another clip starts with nothing selected (its notes can share keys).
+  useEffect(() => setSelected(new Set()), [id, clip?.id]);
   // Drop selected keys that no longer exist.
   useEffect(() => {
     setSelected((s) => {

@@ -209,7 +209,9 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   --notes` ignores keys that are not in the clip instead of rejecting them;
   dragging a selection against the grid's edge can land two notes on one
   `tick:note`; take notes outside the rows (non-drum clips) are not drawn
-  until written; resizing is not clamped to the loop.
+  until written; resizing is not clamped to the loop; the roll has its own
+  text-field check for Delete instead of sharing `App.tsx`'s
+  `inTextField()` (which does not skip `<select>`).
 - (2026-10-10, piano-roll branch) the piano roll has no copy/paste,
   keyboard nudging, or scroll-to-notes; its 808 view still shows the step
   editor below it (with the voices' knobs).

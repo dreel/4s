@@ -473,6 +473,9 @@ test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, a
   await page.getByTestId("roll-zoom").selectOption("1");
   const grid = page.getByTestId("roll-grid");
   await expect(grid).toBeVisible();
+  // The mouse goes to page coordinates, so the whole roll (grid and velocity
+  // lane) must be on screen first; a small CI display puts it below the fold.
+  await page.getByTestId("pianoroll-drums").scrollIntoViewIfNeeded();
   const box = (await grid.boundingBox())!;
   // 1 px per tick, 16 px rows: the 808's voices, kick first.
   const at = (tick: number, row: number) => ({ x: box.x + tick + 2, y: box.y + row * 16 + 8 });
