@@ -394,6 +394,13 @@ pub struct MidiDevice {
     pub profile: DeviceProfile,
     /// Connect automatically when the port appears.
     pub auto_connect: bool,
+    /// Known device model (`midi.models`) this port belongs to.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// The port's role in its model: the model's name for it (e.g.
+    /// `mpk_daw`), which its default layout refers to.
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -403,6 +410,52 @@ pub struct MidiConnection {
     /// Logical device name.
     pub device: String,
     pub profile: DeviceProfile,
+    /// Known device model, if any.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// The port's role in its model (see `MidiDevice::role`).
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+/// A known controller (RFC 0007, device models): which of its ports to use
+/// and how, and a default layout used while a seat has no bindings for it.
+/// Shipped as data in `crates/daemon/devices/`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct DeviceModel {
+    /// Stable id, e.g. `akai_mpk_mini_iv`.
+    pub id: String,
+    pub label: String,
+    /// Ports whose name contains this (any case) belong to the model.
+    #[serde(rename = "match")]
+    #[ts(rename = "match")]
+    pub matches: String,
+    /// Port name part (any case; `""` matches any port of the model) ->
+    /// logical device name for that port, or `ignore` to leave it alone.
+    pub ports: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub profile: DeviceProfile,
+    /// Bindings, CC maps, following knobs, and pitch bend, naming the
+    /// model's ports by their names in `ports`.
+    #[serde(default)]
+    pub layout: SeatConfig,
+}
+
+impl DeviceModel {
+    /// The logical name this model gives `port` (`None`: not this model's
+    /// port, or ignored).
+    pub fn role(&self, port: &str) -> Option<&str> {
+        let p = port.to_lowercase();
+        if !p.contains(&self.matches.to_lowercase()) {
+            return None;
+        }
+        let (_, name) = self
+            .ports
+            .iter()
+            .filter(|(k, _)| p.contains(&k.to_lowercase()))
+            .max_by_key(|(k, _)| k.len())?;
+        (name != "ignore").then_some(name.as_str())
+    }
 }
 
 /// Check a logical device or seat name: `[a-z][a-z0-9_]*`, at most 32
@@ -450,7 +503,14 @@ pub struct NoteBinding {
     /// Semitones added to each note.
     #[serde(default)]
     pub transpose: i8,
-    /// An instrument id, or `focus` for the seat's focused instrument.
+    /// Output note for input notes `low`, `low + 1`, ... (from 0 without
+    /// `low`), e.g. pads to drum voices. Overrides `transpose`; a note past
+    /// the list plays nothing.
+    #[serde(default)]
+    pub remap: Option<Vec<u8>>,
+    /// An instrument id, `focus` for the seat's focused instrument, or
+    /// `@<type>` for the first instrument of a type (`@tr808`).
+    /// Alternatives separated by `|` are tried in order: `@tb303|focus`.
     pub target: String,
 }
 
@@ -461,6 +521,25 @@ impl NoteBinding {
             && self.low.is_none_or(|l| note >= l)
             && self.high.is_none_or(|h| note <= h)
     }
+
+    /// The note an input note plays, if any.
+    pub fn output(&self, note: u8) -> Option<u8> {
+        match &self.remap {
+            Some(map) => map.get(note.checked_sub(self.low.unwrap_or(0))? as usize).copied(),
+            None => u8::try_from(note as i16 + self.transpose as i16).ok().filter(|n| *n <= 127),
+        }
+    }
+}
+
+/// How a CC's value moves a parameter.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CcMode {
+    /// 0..127 is the parameter's range (a pot or fader).
+    #[default]
+    Absolute,
+    /// Endless encoder: 1..63 turn up, 65..127 turn down (127 = -1).
+    Relative,
 }
 
 /// Bind one CC to one parameter, scaled over its range.
@@ -470,11 +549,14 @@ pub struct CcMap {
     #[serde(default)]
     pub channel: Option<u8>,
     pub cc: u8,
-    /// Parameter path.
+    /// Parameter path; `focus.<param>` follows the seat's focus (e.g.
+    /// `focus.cutoff`; nothing when the focus has no such parameter).
     pub param: String,
-    /// Only take over once the knob passes the current value.
+    /// Only take over once the knob passes the current value (absolute).
     #[serde(default = "yes")]
     pub pickup: bool,
+    #[serde(default)]
+    pub mode: CcMode,
 }
 
 /// CCs of a device that control the focused instrument's knob page
@@ -487,6 +569,8 @@ pub struct KnobFollow {
     pub ccs: Vec<u8>,
     #[serde(default = "yes")]
     pub pickup: bool,
+    #[serde(default)]
+    pub mode: CcMode,
 }
 
 fn yes() -> bool {
@@ -510,6 +594,10 @@ pub struct SeatConfig {
     pub cc: Vec<CcMap>,
     #[serde(default)]
     pub knobs: Vec<KnobFollow>,
+    /// Where pitch bend goes: `focus`, an instrument id, or `@<type>`.
+    /// Default: the focus.
+    #[serde(default)]
+    pub pitch_bend: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -523,6 +611,10 @@ pub struct Seat {
     /// Parameter that the next CC moved on this seat's devices will be
     /// mapped to (`seat.learn_cc`).
     pub learning: Option<String>,
+    /// Devices on this engine that play here with their model's default
+    /// layout (no bindings of the seat's own), as `device (Model)`.
+    #[serde(default)]
+    pub defaults: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

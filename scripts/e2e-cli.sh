@@ -166,6 +166,13 @@ WATCH=$!; sleep 0.5
 echo "raw 90 24 64" >&8   # note on, C2 (36)
 wait $WATCH
 check "key down plays the note" '"instrument":"bass","voice":null,"note":36' cat "$TMP/key.json"
+s cc map keys 21 bass.cutoff >/dev/null
+"$BIN/4s" watch --type trigger --json > "$TMP/key-cc.json" &
+WATCH=$!; sleep 0.5
+echo "raw 90 26 64" >&8; echo "raw 80 26 00" >&8   # D2 (38)
+sleep 0.5; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "a keyboard with only a CC map still plays the focus" '"instrument":"bass","voice":null,"note":38' cat "$TMP/key-cc.json"
+s cc unmap keys 21 >/dev/null
 "$BIN/4s" watch --type meters --json > "$TMP/key-meters.json" &
 WATCH=$!; sleep 0.6
 echo "raw 80 24 00" >&8   # note off
@@ -237,6 +244,76 @@ check "unbind removes one binding" "bind 1: keys ch 10 all notes -> drums" s unb
 s unbind 1 >/dev/null
 s midi disconnect keys >/dev/null
 exec 8>&-
+# Device models (RFC 0007): an Akai MPK mini IV, as two virtual ports named
+# like the real one's. Its keys/pads come on the MIDI Port, its endless
+# knobs on the DAW Port (relative CCs 24-31).
+MPK="MPK mini IV MIDI Port e2e$$"; MPKD="MPK mini IV DAW Port e2e$$"
+mkfifo "$TMP/mpk.in" "$TMP/mpkd.in"
+target/debug/examples/virtual_block "$MPK" < "$TMP/mpk.in" > "$TMP/mpk.out" 2>&1 &
+exec 5> "$TMP/mpk.in"
+target/debug/examples/virtual_block "$MPKD" < "$TMP/mpkd.in" > "$TMP/mpkd.out" 2>&1 &
+exec 6> "$TMP/mpkd.in"
+for _ in $(seq 50); do grep -q ready "$TMP/mpk.out" && grep -q ready "$TMP/mpkd.out" && break; sleep 0.1; done
+for _ in $(seq 30); do s midi ports | grep -q "$MPKD" && break; sleep 0.1; done
+check "known models" "akai_mpk_mini_iv   Akai MPK mini IV" s midi models
+check "a model's port gets its name" "$MPK as mpk (Generic) model akai_mpk_mini_iv" s midi connect "$MPK"
+check "and its other port its own" "$MPKD as mpk_daw (Generic) model akai_mpk_mini_iv" s midi connect "$MPKD"
+check "with no bindings, the seat uses the model's default layout" "default layout: mpk (Akai MPK mini IV)" s seat
+s focus drums >/dev/null   # the keys play the bass anyway (@tb303|focus)
+"$BIN/4s" watch --type trigger --count 2 --json > "$TMP/mpk.json" &
+WATCH=$!; sleep 0.5
+echo "raw 90 30 64" >&5; echo "raw 80 30 00" >&5   # a key, channel 1
+echo "raw 99 25 64" >&5; echo "raw 89 25 00" >&5   # pad 2, channel 10
+echo "raw 99 25 64" >&6; echo "raw 89 25 00" >&6   # the DAW Port's copy of it
+wait $WATCH; sleep 0.3
+check "keys play the first 303 whatever the focus" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
+check "pads play the 808's voices in order" '"instrument":"drums","voice":"snare"' cat "$TMP/mpk.json"
+s focus bass >/dev/null
+"$BIN/4s" watch --type trigger --json > "$TMP/mpk-daw.json" &
+WATCH=$!; sleep 0.5
+echo "raw 99 25 64" >&6; echo "raw 89 25 00" >&6   # a pad's copy on the DAW Port only
+sleep 0.5; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "the DAW Port's pad copies play nothing, whatever the focus" "0 triggers" bash -c "echo \$(grep -c trigger '$TMP/mpk-daw.json') triggers"
+# A held key (channel 1, note 48) survives a pad with the same note number
+# on channel 10 (bank B pad 5) being tapped.
+"$BIN/4s" watch --type meters --json > "$TMP/mpk-hold.json" &
+WATCH=$!; sleep 0.2
+echo "raw 90 30 64" >&5; sleep 0.2
+echo "raw 99 30 64" >&5; echo "raw 89 30 00" >&5; sleep 0.6
+kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+echo "raw 80 30 00" >&5
+check "a pad's note-off on channel 10 does not end a held key on channel 1" "still sounding" python3 -c "
+import json
+levels = [c['left'] for l in open('$TMP/mpk-hold.json') if l.strip()
+          for c in json.loads(l)['event']['channels'] if c['channel'] == 2]
+print('still sounding' if levels and levels[-1] > 0.01 else f'levels {levels}')"
+s set bass.cutoff 0.5 >/dev/null
+echo "raw B0 18 0A" >&6; sleep 0.3   # knob 1 turned up 10 steps
+check "an endless knob moves the focus's page parameter by steps" "bass.cutoff = 0.55" s get bass.cutoff
+echo "raw B0 18 7B" >&6; sleep 0.3   # 5 steps down
+check "and back down" "bass.cutoff = 0.525" s get bass.cutoff
+echo "raw B0 01 00" >&5; echo "raw B0 01 7F" >&5; sleep 0.3
+check "the mod control moves focus.cutoff" "bass.cutoff = 1" s get bass.cutoff
+s focus drums >/dev/null
+echo "raw B0 01 00" >&5; sleep 0.3
+check "focus.cutoff does nothing when the focus has none" "bass.cutoff = 1" s get bass.cutoff
+s focus bass >/dev/null
+BEFORE=$(s --json journal --limit 10000 | python3 -c "import json,sys;print(len(json.load(sys.stdin)['entries']))")
+for v in 50 60 70 40; do echo "raw E0 00 $v" >&5; done; sleep 0.3
+check "pitch bend plays without being journaled" "0 new entries" bash -c "echo \$(( \$($BIN/4s --json journal --limit 10000 | python3 -c \"import json,sys;print(len(json.load(sys.stdin)['entries']))\") - $BEFORE )) new entries"
+check "apply the layout to edit it" "bind 2: mpk ch 10 C2..G2 as C2,D2,D#2,F#2,A#2,A2,D3,G#3 -> @tr808" s midi layout mpk --apply
+check "the seat now has its own bindings" "knobs: mpk_daw cc 24 25 26 27 28 29 30 31 follow focus (relative)" s seat
+check "undo takes the applied layout back" "default layout: mpk_daw" bash -c "$BIN/4s undo >/dev/null && $BIN/4s seat"
+# Remap and @type work for any device.
+s bind pads --notes 60..61 --remap 36,38 --to @tr808 >/dev/null
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/remap.json" &
+WATCH=$!; sleep 0.5
+s midi send pads 90 3D 64 >/dev/null
+wait $WATCH
+check "remap: the second note plays the second voice of the first tr808" '"instrument":"drums","voice":"snare"' cat "$TMP/remap.json"
+s unbind 1 >/dev/null
+s midi disconnect mpk >/dev/null; s midi disconnect mpk_daw >/dev/null
+exec 5>&- 6>&-
 BASS_RMS=$(s --json render --bars 1 --out renders/b1.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
 s set mixer.2.mute on >/dev/null
 MUTED_RMS=$(s --json render --bars 1 --out renders/b2.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
@@ -441,7 +518,7 @@ s set bass.cutoff 0.25 >/dev/null
 # the seat matching its user, and the host's devices play in the host seat.
 check "the CLI joins the seat matching its user" "you: e2e" s seat
 check "it is this engine's devices' seat" "e2e: cli#" s seat
-check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 4, "user": "bob"}'
+check "a user with no matching seat is asked to choose" '"choose_seat": true' s call session.hello '{"client_name": "x", "protocol_version": 5, "user": "bob"}'
 check "and stays unseated" "you: (no seat)" s --user bob seat
 check "seat edits need a seat" "you have no seat" s --user bob focus drums
 check "create a seat for bob" "you: bob" s --user bob --new-seat seat
@@ -475,6 +552,11 @@ check "the next CC moved is mapped, on its channel" "cc: knobs ch 3 cc 22 -> bas
 s midi send knobs B0 16 7F >/dev/null
 check "the same CC on another channel is not mapped" "bass.resonance = 0.5" s get bass.resonance
 s cc unmap knobs 22 >/dev/null
+check "a CC map can follow the focus" "cc: knobs any ch cc 23 -> focus.cutoff" s cc map knobs 23 focus.cutoff --no-pickup
+s midi send knobs B0 17 40 >/dev/null
+check "and moves the focused 303's cutoff" "bass.cutoff = 0.5039" s get bass.cutoff
+check "focus.<param> must exist on some instrument type" "no instrument type has a parameter 'nope'" s cc map knobs 23 focus.nope
+s cc unmap knobs 23 >/dev/null
 # Following knobs control the focused instrument's knob page.
 check "knobs follow the focus" "knobs: knobs cc 1 2 follow focus" s knobs follow knobs 1 2
 s midi send knobs B0 02 00 >/dev/null; s midi send knobs B0 02 7F >/dev/null

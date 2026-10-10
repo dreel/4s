@@ -468,3 +468,31 @@ they differ from the sections above, these win):
 - **Not in phase 2**: a piano-roll editor in the UI (the CLI and RPC edit
   any event; the step editors edit the grid).
 
+## Implementation notes (device models)
+
+Added with the Akai MPK mini IV, the first controller with several ports
+and endless knobs:
+
+- **Models** are data (`crates/daemon/devices/*.json`, embedded): `match`
+  on the port name, `ports` (name part -> logical device name or `ignore`;
+  a controller can be several devices, e.g. `mpk` and `mpk_daw`), a
+  `profile`, and a default `layout` (a `SeatConfig` naming the model's
+  ports). The Livid Block is a model too (profile `livid_block`). Ports of
+  known models connect automatically; `midi-devices.json` records each
+  port's `model` and `role`.
+- **Default layout**: a device with no bindings, CC maps, or knob entries
+  of its own in the seat uses its model's layout for its role (renamed to
+  the device); without a model it plays the focus as before.
+  `seat.apply_layout` (`4s midi layout <device> --apply`, the UI's "edit")
+  copies it into the seat for every connected port of the model, as an
+  undoable seat edit.
+- **General additions**: `NoteBinding.remap` (output notes from the range's
+  low end), `@<type>` targets and `a|b` fallbacks (the MPK's keys play
+  `@tb303|focus`), `focus.<param>` CC maps (skipped when the
+  focus lacks the parameter), `CcMode::Relative` for endless encoders (200
+  steps per range, no pickup needed), and `SeatConfig.pitch_bend` (default
+  the focus; +/-2 semitones; `Instrument::pitch_bend`, the 303 bends).
+- Pitch bend is not journaled (see the RFC 0006 amendment). Protocol 5.
+- Not yet: pad LEDs, display, and buttons over the DAW Port (no documented
+  protocol); MIDI out to the Din Port.
+

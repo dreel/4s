@@ -69,7 +69,8 @@ export function MidiPanel() {
         <div className="text-zinc-400">
           {connections.map((c) => (
             <div key={c.input} data-testid={`midi-device-${c.device}`}>
-              {c.device} <span className="text-zinc-600">{c.input}</span> ({c.profile === "livid_block" ? "Block" : "notes + CCs"})
+              {c.device} <span className="text-zinc-600">{c.input}</span> ({c.profile === "livid_block" ? "Block" : "notes + CCs"}
+              {c.model ? `, ${c.model}` : ""})
               {c.output ? ` -> ${c.output}` : ""}
             </div>
           ))}

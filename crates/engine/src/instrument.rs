@@ -43,6 +43,9 @@ pub trait Instrument: Send {
     /// Release a held note.
     fn note_off(&mut self, _note: u8) {}
 
+    /// Bend every note by `semitones` (from a pitch wheel); 0 is unbent.
+    fn pitch_bend(&mut self, _semitones: f32) {}
+
     /// Render `frames` (<= MAX_BLOCK) frames into the output buffers.
     fn render(&mut self, frames: usize);
 

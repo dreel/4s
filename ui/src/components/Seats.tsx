@@ -122,6 +122,19 @@ export function SeatPanel() {
           </button>
         </div>
       ))}
+      {seat.defaults.map((d) => (
+        <div key={`d-${d}`} className="flex justify-between gap-2" data-testid={`seat-default-${d.split(" ")[0]}`}>
+          <span className="truncate">{d}: default layout</span>
+          <button
+            className="text-zinc-500 hover:text-zinc-200"
+            title="copy the default layout into your seat to edit it"
+            data-testid={`seat-apply-${d.split(" ")[0]}`}
+            onClick={() => void act(client.call("seat.apply_layout", { seat: seat.name, device: d.split(" ")[0] }))}
+          >
+            edit
+          </button>
+        </div>
+      ))}
       {c.cc.map((m) => (
         <div key={`${m.device}/${m.channel}/${m.cc}`} className="flex justify-between gap-2">
           <span className="truncate">

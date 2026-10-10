@@ -17,6 +17,19 @@ struct Entry {
     profile: DeviceProfile,
     #[serde(default)]
     auto_connect: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+}
+
+/// How a port is connected: its logical name, profile, and model role.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Resolved {
+    pub name: String,
+    pub profile: DeviceProfile,
+    pub model: Option<String>,
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -33,16 +46,20 @@ pub struct Hardware {
     file: File,
 }
 
-/// A port named like a Livid Block gets its profile by default.
-pub fn looks_like_block(port: &str) -> bool {
-    port.to_lowercase().contains("block")
+/// A port to connect automatically when it appears: a known model's port
+/// that the model uses (`crate::models`).
+pub fn known_model_port(port: &str) -> bool {
+    crate::models::for_port(port).is_some_and(|(_, role)| role.is_some())
 }
 
 impl Hardware {
     pub fn load(path: &Path) -> Hardware {
         let file = match std::fs::read_to_string(path) {
             Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-                tracing::warn!("invalid {}: {e}; starting empty", path.display());
+                // Keep the user's file: it is moved aside, not overwritten.
+                let bak = path.with_extension("json.bak");
+                let _ = std::fs::rename(path, &bak);
+                tracing::warn!("invalid {}: {e}; moved to {} and starting empty", path.display(), bak.display());
                 File::default()
             }),
             Err(_) => File::default(),
@@ -73,6 +90,8 @@ impl Hardware {
                 name: e.name.clone(),
                 profile: e.profile,
                 auto_connect: e.auto_connect,
+                model: e.model.clone(),
+                role: e.role.clone(),
             })
             .collect()
     }
@@ -94,10 +113,10 @@ impl Hardware {
         self.file.devices.iter().any(|(p, e)| p != except_port && e.name == name)
     }
 
-    /// A name for a port seen for the first time: from its port name,
-    /// numbered if another port already has it.
-    fn fresh_name(&self, port: &str) -> String {
-        let mut base = slug(port);
+    /// A name for a port seen for the first time: its model's name for it,
+    /// else from its port name; numbered if another port already has it.
+    fn fresh_name(&self, port: &str, model_name: Option<&str>) -> String {
+        let mut base = model_name.map(str::to_string).unwrap_or_else(|| slug(port));
         if !self.name_taken(&base, port) {
             return base;
         }
@@ -116,25 +135,44 @@ impl Hardware {
         name: Option<&str>,
         profile: Option<DeviceProfile>,
         replaces: Option<&str>,
-    ) -> Result<(String, DeviceProfile), String> {
+    ) -> Result<Resolved, String> {
         if let Some(n) = name {
             validate_name("device", n)?;
             if self.name_taken(n, port) && self.port_named(n).as_deref() != replaces {
                 return Err(format!("another port is already named '{n}'"));
             }
         }
-        let default_profile =
-            if looks_like_block(port) { DeviceProfile::LividBlock } else { DeviceProfile::Generic };
         let saved = self.file.devices.get(port);
-        let name = name.map(str::to_string).or(saved.map(|e| e.name.clone())).unwrap_or_else(|| self.fresh_name(port));
-        let profile = profile.or(saved.map(|e| e.profile)).unwrap_or(default_profile);
-        Ok((name, profile))
+        // A known model names the port and sets its profile; its ignored
+        // ports connect as plain devices when asked for by hand.
+        let model = crate::models::for_port(port);
+        let role = model.and_then(|(_, r)| r);
+        let name = name
+            .map(str::to_string)
+            .or(saved.map(|e| e.name.clone()))
+            .unwrap_or_else(|| self.fresh_name(port, role));
+        let profile = profile
+            .or(saved.map(|e| e.profile))
+            .unwrap_or(model.filter(|(_, r)| r.is_some()).map(|(m, _)| m.profile).unwrap_or_default());
+        Ok(Resolved {
+            name,
+            profile,
+            model: role.and(model.map(|(m, _)| m.id.clone())),
+            role: role.map(str::to_string),
+        })
     }
 
     /// Record a successful connection (as `resolve` named it), to be
     /// reconnected automatically when the port comes back.
-    pub fn connected(&mut self, port: &str, name: &str, profile: DeviceProfile) {
-        self.file.devices.insert(port.to_string(), Entry { name: name.to_string(), profile, auto_connect: true });
+    pub fn connected(&mut self, port: &str, r: &Resolved) {
+        let e = Entry {
+            name: r.name.clone(),
+            profile: r.profile,
+            auto_connect: true,
+            model: r.model.clone(),
+            role: r.role.clone(),
+        };
+        self.file.devices.insert(port.to_string(), e);
         self.save();
     }
 

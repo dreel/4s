@@ -21,6 +21,14 @@ low: number | null, high: number | null,
  */
 transpose: number, 
 /**
- * An instrument id, or `focus` for the seat's focused instrument.
+ * Output note for input notes `low`, `low + 1`, ... (from 0 without
+ * `low`), e.g. pads to drum voices. Overrides `transpose`; a note past
+ * the list plays nothing.
+ */
+remap: Array<number> | null, 
+/**
+ * An instrument id, `focus` for the seat's focused instrument, or
+ * `@<type>` for the first instrument of a type (`@tr808`).
+ * Alternatives separated by `|` are tried in order: `@tb303|focus`.
  */
 target: string, };

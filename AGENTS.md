@@ -42,6 +42,7 @@ and agents can drive and verify every part of it.
 - [Validation](docs/validation.md) -- loop-closing, agent-driven testing
 - [Journal](docs/journal.md) -- what happened and who did it, undo/redo, reproducing bugs by replaying recordings, recordings as tests
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
+- [Akai MPK mini IV](docs/hardware/akai-mpk-mini-iv.md) -- device model, ports, default layout
 
 ## Build, run, verify
 

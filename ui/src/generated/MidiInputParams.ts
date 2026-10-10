@@ -20,4 +20,10 @@ seat: string | null,
  * generic. Input from a device on the engine host carries it, so the
  * journal replays it the same way where that device is not connected.
  */
-profile: DeviceProfile | null, };
+profile: DeviceProfile | null, 
+/**
+ * The device model and port role whose default layout applies (see
+ * `midi.models`); default: the connected device's. Carried like
+ * `profile`, so a replay reads the input through the same layout.
+ */
+model?: string | null, role?: string | null, };

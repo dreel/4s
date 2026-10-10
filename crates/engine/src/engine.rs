@@ -51,6 +51,7 @@ pub enum Command {
     /// A note; with `gate` it releases after half a step at the current tempo.
     NoteOn { slot: u8, note: u8, velocity: f32, gate: bool },
     NoteOff { slot: u8, note: u8 },
+    PitchBend { slot: u8, semitones: f32 },
     Play,
     Stop,
 }
@@ -69,6 +70,7 @@ impl std::fmt::Debug for Command {
             Command::SetClipLength { slot, length } => write!(f, "SetClipLength({slot}, {length:?})"),
             Command::NoteOn { slot, note, .. } => write!(f, "NoteOn({slot}, {note})"),
             Command::NoteOff { slot, note } => write!(f, "NoteOff({slot}, {note})"),
+            Command::PitchBend { slot, semitones } => write!(f, "PitchBend({slot}, {semitones})"),
             Command::Play => write!(f, "Play"),
             Command::Stop => write!(f, "Stop"),
         }
@@ -343,6 +345,11 @@ impl Engine {
             Command::NoteOff { slot, note } => {
                 if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
                     s.instrument.note_off(note);
+                }
+            }
+            Command::PitchBend { slot, semitones } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.pitch_bend(semitones);
                 }
             }
             Command::Play => {
@@ -741,6 +748,28 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(silent_bars, 0, "the bass went silent");
+    }
+
+    /// Pitch bend moves a sounding 303 note: +2 semitones raises the
+    /// waveform's rate by 2^(2/12) (counted as rising zero crossings of a
+    /// bright saw).
+    #[test]
+    fn pitch_bend_bends_the_303() {
+        let crossings = |bend: f32| {
+            let mut e = note_engine();
+            for (index, value) in [(2u16, 1.0f32), (4, 0.0)] {
+                // Cutoff open, no envelope sweep: the saw passes through.
+                let _ = e.apply(Command::SetParam { target: ParamTarget::Instrument { slot: 0, index }, value }, &mut |_| {});
+            }
+            let _ = e.apply(Command::NoteOn { slot: 0, note: 45, velocity: 0.7, gate: false }, &mut |_| {});
+            let _ = e.apply(Command::PitchBend { slot: 0, semitones: bend }, &mut |_| {});
+            render_secs(&mut e, 0.2, &mut vec![]); // let the bend settle
+            let out = render_secs(&mut e, 0.5, &mut vec![]);
+            let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+            left.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() as f32
+        };
+        let ratio = crossings(2.0) / crossings(0.0);
+        assert!((ratio - 2f32.powf(2.0 / 12.0)).abs() < 0.03, "ratio {ratio}");
     }
 
     /// A clip note that ends while a later one on the same pitch sounds must

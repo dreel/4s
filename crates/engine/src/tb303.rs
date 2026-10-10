@@ -70,6 +70,9 @@ pub struct Tb303 {
     ladder: [f32; 4],
     /// The current note is held (until its note-off) rather than timed.
     held_by_key: bool,
+    /// Pitch bend in semitones: target and smoothed value.
+    bend_target: f32,
+    bend: f32,
     /// Held keys, oldest first; the last one sounds (last-note priority).
     keys: [u8; MAX_KEYS],
     num_keys: usize,
@@ -102,6 +105,8 @@ impl Tb303 {
             accent_coef: coef(0.08),
             ladder: [0.0; 4],
             held_by_key: false,
+            bend_target: 0.0,
+            bend: 0.0,
             keys: [0; MAX_KEYS],
             num_keys: 0,
             buf: vec![0.0; MAX_BLOCK * 2],
@@ -188,6 +193,10 @@ impl Instrument for Tb303 {
         Some(Hit { voice: None, note: Some(note), velocity })
     }
 
+    fn pitch_bend(&mut self, semitones: f32) {
+        self.bend_target = semitones.clamp(-12.0, 12.0);
+    }
+
     fn note_off(&mut self, note: u8) {
         let was_top = self.remove_key(note);
         // A timed note (an audition) that took over is not the key's to end,
@@ -230,7 +239,8 @@ impl Instrument for Tb303 {
                 }
             }
             self.pitch = self.target + (self.pitch - self.target) * self.glide_coef;
-            let hz = midi_hz(self.pitch) * semitones_to_ratio(tune);
+            self.bend += (self.bend_target - self.bend) * 0.002;
+            let hz = midi_hz(self.pitch) * semitones_to_ratio(tune + self.bend);
             let dt = (hz / sr).min(0.45);
             self.phase += dt;
             if self.phase >= 1.0 {

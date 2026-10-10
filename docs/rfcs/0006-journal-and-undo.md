@@ -261,6 +261,8 @@ the journal this means:
   and the host seat pin are not in the doc.
 - Seat changes are journaled like any other request; `seat.list` is read
   only.
+- **Pitch bend** from a device plays at once and is not journaled: it is a
+  performance gesture at wheel/strip rate and changes no state.
 - **Clips (RFC 0007 phase 2)** replace the `step:` and `note:` keys with one
   key per event, `event:<inst>.<tick>.<note>` -> `{len, velocity}`, and
   `clip:<inst>` for a clip's own length. Two people editing different notes

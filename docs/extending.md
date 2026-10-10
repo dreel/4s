@@ -96,6 +96,18 @@ seat bindings and CC maps (`4s bind`, `4s cc map`, `4s cc learn`,
 [architecture.md](architecture.md#midi-input-and-seats)). A device with no
 bindings plays the seat's focus.
 
+To make a controller work out of the box, add a **device model**: a JSON
+file in `crates/daemon/devices/` (listed in `crates/daemon/src/models.rs`)
+naming its ports (`match`, `ports`: port name part -> device name or
+`ignore`) and a default `layout` (bindings with `remap` and `@<type>`
+targets, CC maps with `focus.<param>`, knobs that follow the focus,
+`mode: relative` for endless encoders, `pitch_bend`). Ports of known models
+connect automatically, and seats use the layout until they bind the device
+themselves. Probe the device first with `4s midi connect` on each port and
+`4s midi monitor`, and document it in `docs/hardware/<device>.md`, like
+[akai-mpk-mini-iv.md](hardware/akai-mpk-mini-iv.md). The models test checks
+every file.
+
 Code is only needed for a **surface**: a controller with its own layout and
 feedback, like the Livid Block (the reference). For one:
 
@@ -117,10 +129,10 @@ feedback, like the Livid Block (the reference). For one:
    from `refresh_controller`). A second device kind with feedback needs a
    per-kind send path in `crates/daemon/src/midi.rs`, still diffing so only
    changes go out.
-5. Auto-connect, if appropriate: `midi_autoconnect` connects ports named
-   like a Block, and every port connected before (`midi-devices.json`);
-   default your profile by port name in `Hardware::resolve` (as
-   `looks_like_block` does).
+5. Auto-connect and the default profile come from a device model: add a
+   model file with `"profile": "<your profile>"` (as `livid-block.json`
+   does). `midi_autoconnect` connects every known model's ports, and every
+   port connected before (`midi-devices.json`).
 6. Expose it in `4s midi connect --profile ...` and the UI's MIDI panel (the
    profile list).
 7. Document the mapping in `docs/hardware/<device>.md`, following

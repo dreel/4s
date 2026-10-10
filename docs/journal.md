@@ -243,8 +243,10 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
   a new segment, so one inside a segment is a failed load), `midi.connect`,
   `midi.disconnect`, `midi.rename`, and `midi.set_seat`. They depend on the
   engine host's disk or ports and never change the doc. MIDI input from a
-  device is recorded as `midi.input` with the device's profile, so it
-  replays the same way without the device.
+  device is recorded as `midi.input` with the device's profile, model, and
+  port role, and `seat.apply_layout` with the model's ports it applied, so
+  both replay the same way without the device (a model's default layout
+  included).
 - **Replay into a daemon with the recording's host user.** Each entry
   records its caller's seat, and replay joins it, but `controller.*` and a
   Block act on the host seat, the daemon's own user (`FOURS_USER`, else the

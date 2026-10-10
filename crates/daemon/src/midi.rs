@@ -108,10 +108,10 @@ impl Midi {
         &mut self,
         input_name: &str,
         output_query: Option<&str>,
-        device: &str,
-        profile: DeviceProfile,
+        r: &crate::hardware::Resolved,
         tx: Sender<MidiMessage>,
     ) -> Result<MidiConnection> {
+        let profile = r.profile;
         let (_, outputs) = list_ports();
         let input_name = input_name.to_string();
         if self.is_connected(&input_name) {
@@ -156,7 +156,14 @@ impl Midi {
             None => None,
         };
 
-        let info = MidiConnection { input: input_name, output: output_name, device: device.to_string(), profile };
+        let info = MidiConnection {
+            input: input_name,
+            output: output_name,
+            device: r.name.clone(),
+            profile,
+            model: r.model.clone(),
+            role: r.role.clone(),
+        };
         self.conns.push(Conn { info: info.clone(), _input: input, output });
         Ok(info)
     }

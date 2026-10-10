@@ -31,6 +31,7 @@ import type { KnobParams } from "./KnobParams";
 import type { MidiConnectParams } from "./MidiConnectParams";
 import type { MidiDisconnectParams } from "./MidiDisconnectParams";
 import type { MidiInputParams } from "./MidiInputParams";
+import type { MidiModelsResult } from "./MidiModelsResult";
 import type { MidiPortsResult } from "./MidiPortsResult";
 import type { MidiRenameParams } from "./MidiRenameParams";
 import type { MidiSetSeatParams } from "./MidiSetSeatParams";
@@ -59,6 +60,7 @@ import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
 import type { RouteSetParams } from "./RouteSetParams";
 import type { Seat } from "./Seat";
+import type { SeatApplyLayoutParams } from "./SeatApplyLayoutParams";
 import type { SeatBindParams } from "./SeatBindParams";
 import type { SeatCreateParams } from "./SeatCreateParams";
 import type { SeatFocusParams } from "./SeatFocusParams";
@@ -132,6 +134,7 @@ export interface Methods {
   "midi.rename": { params: MidiRenameParams; result: MidiPortsResult };
   "midi.set_seat": { params: MidiSetSeatParams; result: MidiPortsResult };
   "midi.input": { params: MidiInputParams; result: Empty };
+  "midi.models": { params: Empty; result: MidiModelsResult };
   "seat.list": { params: Empty; result: SeatListResult };
   "seat.claim": { params: SeatNameParams; result: SeatListResult };
   "seat.create": { params: SeatCreateParams; result: SeatListResult };
@@ -145,6 +148,7 @@ export interface Methods {
   "seat.unmap_cc": { params: SeatUnmapCcParams; result: Seat };
   "seat.learn_cc": { params: SeatLearnCcParams; result: Seat };
   "seat.follow_knobs": { params: SeatFollowKnobsParams; result: Seat };
+  "seat.apply_layout": { params: SeatApplyLayoutParams; result: Seat };
   "project.new": { params: Empty; result: ProjectInfo };
   "project.save": { params: ProjectSaveParams; result: ProjectInfo };
   "project.load": { params: ProjectLoadParams; result: ProjectInfo };
@@ -210,6 +214,7 @@ export const METHODS: MethodName[] = [
   "midi.rename",
   "midi.set_seat",
   "midi.input",
+  "midi.models",
   "seat.list",
   "seat.claim",
   "seat.create",
@@ -223,6 +228,7 @@ export const METHODS: MethodName[] = [
   "seat.unmap_cc",
   "seat.learn_cc",
   "seat.follow_knobs",
+  "seat.apply_layout",
   "project.new",
   "project.save",
   "project.load",

@@ -51,11 +51,11 @@ pub(super) struct ClientState {
     pub chose: bool,
 }
 
-/// A note held by someone: `key` is the input note, `note` what it played
+/// A note held by someone: `key` is the input note and channel (`input_key`), `note` what it played
 /// (after transpose) on instrument `slot`.
 pub(super) struct Held {
     pub holder: String,
-    pub key: u8,
+    pub key: u16,
     pub slot: u8,
     pub note: u8,
 }
@@ -67,6 +67,32 @@ pub(super) struct Pickup {
     pub sent: Option<f64>,
     pub last_in: Option<f64>,
 }
+
+/// A binding target: `focus`, an instrument id, or `@<type>`.
+/// Alternatives separated by `|` are tried in order (`@tb303|focus`).
+fn check_target(t: &str) -> Result<(), RpcError> {
+    for part in t.split('|') {
+        match part.strip_prefix('@') {
+            _ if part == "focus" => {}
+            Some(kind) => {
+                InstrumentType::parse(kind)
+                    .ok_or_else(|| RpcError::invalid(format!("unknown instrument type in target '{t}'")))?;
+            }
+            None => validate_instrument_id(part).map_err(RpcError::invalid)?,
+        }
+    }
+    Ok(())
+}
+
+/// What a held note is released by: the input note and its MIDI channel
+/// (0 for notes started over RPC), so a note-off on another channel (a pad
+/// on channel 10 sharing a key's note number) never ends it.
+pub(super) fn input_key(channel: u8, note: u8) -> u16 {
+    channel as u16 * 128 + note as u16
+}
+
+/// Relative encoder steps per parameter range.
+const RELATIVE_STEPS: f64 = 200.0;
 
 /// Seat and note checks shared by RPC edits and project loading.
 pub(super) fn check_seat_config(c: &SeatConfig) -> Result<(), RpcError> {
@@ -85,9 +111,15 @@ pub(super) fn check_seat_config(c: &SeatConfig) -> Result<(), RpcError> {
         {
             return Err(RpcError::invalid(format!("note range {l}..{h} is backwards")));
         }
-        if b.target != "focus" {
-            validate_instrument_id(&b.target).map_err(RpcError::invalid)?;
+        check_target(&b.target)?;
+        if let Some(map) = &b.remap
+            && (map.len() > 128 || map.iter().any(|n| *n > 127))
+        {
+            return Err(RpcError::invalid("remap: at most 128 notes, each 0..127"));
         }
+    }
+    if let Some(t) = &c.pitch_bend {
+        check_target(t)?;
     }
     for m in &c.cc {
         validate_name("device", &m.device).map_err(RpcError::invalid)?;
@@ -127,6 +159,21 @@ impl Core {
                     config: s.config.clone(),
                     occupants,
                     learning: s.learning.clone(),
+                    defaults: self
+                        .midi
+                        .connections()
+                        .iter()
+                        .filter(|c| {
+                            let own = s.config.bindings.iter().any(|b| b.device == c.device)
+                                || s.config.cc.iter().any(|m| m.device == c.device)
+                                || s.config.knobs.iter().any(|k| k.device == c.device);
+                            !own && c.model.is_some()
+                        })
+                        .filter_map(|c| {
+                            let m = crate::models::get(c.model.as_deref()?)?;
+                            Some(format!("{} ({})", c.device, m.label))
+                        })
+                        .collect(),
                 }
             })
             .collect();
@@ -499,7 +546,7 @@ impl Core {
                 })
                 .and_then(ok),
             Request::SeatMapCc(p) => {
-                if let Err(e) = self.param_id(&p.map.param) {
+                if let Err(e) = self.check_cc_param(&p.map.param) {
                     return Ok(Err(e));
                 }
                 self.edit_seat(p.seat.as_deref(), client, origin, |s| {
@@ -520,7 +567,7 @@ impl Core {
                 .and_then(ok),
             Request::SeatLearnCc(p) => {
                 if let Some(path) = &p.param
-                    && let Err(e) = self.param_id(path)
+                    && let Err(e) = self.check_cc_param(path)
                 {
                     return Ok(Err(e));
                 }
@@ -540,6 +587,39 @@ impl Core {
                     Ok(())
                 })
                 .and_then(ok),
+            Request::SeatApplyLayout(p) => {
+                // Every port of the device's model gets its part.
+                let found = match p.model {
+                    Some(m) => Some((m, p.ports)),
+                    None => self.layout_ports(&p.device),
+                };
+                let Some((model, ports)) = found.and_then(|(m, ports)| Some((crate::models::get(&m)?, ports))) else {
+                    return Ok(Err(RpcError::invalid(format!(
+                        "'{}' is not a connected device of a known model (see 4s midi models)",
+                        p.device
+                    ))));
+                };
+                let devices: Vec<String> = ports.iter().map(|x| x.device.clone()).collect();
+                let parts: Vec<SeatConfig> = ports.iter().map(|x| layout(model, &x.role, &x.device)).collect();
+                self.edit_seat(p.seat.as_deref(), client, origin, |s| {
+                    let c = &mut s.config;
+                    for d in devices.iter() {
+                        c.bindings.retain(|b| &b.device != d);
+                        c.cc.retain(|m| &m.device != d);
+                        c.knobs.retain(|k| &k.device != d);
+                    }
+                    for part in parts {
+                        c.bindings.extend(part.bindings);
+                        c.cc.extend(part.cc);
+                        c.knobs.extend(part.knobs);
+                        if c.pitch_bend.is_none() {
+                            c.pitch_bend = part.pitch_bend;
+                        }
+                    }
+                    Ok(())
+                })
+                .and_then(ok)
+            }
             other => return Err(other),
         })
     }
@@ -548,7 +628,7 @@ impl Core {
 
     /// Start a held note for `holder`. `key` is what the holder will
     /// release it by (the input note).
-    pub(super) fn hold_note(&mut self, holder: &str, key: u8, slot: u8, note: u8, velocity: f32) -> Result<(), RpcError> {
+    pub(super) fn hold_note(&mut self, holder: &str, key: u16, slot: u8, note: u8, velocity: f32) -> Result<(), RpcError> {
         self.ensure_room(1)?;
         // One entry per played note: a key layered onto one instrument by
         // two bindings holds both notes, and its note-off releases both.
@@ -560,7 +640,7 @@ impl Core {
 
     /// Release what `holder` holds by `key` (on `slot` only, if given).
     /// The engine hears a note-off only when nobody else holds that note.
-    pub(super) fn release_note(&mut self, holder: &str, key: u8, slot: Option<u8>) {
+    pub(super) fn release_note(&mut self, holder: &str, key: u16, slot: Option<u8>) {
         let mut released = Vec::new();
         self.held.retain(|h| {
             let hit = h.holder == holder && h.key == key && slot.is_none_or(|s| s == h.slot);
@@ -614,8 +694,9 @@ impl Core {
     // ---- input routing -------------------------------------------------------
 
     /// What a `midi.input` message can do in its seat, as `device_input`
-    /// would handle it. Input that can do nothing (clock, active sensing,
-    /// pitch bend, an unmapped CC, a Block pad release) is not journaled.
+    /// would handle it. Input that edits and plays nothing (clock, active
+    /// sensing, an unmapped CC, a Block pad release) is not journaled, nor
+    /// is pitch bend, a gesture that plays at once.
     /// Malformed input or an unknown seat counts as playing, so its error
     /// is journaled.
     pub(super) fn input_effect(&self, p: &MidiInputParams, client: &str) -> InputEffect {
@@ -634,12 +715,17 @@ impl Core {
             };
         }
         let (channel, cc) = ((d[0] & 0x0f) + 1, d[1]);
+        let model = self.input_model(p);
+        let model = model.as_ref().map(|(m, r)| (m.as_str(), r.as_str()));
         let on_channel = |c: Option<u8>| c.is_none_or(|c| c == channel);
         match d[0] & 0xf0 {
             0x80 | 0x90 => InputEffect::Plays,
+            // The seat's own maps for the device, else its model's layout.
             0xb0 if s.learning.is_some()
-                || s.config.cc.iter().any(|m| m.device == p.device && m.cc == cc && on_channel(m.channel))
-                || s.config.knobs.iter().any(|k| k.device == p.device && on_channel(k.channel) && k.ccs.contains(&cc)) =>
+                || self.device_config(&seat, &p.device, model).is_some_and(|c| {
+                    c.cc.iter().any(|m| m.cc == cc && on_channel(m.channel))
+                        || c.knobs.iter().any(|k| on_channel(k.channel) && k.ccs.contains(&cc))
+                }) =>
             {
                 InputEffect::Edits
             }
@@ -654,6 +740,7 @@ impl Core {
         seat: &str,
         device: &str,
         profile: DeviceProfile,
+        model: Option<(&str, &str)>,
         holder: &str,
         d: &[u8],
         origin: &str,
@@ -680,65 +767,206 @@ impl Core {
         }
         let (status, channel, a, b) = (d[0] & 0xf0, (d[0] & 0x0f) + 1, d[1], d[2]);
         match status {
-            0x90 if b > 0 => self.input_note_on(seat, device, holder, channel, a, b as f32 / 127.0),
-            0x80 | 0x90 => self.release_note(holder, a, None),
-            0xb0 => self.input_cc(seat, device, channel, a, b as f64 / 127.0, origin),
+            0x90 if b > 0 => self.input_note_on(seat, device, model, holder, channel, a, b as f32 / 127.0),
+            0x80 | 0x90 => self.release_note(holder, input_key(channel, a), None),
+            0xb0 => self.input_cc(seat, device, model, channel, a, b, origin),
+            0xe0 => self.input_pitch_bend(seat, device, model, ((b as i32) << 7 | a as i32) - 8192),
             _ => {}
         }
     }
 
-    fn input_note_on(&mut self, seat: &str, device: &str, holder: &str, channel: u8, note: u8, velocity: f32) {
-        let Some(s) = self.seats.get(seat) else { return };
-        let bound: Vec<NoteBinding> = s.config.bindings.iter().filter(|b| b.device == device).cloned().collect();
-        // A device without bindings in this seat plays the seat's focus.
-        let bindings = if bound.is_empty() {
-            vec![NoteBinding { device: device.into(), channel: None, low: None, high: None, transpose: 0, target: "focus".into() }]
-        } else {
-            bound
+    /// What `device` does in `seat`: the seat's own entries for it; else
+    /// the default layout of `model` (model id, port role: entries for the
+    /// role, renamed to the device); else `None`, and it plays the seat's
+    /// focus.
+    pub(super) fn device_config(&self, seat: &str, device: &str, model: Option<(&str, &str)>) -> Option<SeatConfig> {
+        let s = self.seats.get(seat)?;
+        let own = SeatConfig {
+            focus: None,
+            knob_page: None,
+            bindings: s.config.bindings.iter().filter(|b| b.device == device).cloned().collect(),
+            cc: s.config.cc.iter().filter(|m| m.device == device).cloned().collect(),
+            knobs: s.config.knobs.iter().filter(|k| k.device == device).cloned().collect(),
+            pitch_bend: s.config.pitch_bend.clone(),
         };
+        if !own.bindings.is_empty() || !own.cc.is_empty() || !own.knobs.is_empty() {
+            return Some(own);
+        }
+        let (model, role) = model?;
+        Some(layout(crate::models::get(model)?, role, device))
+    }
+
+    /// The model of connected `device` and its model's connected ports.
+    pub(super) fn layout_ports(&self, device: &str) -> Option<(String, Vec<LayoutPort>)> {
+        let model = self.midi.by_device(device)?.model.clone()?;
+        let ports = self
+            .midi
+            .connections()
+            .into_iter()
+            .filter(|c| c.model.as_deref() == Some(model.as_str()))
+            .filter_map(|c| Some(LayoutPort { device: c.device, role: c.role? }))
+            .collect();
+        Some((model, ports))
+    }
+
+    /// An instrument a binding target names in a seat: `focus`, `@<type>`
+    /// (the first of that type), or an id.
+    pub(super) fn resolve_target(&self, seat: &str, target: &str) -> Option<String> {
+        // `a|b`: the first alternative that names an instrument.
+        if target.contains('|') {
+            return target.split('|').find_map(|t| self.resolve_target(seat, t));
+        }
+        if target == "focus" {
+            return self.seat_focus(seat);
+        }
+        if let Some(kind) = target.strip_prefix('@') {
+            let kind = InstrumentType::parse(kind)?;
+            return self.instruments.iter().find(|i| i.kind == kind).map(|i| i.id.clone());
+        }
+        self.instruments.iter().any(|i| i.id == target).then(|| target.to_string())
+    }
+
+    fn input_note_on(
+        &mut self,
+        seat: &str,
+        device: &str,
+        model: Option<(&str, &str)>,
+        holder: &str,
+        channel: u8,
+        note: u8,
+        velocity: f32,
+    ) {
+        // The seat's own bindings for the device (CC maps or knobs alone do
+        // not count); else its model port's layout, which may bind nothing
+        // (the MPK's DAW port copies the pads: it plays no notes); else,
+        // with no model, the seat's focus.
+        let mut bindings = self.device_config(seat, device, model).map(|c| c.bindings).unwrap_or_default();
+        let layout = model.and_then(|(m, role)| Some(layout(crate::models::get(m)?, role, device)));
+        if bindings.is_empty()
+            && let Some(l) = layout
+        {
+            bindings = l.bindings;
+        } else if bindings.is_empty() {
+            bindings = vec![NoteBinding {
+                device: device.into(),
+                channel: None,
+                low: None,
+                high: None,
+                transpose: 0,
+                remap: None,
+                target: "focus".into(),
+            }];
+        }
         for b in bindings.iter().filter(|b| b.matches(device, channel, note)) {
-            let target = if b.target == "focus" { self.seat_focus(seat) } else { Some(b.target.clone()) };
-            let (Some(slot), Ok(out)) = (target.and_then(|t| self.slot_of(&t)), u8::try_from(note as i16 + b.transpose as i16))
-            else {
-                continue;
-            };
-            if out <= 127 {
-                let _ = self.hold_note(holder, note, slot, out, velocity);
-            }
+            let target = self.resolve_target(seat, &b.target);
+            let (Some(slot), Some(out)) = (target.and_then(|t| self.slot_of(&t)), b.output(note)) else { continue };
+            let _ = self.hold_note(holder, input_key(channel, note), slot, out, velocity);
         }
     }
 
-    fn input_cc(&mut self, seat: &str, device: &str, channel: u8, cc: u8, value: f64, origin: &str) {
+    /// Pitch bend (-8192..8191) to +/-2 semitones on the configured target
+    /// (default: the focus).
+    fn input_pitch_bend(&mut self, seat: &str, device: &str, model: Option<(&str, &str)>, value: i32) {
+        let target = self
+            .device_config(seat, device, model)
+            .and_then(|c| c.pitch_bend)
+            .or_else(|| self.seats.get(seat)?.config.pitch_bend.clone())
+            .unwrap_or_else(|| "focus".into());
+        let Some(slot) = self.resolve_target(seat, &target).and_then(|t| self.slot_of(&t)) else { return };
+        let semitones = 2.0 * value as f32 / 8192.0;
+        self.send(Command::PitchBend { slot, semitones });
+    }
+
+    /// A CC map's parameter: an existing path, or `focus.<param>` where some
+    /// instrument type has `<param>` (it applies whenever the focus has it).
+    fn check_cc_param(&self, param: &str) -> Result<(), RpcError> {
+        let Some(rest) = param.strip_prefix("focus.") else { return self.param_id(param).map(|_| ()) };
+        let known = InstrumentType::ALL.iter().any(|k| {
+            let id = k.default_id();
+            instrument::params(*k, id).iter().any(|p| p.path == format!("{id}.{rest}"))
+        });
+        if known {
+            Ok(())
+        } else {
+            Err(RpcError::invalid(format!("no instrument type has a parameter '{rest}' (see 4s instrument types)")))
+        }
+    }
+
+    /// A parameter path, with `focus.<param>` resolved to the seat's focus.
+    fn resolve_param(&self, seat: &str, param: &str) -> Option<String> {
+        match param.strip_prefix("focus.") {
+            Some(rest) => Some(format!("{}.{rest}", self.seat_focus(seat)?)),
+            None => Some(param.to_string()),
+        }
+    }
+
+    fn input_cc(
+        &mut self,
+        seat: &str,
+        device: &str,
+        model: Option<(&str, &str)>,
+        channel: u8,
+        cc: u8,
+        raw: u8,
+        origin: &str,
+    ) {
+        let config = self.device_config(seat, device, model);
         let Some(s) = self.seats.get_mut(seat) else { return };
         if let Some(param) = s.learning.take() {
-            let map = CcMap { device: device.into(), channel: Some(channel), cc, param, pickup: true };
+            let map = CcMap { device: device.into(), channel: Some(channel), cc, param, pickup: true, mode: CcMode::Absolute };
             s.config.cc.retain(|x| !(x.device == map.device && x.cc == map.cc && x.channel == map.channel));
             s.config.cc.push(map);
             let saved = s.saved;
             self.seats_changed(origin, saved);
             return;
         }
-        let maps: Vec<CcMap> = s
-            .config
+        let Some(config) = config else { return };
+        let maps: Vec<CcMap> = config
             .cc
             .iter()
-            .filter(|m| m.device == device && m.cc == cc && m.channel.is_none_or(|c| c == channel))
+            .filter(|m| m.cc == cc && m.channel.is_none_or(|c| c == channel))
             .cloned()
             .collect();
-        let knobs: Vec<(usize, bool)> = s
-            .config
+        let knobs: Vec<(usize, bool, CcMode)> = config
             .knobs
             .iter()
-            .filter(|k| k.device == device && k.channel.is_none_or(|c| c == channel))
-            .filter_map(|k| k.ccs.iter().position(|c| *c == cc).map(|i| (i, k.pickup)))
+            .filter(|k| k.channel.is_none_or(|c| c == channel))
+            .filter_map(|k| k.ccs.iter().position(|c| *c == cc).map(|i| (i, k.pickup, k.mode)))
             .collect();
         for m in maps {
+            let Some(path) = self.resolve_param(seat, &m.param) else { continue };
+            if self.param_id(&path).is_err() {
+                continue; // e.g. `focus.cutoff` while a drum machine is focused
+            }
             let key = m.pickup.then(|| format!("{seat}/{device}/cc{channel}.{cc}"));
-            let _ = self.knob_to(&m.param, value, key, origin);
+            let _ = self.cc_to(&path, raw, m.mode, key, origin);
         }
-        for (index, pickup) in knobs {
+        for (index, pickup, mode) in knobs {
+            let (_, page) = self.seat_page(seat);
+            let Some(path) = page.and_then(|p| p.params.get(index).cloned()) else { continue };
             let key = pickup.then(|| format!("{seat}/{device}/k{index}"));
-            let _ = self.page_knob(seat, index, value, key, origin);
+            let _ = self.cc_to(&path, raw, mode, key, origin);
+        }
+    }
+
+    /// A CC value to a parameter: an absolute position (with pickup), or a
+    /// relative step from where it is.
+    fn cc_to(&mut self, path: &str, raw: u8, mode: CcMode, pickup: Option<String>, origin: &str) -> Result<(), RpcError> {
+        match mode {
+            CcMode::Absolute => self.knob_to(path, raw as f64 / 127.0, pickup, origin),
+            CcMode::Relative => {
+                let id = self.param_id(path)?;
+                let delta = if raw < 64 { raw as f64 } else { raw as f64 - 128.0 };
+                let (min, max) = match self.params[id].info.kind {
+                    ParamKind::Continuous { min, max } => (min, max),
+                    ParamKind::Integer { min, max } => (min as f64, max as f64),
+                    ParamKind::Toggle => (0.0, 1.0),
+                };
+                let step = (max - min) / RELATIVE_STEPS;
+                let step = if matches!(self.params[id].info.kind, ParamKind::Integer { .. }) { step.max(1.0) } else { step };
+                let value = self.params[id].value + delta * step;
+                self.set_param(path, value, origin).map(|_| ())
+            }
         }
     }
 
@@ -790,5 +1018,19 @@ impl Core {
         }
         self.set_param(path, min + v * (max - min), origin)?;
         Ok(())
+    }
+}
+
+/// `model`'s layout entries for port `role`, renamed to `device`.
+fn layout(model: &DeviceModel, role: &str, device: &str) -> SeatConfig {
+    let l = &model.layout;
+    let rename = |d: &str| (d == role).then(|| device.to_string());
+    SeatConfig {
+        focus: None,
+        knob_page: None,
+        bindings: l.bindings.iter().filter_map(|b| Some(NoteBinding { device: rename(&b.device)?, ..b.clone() })).collect(),
+        cc: l.cc.iter().filter_map(|m| Some(CcMap { device: rename(&m.device)?, ..m.clone() })).collect(),
+        knobs: l.knobs.iter().filter_map(|k| Some(KnobFollow { device: rename(&k.device)?, ..k.clone() })).collect(),
+        pitch_bend: l.pitch_bend.clone(),
     }
 }

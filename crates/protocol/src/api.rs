@@ -581,6 +581,41 @@ pub struct MidiInputParams {
     /// journal replays it the same way where that device is not connected.
     #[serde(default)]
     pub profile: Option<DeviceProfile>,
+    /// The device model and port role whose default layout applies (see
+    /// `midi.models`); default: the connected device's. Carried like
+    /// `profile`, so a replay reads the input through the same layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct MidiModelsResult {
+    pub models: Vec<DeviceModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SeatApplyLayoutParams {
+    /// Default: the caller's seat.
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// A connected device of a known model.
+    pub device: String,
+    /// The model and its ports to apply; default: the connected ports of
+    /// `device`'s model. The daemon journals them, so a replay applies the
+    /// same layout where the devices are not connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<LayoutPort>,
+}
+
+/// A device and the role its port plays in its model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LayoutPort {
+    pub device: String,
+    pub role: String,
 }
 
 // ---- seats ---------------------------------------------------------------
@@ -853,6 +888,8 @@ api! {
     MidiSetSeat = "midi.set_seat" (MidiSetSeatParams) -> MidiPortsResult;
     /// Feed one raw MIDI message from a logical device (as a bridge does).
     MidiInput = "midi.input" (MidiInputParams) -> Empty;
+    /// Known device models, with their ports and default layouts.
+    MidiModels = "midi.models" (Empty) -> MidiModelsResult;
 
     /// Seats, who sits where, and the host seat.
     SeatList = "seat.list" (Empty) -> SeatListResult;
@@ -882,6 +919,8 @@ api! {
     SeatLearnCc = "seat.learn_cc" (SeatLearnCcParams) -> Seat;
     /// Make a device's CCs control the focused instrument's knob page.
     SeatFollowKnobs = "seat.follow_knobs" (SeatFollowKnobsParams) -> Seat;
+    /// Copy a device model's default layout into the seat, to edit it.
+    SeatApplyLayout = "seat.apply_layout" (SeatApplyLayoutParams) -> Seat;
 
     /// Reset to a fresh default project.
     ProjectNew = "project.new" (Empty) -> ProjectInfo;

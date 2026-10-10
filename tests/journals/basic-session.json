@@ -86,7 +86,7 @@
   "entries": [
     {
       "seq": 2,
-      "time": 1791575501.653708,
+      "time": 1791578712.395774,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -112,7 +112,7 @@
     },
     {
       "seq": 3,
-      "time": 1791575501.65393,
+      "time": 1791578712.395989,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
@@ -191,7 +191,7 @@
     },
     {
       "seq": 4,
-      "time": 1791575501.654166,
+      "time": 1791578712.396213,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
@@ -262,7 +262,7 @@
     },
     {
       "seq": 5,
-      "time": 1791575501.654421,
+      "time": 1791578712.396431,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_step",
@@ -293,7 +293,7 @@
     },
     {
       "seq": 6,
-      "time": 1791575501.654695,
+      "time": 1791578712.39673,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
@@ -345,7 +345,7 @@
     },
     {
       "seq": 7,
-      "time": 1791575501.655227,
+      "time": 1791578712.397361,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
@@ -727,7 +727,7 @@
     },
     {
       "seq": 8,
-      "time": 1791575501.655756,
+      "time": 1791578712.397984,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_note",
@@ -761,7 +761,7 @@
     },
     {
       "seq": 9,
-      "time": 1791575501.656099,
+      "time": 1791578712.398386,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -787,7 +787,7 @@
     },
     {
       "seq": 10,
-      "time": 1791575501.65629,
+      "time": 1791578712.398587,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -813,7 +813,7 @@
     },
     {
       "seq": 11,
-      "time": 1791575501.656723,
+      "time": 1791578712.399016,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
@@ -843,7 +843,7 @@
     },
     {
       "seq": 12,
-      "time": 1791575501.657084,
+      "time": 1791578712.399387,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
@@ -864,7 +864,7 @@
     },
     {
       "seq": 13,
-      "time": 1791575501.65733,
+      "time": 1791578712.399615,
       "user": "e2e",
       "origin": "cli",
       "method": "seat.page",
@@ -887,7 +887,8 @@
             "cc": [],
             "focus": null,
             "knob_page": "decay",
-            "knobs": []
+            "knobs": [],
+            "pitch_bend": null
           }
         }
       ],
@@ -896,7 +897,7 @@
     },
     {
       "seq": 14,
-      "time": 1791575501.657704,
+      "time": 1791578712.399998,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.knob",
@@ -922,7 +923,7 @@
     },
     {
       "seq": 15,
-      "time": 1791575501.657988,
+      "time": 1791578712.400299,
       "user": "e2e",
       "origin": "cli",
       "method": "channel.add",
@@ -959,7 +960,7 @@
     },
     {
       "seq": 16,
-      "time": 1791575501.658251,
+      "time": 1791578712.40057,
       "user": "e2e",
       "origin": "cli",
       "method": "route.set",
@@ -986,7 +987,7 @@
     },
     {
       "seq": 17,
-      "time": 1791575501.658583,
+      "time": 1791578712.400906,
       "user": "e2e",
       "origin": "cli",
       "method": "route.set",
@@ -1018,7 +1019,7 @@
     },
     {
       "seq": 18,
-      "time": 1791575501.658918,
+      "time": 1791578712.401257,
       "user": "e2e",
       "origin": "cli",
       "method": "channel.move",
@@ -1052,7 +1053,7 @@
     },
     {
       "seq": 19,
-      "time": 1791575501.659554,
+      "time": 1791578712.40185,
       "user": "alice",
       "origin": "cli",
       "method": "param.set",
@@ -1078,7 +1079,7 @@
     },
     {
       "seq": 20,
-      "time": 1791575501.660081,
+      "time": 1791578712.402395,
       "user": "bob",
       "origin": "cli",
       "method": "param.set",
@@ -1104,7 +1105,7 @@
     },
     {
       "seq": 21,
-      "time": 1791575501.660277,
+      "time": 1791578712.40259,
       "user": "alice",
       "origin": "cli",
       "method": "history.undo",
@@ -1121,7 +1122,7 @@
     },
     {
       "seq": 22,
-      "time": 1791575501.660481,
+      "time": 1791578712.402787,
       "user": "bob",
       "origin": "cli",
       "method": "history.undo",
@@ -1144,7 +1145,7 @@
     },
     {
       "seq": 23,
-      "time": 1791575501.660693,
+      "time": 1791578712.402982,
       "user": "bob",
       "origin": "cli",
       "method": "history.redo",
@@ -1167,7 +1168,7 @@
     },
     {
       "seq": 24,
-      "time": 1791575501.661003,
+      "time": 1791578712.403282,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
@@ -1199,7 +1200,7 @@
     },
     {
       "seq": 25,
-      "time": 1791575501.661555,
+      "time": 1791578712.403859,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
@@ -1565,7 +1566,7 @@
     },
     {
       "seq": 26,
-      "time": 1791575501.662122,
+      "time": 1791578712.404432,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.remove",
@@ -1618,7 +1619,7 @@
     },
     {
       "seq": 27,
-      "time": 1791575501.662533,
+      "time": 1791578712.404845,
       "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
@@ -1668,7 +1669,7 @@
     },
     {
       "seq": 28,
-      "time": 1791575501.662756,
+      "time": 1791578712.40504,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -1688,7 +1689,7 @@
     },
     {
       "seq": 29,
-      "time": 1791575501.663001,
+      "time": 1791578712.405261,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.clear",
@@ -1725,7 +1726,7 @@
     },
     {
       "seq": 30,
-      "time": 1791575501.66323,
+      "time": 1791578712.405489,
       "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
@@ -1758,5 +1759,5 @@
       "error": null
     }
   ],
-  "digest": "88b0e60befb29fc0"
+  "digest": "a995dcb57bf68f6b"
 }

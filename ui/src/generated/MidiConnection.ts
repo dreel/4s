@@ -5,4 +5,12 @@ export type MidiConnection = { input: string, output: string | null,
 /**
  * Logical device name.
  */
-device: string, profile: DeviceProfile, };
+device: string, profile: DeviceProfile, 
+/**
+ * Known device model, if any.
+ */
+model: string | null, 
+/**
+ * The port's role in its model (see `MidiDevice::role`).
+ */
+role: string | null, };
