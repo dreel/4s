@@ -48,7 +48,7 @@ type Drag =
 type Handlers = {
   down: (e: React.PointerEvent, d: Drag) => void;
   move: (e: React.PointerEvent) => void;
-  up: () => void;
+  up: (e: React.PointerEvent) => void;
 };
 
 /** A placement's clip drawn as notes, repeated where the placement loops it,
@@ -213,6 +213,8 @@ function TrackHeader({ id, name, type, armed, selected, seated, h }: { id: strin
 export function Arrangement() {
   const instruments = useApp((s) => s.snapshot?.graph.instruments ?? []);
   const tracks = useApp((s) => s.snapshot?.tracks);
+  const clips = useApp((s) => s.snapshot?.clips);
+  const stepsLength = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   const seat = useApp(mySeat);
   const selected = useSelected();
   const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
@@ -250,6 +252,24 @@ export function Arrangement() {
     params: { instrument: id, ...p },
   });
 
+  /** A drag after the pointer moved to `e`. */
+  const follow = (drag: Drag, e: React.PointerEvent): Drag => {
+    if (drag.kind === "move" || drag.kind === "copy") return { ...drag, dt: snapTo((e.clientX - drag.x) / px) };
+    if (drag.kind === "resize") {
+      // At least a snap long (or as long as it was, if shorter).
+      const least = Math.min(snap, drag.p.length) - drag.p.length;
+      return { ...drag, dl: Math.max(least, snapTo((e.clientX - drag.x) / px)) };
+    }
+    // Over its own lane: the snap cell under the pointer, ending by the
+    // song's last tick.
+    const lane = lanes.current?.querySelector(`[data-testid="lane-${drag.id}"]`);
+    const r = lane?.getBoundingClientRect();
+    const x = r ? e.clientX - r.left : -1;
+    const on = !!r && x >= 0 && x < r.width && e.clientY >= r.top && e.clientY < r.bottom;
+    const length = clips?.find((c) => c.instrument === drag.id && c.id === drag.clip)?.length ?? stepsLength * STEP;
+    return { ...drag, start: on ? Math.min(Math.floor((MAX_TICKS - length) / snap) * snap, Math.floor(x / px / snap) * snap) : null };
+  };
+
   const h: Handlers = {
     down: (e, d) => {
       e.stopPropagation();
@@ -260,51 +280,42 @@ export function Arrangement() {
       setDrag(d);
     },
     move: (e) => {
-      if (!drag) return;
-      if (drag.kind === "move" || drag.kind === "copy") setDrag({ ...drag, dt: snapTo((e.clientX - drag.x) / px) });
-      else if (drag.kind === "resize") {
-        // At least a snap long (or as long as it was, if shorter).
-        const least = Math.min(snap, drag.p.length) - drag.p.length;
-        setDrag({ ...drag, dl: Math.max(least, snapTo((e.clientX - drag.x) / px)) });
-      } else {
-        // Over its own lane: the snap cell under the pointer.
-        const r = lanes.current!.getBoundingClientRect();
-        const row = Math.floor((e.clientY - r.top) / LANE);
-        const x = e.clientX - r.left;
-        const on = instruments[row]?.id === drag.id && x >= 0 && x < r.width;
-        setDrag({ ...drag, start: on ? Math.min(MAX_TICKS - BAR, Math.floor(x / px / snap) * snap) : null });
-      }
+      const d = drag && follow(drag, e);
+      if (d) setDrag(d);
     },
-    up: () => {
+    up: (e) => {
       if (!drag) return;
       setDrag(null);
-      const { id } = drag;
-      if (drag.kind === "move" || drag.kind === "copy") {
-        const to = dragStart(drag);
-        if (to === drag.p.start) return; // a click: selected
-        const { clip, length, offset } = drag.p;
+      // Where the pointer let go, even if its last move has not drawn yet.
+      const d = follow(drag, e);
+      const { id } = d;
+      if (d.kind === "move" || d.kind === "copy") {
+        const to = dragStart(d);
+        if (to === d.p.start) return; // a click: selected
+        const { clip, length, offset } = d.p;
         setPicked({ id, start: to });
-        if (drag.kind === "move") void act(client.call("song.move", { instrument: id, start: drag.p.start, to }));
+        if (d.kind === "move") void act(client.call("song.move", { instrument: id, start: d.p.start, to }));
         else void act(client.call("song.place", { instrument: id, clip, start: to, length, offset }));
-      } else if (drag.kind === "resize") {
-        const length = resized(drag);
-        if (length === drag.p.length) return;
-        const p = place(id, { clip: drag.p.clip, start: drag.p.start, length, offset: drag.p.offset });
+      } else if (d.kind === "resize") {
+        const length = resized(d);
+        if (length === d.p.length) return;
+        const p = place(id, { clip: d.p.clip, start: d.p.start, length, offset: d.p.offset });
         // Placing over it at the same start replaces it, but a shorter one
         // would leave its tail playing: lift it off first (one batch, one
         // undo step).
-        if (length > drag.p.length) void act(client.call("song.place", p.params));
-        else void act(client.call("batch", { requests: [{ method: "song.remove", params: { instrument: id, start: drag.p.start } }, p] }));
-      } else if (drag.start !== null) {
-        setPicked({ id, start: drag.start });
-        void act(client.call("song.place", place(id, { clip: drag.clip, start: drag.start, length: null, offset: null }).params));
+        if (length > d.p.length) void act(client.call("song.place", p.params));
+        else void act(client.call("batch", { requests: [{ method: "song.remove", params: { instrument: id, start: d.p.start } }, p] }));
+      } else if (d.start !== null) {
+        setPicked({ id, start: d.start });
+        void act(client.call("song.place", place(id, { clip: d.clip, start: d.start, length: null, offset: null }).params));
       }
     },
   };
 
   // Delete removes the selected placement; Escape clears the selection.
   const key = (e: React.KeyboardEvent) => {
-    if (!picked) return;
+    const t = e.target as HTMLElement;
+    if (!picked || ["INPUT", "SELECT", "TEXTAREA"].includes(t.tagName) || t.isContentEditable) return;
     if (e.key === "Delete" || e.key === "Backspace") {
       // Not also the piano roll's selected notes.
       e.preventDefault();

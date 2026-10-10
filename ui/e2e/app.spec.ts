@@ -607,9 +607,16 @@ test("arrangement editing: place from the pool, move, resize, copy, and delete b
   // A clip dropped off its own lane places nothing.
   l = await lane();
   const c1 = await center("pool-drums-1");
-  await drag(c1, { x: l.x + 10 * bar, y: l.y - 60 });
-  await page.waitForTimeout(100);
-  expect(await song()).toEqual(shorter);
+  await page.mouse.move(c1.x, c1.y);
+  await page.mouse.down();
+  await page.mouse.move(l.x + 10 * bar, l.y + l.height / 2);
+  await expect(page.getByTestId("placement-ghost-drums")).toBeVisible();
+  await page.mouse.move(l.x + 10 * bar, l.y - 60);
+  await expect(page.getByTestId("placement-ghost-drums")).toHaveCount(0);
+  await page.mouse.up();
+  // Undo still takes back the delete: nothing else was journaled.
+  await page.getByTestId("undo").click();
+  await expect.poll(song).toEqual(copied);
 });
 
 test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, and take notes", async () => {
