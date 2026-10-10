@@ -9,7 +9,7 @@
 import { useMemo, useState } from "react";
 import type { Clip } from "../generated/Clip";
 import type { Placement } from "../generated/Placement";
-import { act, app, client, mySeat, select, useApp, useSelected } from "../store";
+import { act, client, mySeat, select, useApp, useSelected } from "../store";
 
 /** Ticks per step, beat, and bar, as in the protocol. */
 const STEP = 24;
@@ -37,6 +37,7 @@ function NotePreview({ placement, clip, clipLength, px }: { placement: Placement
   const width = placement.length * px;
   const height = LANE - 18;
   const notes = clip?.events ?? [];
+  if (!notes.length) return null;
   const lo = Math.min(...notes.map((e) => e.note));
   const hi = Math.max(...notes.map((e) => e.note));
   const y = (n: number) => (hi === lo ? height / 2 : ((hi - n) / (hi - lo)) * (height - 2));
@@ -259,6 +260,3 @@ export function Arrangement() {
     </section>
   );
 }
-
-/** Whether `app` has a snapshot with any instrument (for tests and callers). */
-export const hasTracks = () => (app.state.snapshot?.graph.instruments.length ?? 0) > 0;
