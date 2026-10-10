@@ -76,10 +76,35 @@ song.
 
 ### Phase C: arrangement view
 
-Columns per mixer channel, grouped under their instrument (an unrouted
-instrument is one column without a strip); time runs downward with a bar
-ruler, loop brace, and playhead; clips are blocks spanning their group,
-moved, resized, and duplicated through phase B's RPCs.
+Revised 2026-10-10 (before it was built): time runs **left to right**,
+with **one lane per track** (= instrument), as Ableton's arrangement does;
+not a column per mixer channel. A new `ui/src/components/Arrangement.tsx`:
+
+- **Track headers** (left, sticky): the instrument's name, select (opens
+  it in the editor), and **arm** = the seat's focus (`seat.focus`), which
+  already routes MIDI input and sets the record target, as Ableton's arm
+  does. No mute/solo here: they are per mixer channel, and an instrument
+  can feed several (an instrument-level mute is a backlog item).
+- **Ruler** (top): bars and beats; click to locate (`transport.locate`);
+  a **loop brace** dragged to set `song.loop_start/end` with `song.loop`
+  = 2, sent as one `batch` (one undo step); the song's end; a playhead
+  that follows while playing.
+- **Lanes**: placements as blocks with the clip's name and a small note
+  preview (looped repeats marked). Drag to move (`song.move`), drag the
+  right edge to resize (`song.place` at the same start; longer loops the
+  clip), alt-drag to copy (`song.place`), Delete removes (`song.remove`),
+  snapping to bar, beat, or off. Drag a clip from the track's pool (its
+  clip bar) into its lane. Edits of several placements go as one `batch`.
+  Moving a placement to another track (copying the clip into that pool) is
+  out of scope.
+- **Double-click a placement**: selects its clip and opens the piano roll
+  (`PianoRoll.tsx`, also horizontal) in a panel below.
+- Horizontal zoom and scroll; the transport keeps the pattern/song toggle.
+- Expected to need no daemon changes; a gap that shows up becomes an RPC
+  first, then CLI, then UI.
+- Validation: Electron e2e drags (place, move, resize, copy, delete, loop
+  brace, locate, arm), checking `song.get`/`state.get` and one undo per
+  action; a screenshot at `ui/test-results/arrangement.png`.
 
 ## Impact on the principles
 
