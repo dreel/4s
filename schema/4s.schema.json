@@ -2033,7 +2033,7 @@
         "description": "Several requests as one: applied in order, journaled as one entry, and\nundone as one step. Not atomic: it stops at the first error, and what\nthe requests before it changed stays.",
         "properties": {
           "requests": {
-            "description": "Each `{\"method\": ..., \"params\": ...}`. Not `batch` itself, nor\nconnection-level methods (hello, subscribe, render, daemon), undo,\nor the journal.",
+            "description": "Each `{\"method\": ..., \"params\": ...}`. Not `batch` itself,\nconnection-level methods (hello, subscribe, render, daemon), undo,\nthe journal, `project.new/load/import`, or the transport\n(`transport.play/stop/locate/record`).",
             "items": true,
             "type": "array"
           }

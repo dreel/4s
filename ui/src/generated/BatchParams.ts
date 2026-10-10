@@ -7,8 +7,9 @@
  */
 export type BatchParams = { 
 /**
- * Each `{"method": ..., "params": ...}`. Not `batch` itself, nor
+ * Each `{"method": ..., "params": ...}`. Not `batch` itself,
  * connection-level methods (hello, subscribe, render, daemon), undo,
- * or the journal.
+ * the journal, `project.new/load/import`, or the transport
+ * (`transport.play/stop/locate/record`).
  */
 requests: Array<{ method: string, params?: unknown }>, };
