@@ -217,6 +217,12 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   placement at a time (no shift-click or box select, so no multi-placement
   moves in one `batch`), has no keyboard nudging, and the header's clip
   pool is cut off when a track has more clips than fit in 128 px.
+- (2026-10-10, arrangement-edit review) the UI copies protocol bounds by
+  hand (`MAX_TICKS` = `MAX_SONG_TICKS` in `Arrangement.tsx`, `MAX_TICKS` =
+  `MAX_CLIP_TICKS` in `PianoRoll.tsx`); export them through the generated
+  bindings. The arrangement's hint line crowds its header at narrow widths
+  (join the transport layout pass). Its e2e's negative checks (a drop on
+  another lane, Delete with nothing selected) wait a fixed 100 ms.
 - (2026-10-10, arrangement-edit branch) moving a placement to another
   track (copying its clip into that pool) is not built (RFC 0008 phase C).
 

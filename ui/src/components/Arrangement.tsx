@@ -307,7 +307,8 @@ export function Arrangement() {
         const p = place(id, { clip: d.p.clip, start: d.p.start, length, offset: d.p.offset });
         // Placing over it at the same start replaces it, but a shorter one
         // would leave its tail playing: lift it off first (one batch, one
-        // undo step).
+        // undo step). `batch` does not roll back, but this place cannot
+        // fail where the remove succeeded: same clip and start, shorter.
         if (length > d.p.length) void act(client.call("song.place", p.params));
         else void act(client.call("batch", { requests: [{ method: "song.remove", params: { instrument: id, start: d.p.start } }, p] }));
       } else if (d.start !== null) {
