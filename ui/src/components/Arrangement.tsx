@@ -38,8 +38,8 @@ function NotePreview({ placement, clip, clipLength, px }: { placement: Placement
   const height = LANE - 18;
   const notes = clip?.events ?? [];
   if (!notes.length) return null;
-  const lo = Math.min(...notes.map((e) => e.note));
-  const hi = Math.max(...notes.map((e) => e.note));
+  const lo = notes.reduce((m, e) => Math.min(m, e.note), 127);
+  const hi = notes.reduce((m, e) => Math.max(m, e.note), 0);
   const y = (n: number) => (hi === lo ? height / 2 : ((hi - n) / (hi - lo)) * (height - 2));
   const marks: number[] = [];
   const bars: { x: number; w: number; y: number }[] = [];
@@ -72,6 +72,7 @@ function Lane({ id, px, bars }: { id: string; px: number; bars: number }) {
   const clips = useApp((s) => s.snapshot?.clips);
   const stepsLength = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
+  const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
   const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
   if (!track) return null;
   return (
@@ -79,7 +80,7 @@ function Lane({ id, px, bars }: { id: string; px: number; bars: number }) {
       {track.arrangement.map((p) => {
         const clip = clips?.find((c) => c.instrument === id && c.id === p.clip);
         const clipLength = clip?.length ?? stepsLength * STEP;
-        const live = playing && tick !== null && p.start <= tick && tick < p.start + p.length;
+        const live = playing && song && tick !== null && p.start <= tick && tick < p.start + p.length;
         return (
           <div
             key={p.start}
