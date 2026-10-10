@@ -51,6 +51,8 @@ the song (`song.*`: each track's arrangement, RFC 0008), the
 instrument graph (`instrument.*`, `channel.*`,
 `route.set`), clips (`clip.*`: timed note events, RFC 0007; `clip.update`
 removes and adds in one step, and is how recorded takes are journaled;
+`clip.quantize` takes `events` to quantize only those notes, as
+`4s clip quantize --notes` does;
 `clip.new/duplicate/rename/delete/select` manage each instrument's pool,
 and the others take an optional `clip`, default the selected one),
 `batch` (several requests as one journal entry and undo step) and their step
@@ -94,6 +96,7 @@ current parameter set.
   instrument an edit or hit belongs to. `clip_changed` carries a whole clip
   after any edit to it (`clip_deleted` when one goes), `track` a pool,
   selection, or arrangement change, `located` a new song start point,
+  `take_notes` the notes a take has not written yet (for drawing them),
   `seats` the seats and who sits where, and `record`
   the recording state (a take running, and the next take's settings), which
   is also in the snapshot. Record settings are shared by everyone on the

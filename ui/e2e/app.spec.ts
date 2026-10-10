@@ -466,6 +466,83 @@ test("clip pool and song mode: the step editor edits the selected clip; song con
   await rpc("param.set", { path: "song.mode", value: 0 });
 });
 
+test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, and take notes", async () => {
+  const { page, rpc } = h;
+  const clip = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).events;
+  await page.getByTestId("view-roll").click();
+  await page.getByTestId("roll-zoom").selectOption("1");
+  const grid = page.getByTestId("roll-grid");
+  await expect(grid).toBeVisible();
+  // The mouse goes to page coordinates, so the whole roll (grid and velocity
+  // lane) must be on screen first; a small CI display puts it below the fold.
+  await page.getByTestId("pianoroll-drums").scrollIntoViewIfNeeded();
+  const box = (await grid.boundingBox())!;
+  // 1 px per tick, 16 px rows: the 808's voices, kick first.
+  const at = (tick: number, row: number) => ({ x: box.x + tick + 2, y: box.y + row * 16 + 8 });
+  const drag = async (from: { x: number; y: number }, to: { x: number; y: number }, alt = false) => {
+    await page.mouse.move(from.x, from.y);
+    if (alt) await page.keyboard.down("Alt");
+    await page.mouse.down();
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2);
+    await page.mouse.move(to.x, to.y);
+    await page.mouse.up();
+    if (alt) await page.keyboard.up("Alt");
+  };
+
+  // Click empty space: a snare (row 1) at step 3.
+  let p = at(50, 1);
+  await page.mouse.click(p.x, p.y);
+  await expect.poll(clip).toEqual([{ tick: 48, len: 24, note: 38, velocity: 100 }]);
+  // Drag it a step later and a row down: a clap at step 5. (Each step
+  // waits for the UI to show the daemon's result before pointing at it.)
+  await expect(page.getByTestId("note-48-38")).toBeVisible();
+  await drag(at(55, 1), at(55 + 48, 2));
+  await expect.poll(clip).toEqual([{ tick: 96, len: 24, note: 39, velocity: 100 }]);
+  // Drag its right edge a step longer.
+  await expect(page.getByTestId("note-96-39")).toBeVisible();
+  const edge = (await page.getByTestId("note-edge-96-39").boundingBox())!;
+  await drag({ x: edge.x + 2, y: edge.y + 4 }, { x: edge.x + 2 + 24, y: edge.y + 4 });
+  await expect.poll(clip).toEqual([{ tick: 96, len: 48, note: 39, velocity: 100 }]);
+  // Alt-drag copies it a beat later.
+  await expect(page.getByTestId("note-96-39")).toHaveAttribute("title", /48 long/);
+  await drag(at(100, 2), at(100 + 96, 2), true);
+  await expect.poll(async () => (await clip()).length).toBe(2);
+  expect((await clip()).map((e: { tick: number }) => e.tick)).toEqual([96, 192]);
+  // The velocity lane: drag the first bar up.
+  await expect(page.getByTestId("note-192-39")).toBeVisible();
+  const vel = (await page.getByTestId("vel-96-39").boundingBox())!;
+  await page.keyboard.press("Escape"); // clear the selection
+  await drag({ x: vel.x + 2, y: vel.y + 4 }, { x: vel.x + 2, y: vel.y - 20 });
+  await expect.poll(async () => (await clip())[0].velocity).toBe(127);
+  // Box-select both and delete them: one undo brings both back.
+  await expect(page.getByTestId("vel-96-39")).toHaveAttribute("title", "velocity 127");
+  await drag({ x: box.x + 80, y: box.y + 20 }, { x: box.x + 300, y: box.y + 40 });
+  await expect(page.getByTestId("note-96-39")).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("note-192-39")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Delete");
+  await expect.poll(clip).toEqual([]);
+  await page.getByTestId("undo").click();
+  await expect.poll(async () => (await clip()).length).toBe(2);
+  // Quantize only the selected note: an off-grid kick added elsewhere moves,
+  // the selected one's neighbors do not.
+  await rpc("clip.add", { instrument: "drums", clip: null, events: [{ tick: 30, len: 12, note: 36, velocity: 90 }, { tick: 250, len: 12, note: 36, velocity: 90 }] });
+  await expect(page.getByTestId("note-250-36")).toBeVisible();
+  await page.getByTestId("note-30-36").click();
+  await page.getByTestId("roll-quantize").click();
+  await expect.poll(async () => (await clip()).filter((e: { note: number }) => e.note === 36).map((e: { tick: number }) => e.tick)).toEqual([24, 250]);
+  await page.getByTestId("pianoroll-drums").screenshot({ path: "test-results/pianoroll.png" });
+
+  // A take draws the notes it has not written yet.
+  await rpc("transport.record", { arm: true, instrument: "drums", mode: null, quantize: 0, strength: null, count_in: 0, offset_ms: null });
+  await rpc("voice.note_on", { instrument: "drums", note: 42, velocity: 1 });
+  await expect(page.locator('[data-testid^="take-note-"][data-testid$="-42"]')).toHaveCount(1);
+  await rpc("voice.note_off", { instrument: "drums", note: 42, velocity: null });
+  await rpc("transport.record", { arm: false, instrument: null, mode: null, quantize: null, strength: null, count_in: null, offset_ms: null });
+  await rpc("transport.stop", {});
+  await expect(page.locator('[data-testid^="take-note-"]')).toHaveCount(0);
+  await page.getByTestId("view-steps").click();
+});
+
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
   const { page, rpc } = h;
   // Pad row 1 (snare), column 3 -> snare step 2.

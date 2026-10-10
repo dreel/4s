@@ -131,6 +131,7 @@ export * from "./SongRemoveParams";
 export * from "./StepResult";
 export * from "./SubscribeParams";
 export * from "./SubscribeResult";
+export * from "./TakeNote";
 export * from "./ToggleStepParams";
 export * from "./TrackInfo";
 export * from "./TrackPattern";

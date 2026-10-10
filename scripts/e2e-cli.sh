@@ -651,6 +651,7 @@ check "quantize keeps a note past the longest clip on the grid" "1512:C2:6:89" b
 s clip clear seq >/dev/null
 check "clip update removes and adds in one edit" "0:C2:24:89 30:G2:24:89 48:E2:6:100" bash -c "$BIN/4s clip set seq '0:C2 24:D2' >/dev/null && $BIN/4s clip update seq --rm 24:D2 --add '48:E2:6:100 30:G2' | tail -1"
 check "...as one undo step" "0:C2:24:89 24:D2:24:89" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq | tail -1"
+check "quantize --notes moves only those notes" "0:C2:24:89 24:G2:24:89 30:A2:24:89" bash -c "$BIN/4s clip set seq '0:C2 30:G2 30:A2' >/dev/null && $BIN/4s clip quantize seq 1/16 --notes 30:G2 | tail -1"
 check "quantize at half strength moves notes halfway" "0:C2:24:89 27:G2:24:89" bash -c "$BIN/4s clip set seq '0:C2 30:G2' >/dev/null && $BIN/4s clip quantize seq 1/16 --strength 50% | tail -1"
 s clip clear seq >/dev/null
 # Recording (RFC 0008). Offline first: the same take code over a render's
@@ -671,8 +672,8 @@ s set mixer.master.volume 0.8 >/dev/null
 s clip clear seq >/dev/null
 # Live: a take on the real-time engine, written at the loop's end.
 check "record starts the transport" "recording into seq" s record --to seq --count-in 0 --quantize 1/16
-sleep 0.4
-s key C2 --instrument seq --for 0.2 >/dev/null
+sleep 0.2
+check "notes not written yet are sent as take_notes" "seq: 1 notes recorded, not written yet" bash -c "(perl -e 'alarm 5; exec @ARGV' $BIN/4s watch --type take_notes --count 1 &) ; sleep 0.2; $BIN/4s key C2 --instrument seq --for 0.2 >/dev/null; sleep 0.1"
 # Written one step before the loop's end (1.875 s in); poll rather than
 # guess how long a loaded machine takes.
 check "the pass is written into the clip" "seq clip 1: 1 notes" bash -c "for i in \$(seq 60); do $BIN/4s clip show seq | grep -q 'seq clip 1: 1 notes' && break; sleep 0.1; done; $BIN/4s clip show seq"

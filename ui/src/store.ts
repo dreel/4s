@@ -9,6 +9,7 @@ import type { HistoryStepResult } from "./generated/HistoryStepResult";
 import type { ParamInfo } from "./generated/ParamInfo";
 import type { InstrumentPattern } from "./generated/InstrumentPattern";
 import type { NoteStep } from "./generated/NoteStep";
+import type { TakeNote } from "./generated/TakeNote";
 import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
 import { RpcClient, type ConnectionState } from "./rpc";
@@ -48,6 +49,8 @@ export type LiveState = {
   triggers: Record<string, number>;
   /** Last note each note instrument played (MIDI number). */
   lastNote: Record<string, number>;
+  /** Notes a take is recording into each instrument, not written yet. */
+  takeNotes: Record<string, TakeNote[]>;
 };
 
 class Store<T> {
@@ -89,7 +92,7 @@ export const app = new Store<AppState>({
   choosingSeat: false,
   history: NO_HISTORY,
 });
-export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {} });
+export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {} });
 
 /** Select an instrument for the editor. */
 export function select(id: string) {
@@ -131,6 +134,7 @@ const UI_EVENTS: EventEnvelope["event"]["type"][] = [
   "clip_deleted",
   "track",
   "located",
+  "take_notes",
   "graph",
   "transport",
   "record",
@@ -166,7 +170,8 @@ async function resync() {
   app.set({ registry: registry.params, snapshot, history });
   // No seat after a (re)connect or a project load: ask.
   if (!mySeat(app.state)) app.set({ choosingSeat: true });
-  live.set({ channels: {} });
+  // Take notes come only as events: whatever was missed is stale.
+  live.set({ channels: {}, takeNotes: {} });
   for (const e of pending) if (e.seq > snapshot.seq) apply(e);
 }
 
@@ -213,6 +218,9 @@ function apply(env: EventEnvelope) {
       });
       return;
     }
+    case "take_notes":
+      live.set({ takeNotes: { ...live.state.takeNotes, [ev.instrument]: ev.notes } });
+      return;
     case "midi_in":
     case "journal":
       return;

@@ -147,8 +147,7 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   recording; there is no way to play `--input` into a non-focus instrument
   without recording.
 - (2026-10-10, recording branch) SMF import/export (RFC 0007 phase 3) is not
-  built; and live take progress (notes shown while recording) waits for the
-  piano roll (RFC 0008 phase B).
+  built.
 
 - (2026-10-10, song branch review) a song-mode take is written as a
   `batch` that is not atomic: if `clip.new` succeeds and a later request
@@ -199,6 +198,23 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, song branch) the transport row is crowded (record, song, and
   tempo controls in one line); give it a layout pass with the arrangement
   view.
+
+- (2026-10-10, piano-roll branch review) take notes are only events, not
+  in the snapshot: a client that reconnects during a take shows none until
+  the next note or step; the CLI e2e's `take_notes` check waits a fixed
+  0.2 s for `watch` to subscribe.
+- (2026-10-10, piano-roll branch review) smaller piano roll and take
+  cases: held take notes are drawn `offset_ms` too long (the step tick goes
+  to `emit_take_notes` without the offset, `record.rs`); `clip.quantize
+  --notes` ignores keys that are not in the clip instead of rejecting them;
+  dragging a selection against the grid's edge can land two notes on one
+  `tick:note`; take notes outside the rows (non-drum clips) are not drawn
+  until written; resizing is not clamped to the loop; the roll has its own
+  text-field check for Delete instead of sharing `App.tsx`'s
+  `inTextField()` (which does not skip `<select>`).
+- (2026-10-10, piano-roll branch) the piano roll has no copy/paste,
+  keyboard nudging, or scroll-to-notes; its 808 view still shows the step
+  editor below it (with the voices' knobs).
 
 ## Mismatches
 

@@ -76,6 +76,20 @@ pub struct Clip {
     pub events: Vec<ClipEvent>,
 }
 
+/// A note a take is recording, not written yet: where it will go (in
+/// pattern mode, the selected clip; in song mode, the clip under it), at
+/// the tick it was played (before quantize), held so far if still held.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct TakeNote {
+    pub clip: u32,
+    pub tick: u32,
+    pub len: u32,
+    pub note: u8,
+    pub velocity: u8,
+    /// Still held.
+    pub held: bool,
+}
+
 /// A clip without its events.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ClipHeader {

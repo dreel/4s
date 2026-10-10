@@ -430,6 +430,9 @@ pub struct ClipQuantizeParams {
     /// How far to move each note toward the grid, 0..1 (default 1: onto it).
     #[serde(default)]
     pub strength: Option<f32>,
+    /// Only these notes (default: all of them).
+    #[serde(default)]
+    pub events: Option<Vec<EventKey>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
