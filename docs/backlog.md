@@ -77,6 +77,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   not reached (during a count-in, the first step); bound the cleared span
   by the heard tick (`crates/daemon/src/core/record.rs`,
   `end_take`/`restart_take`).
+- (2026-10-10, recording branch review) recording: `transport_record` saves
+  the new settings before `self.slot(&id)?`, so a request that fails there
+  still changes them (`crates/daemon/src/core/record.rs`).
+- (2026-10-10, recording branch review) recording, replace mode: a clip
+  event at or past the loop length (left after shortening a clip) is only
+  cleared by a pass that covers the whole loop (`Take::flush`); decide and
+  document.
 - (2026-10-10, recording branch review) quantize: `snap_tick`'s wrap at the
   loop's end can still leave a tick past the loop when the loop is shorter
   than the grid (a 10-tick clip, 1/16 grid); wrap with `%`
@@ -122,6 +129,12 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-09, #24 follow-up) `Command::ClearClip` is unused by the daemon.
 - (2026-10-09, #25 follow-up) the 303 note-stack unit test duplicates the
   e2e legato checks.
+- (2026-10-10, recording branch review) record UI: while someone else's take
+  runs, the Rec button ends it (any client can); show the owner
+  (`RecordState.user`) in its title, and say so in `docs/rpc.md`.
+- (2026-10-10, recording branch review) the `parse_grid` asserts in
+  `clip.rs`'s unit test restate `GRIDS`; drop them and add a CLI e2e check
+  that `--quantize 1/8t` is a 32-tick grid.
 - (2026-10-10, recording branch review) render input: a note with
   `duration` 0 sends its note-off on the same frame as its note-on (a
   silent, 1-tick recorded note); require a positive duration.
@@ -140,6 +153,9 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 ## Mismatches
 
+- (2026-10-10, recording branch review) RFC 0008 says live-note ticks are
+  "counted in the unswung tick grid"; `heard_tick` follows the swung clock
+  (each swung step's ticks evenly spaced). Fix the RFC wording.
 - (2026-10-09, #24/#25 follow-up) RFC 0007's main "Migration" section
   predates the v3/v4 split (still says v3/protocol 3 and clip swapping); the
   implementation notes override it.
