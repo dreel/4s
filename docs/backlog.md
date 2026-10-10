@@ -159,6 +159,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, song branch review) a song-mode take's `Write::New` relies
   on `clip.new` giving the id `make_clip` computed (`next_id`); a partial
   write that failed shifts it (same fix as the item above).
+- (2026-10-10, song branch review) recording: a note heard in the output
+  latency just after a `transport.locate` jump gets a song position before
+  the new point (the engine's heard position does not know the jump); the
+  restarted take then places it before where it starts.
 - (2026-10-10, song branch review) `song.loop_start` and `song.loop_end`
   are set separately, so `start >= end` is accepted and the loop silently
   does nothing; the CLI checks it, the UI inputs and `param.set` do not.

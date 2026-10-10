@@ -294,6 +294,8 @@ pub struct Engine {
     start_pos: u64,
     /// `SongEnd` was sent for this run.
     ended: bool,
+    /// The tick (from play) at which song mode last wrapped at a loop's end.
+    wrapped_at: Option<u64>,
     /// Absolute sample position at which it fires.
     next_tick_at: f64,
     /// Samples between the last tick fired and the next.
@@ -329,6 +331,7 @@ impl Engine {
             song_pos: 0,
             start_pos: 0,
             ended: false,
+            wrapped_at: None,
             next_tick_at: 0.0,
             tick_len: 1.0,
             output_latency: 0.0,
@@ -378,7 +381,7 @@ impl Engine {
         // Just past a loop's wrap, what is heard is still before it.
         if let Some((ls, le)) = self.song_loop()
             && pos < ls as f64
-            && self.song_pos >= ls
+            && self.wrapped_at.is_some_and(|w| (self.tick - w) as f64 <= back.ceil() + 1.0)
         {
             pos += (le - ls) as f64;
         }
@@ -577,6 +580,7 @@ impl Engine {
                 self.loop_tick = 0;
                 self.song_pos = self.start_pos;
                 self.ended = false;
+                self.wrapped_at = None;
                 self.next_tick_at = self.pos as f64;
                 self.tick_len = self.step_samples(0) / TICKS_PER_STEP as f64;
                 emit(Feedback::Started { time: self.time() });
@@ -661,6 +665,7 @@ impl Engine {
                 Some((ls, le)) if self.song_pos == le || (self.globals[LOOP].round() as i32 == 1 && self.song_pos >= le) => {
                     self.release_clip_notes(None);
                     self.song_pos = ls;
+                    self.wrapped_at = Some(tick);
                 }
                 // An empty song plays on (there is nothing to end).
                 None if !self.ended && self.song_end() > 0 && self.song_pos >= self.song_end() => {
@@ -1163,4 +1168,27 @@ pub(crate) mod tests {
         assert!(close(&looped, &[(0, 0.0), (1, 4.0), (1, 8.0)]), "{looped:?}");
         assert_eq!(end, None);
     }
+
+    /// Entering a bar loop from before it is not a wrap: a note heard just
+    /// before the loop's start stays there. Only after a real wrap is what
+    /// is heard placed at the loop's end. (120 bpm: 192 ticks a second; 50
+    /// ms of latency is 9.6 ticks.)
+    #[test]
+    fn heard_position_wraps_only_after_a_wrap() {
+        let mut e = note_engine();
+        e.set_output_latency(0.05);
+        for (g, v) in [(SONG_MODE, 1.0), (LOOP, 2.0), (LOOP_START, 1.0), (LOOP_END, 2.0)] {
+            let _ = e.apply(Command::SetParam { target: ParamTarget::Global(g), value: v }, &mut |_| {});
+        }
+        let _ = e.apply(Command::Play { count_in: 0 }, &mut |_| {});
+        let pos = |e: &mut Engine| e.heard_tick().map(|(_, p)| p).unwrap();
+        render_secs(&mut e, 2.01, &mut vec![]);
+        let p = pos(&mut e);
+        assert!((p - (384.0 + 1.92 - 9.6)).abs() < 2.0, "entering the loop: {p}");
+        // Past the wrap at bar 3 (4 s), back at bar 2.
+        render_secs(&mut e, 2.0, &mut vec![]);
+        let p = pos(&mut e);
+        assert!((p - (768.0 + 1.92 - 9.6)).abs() < 2.0, "just after the wrap, heard before it: {p}");
+    }
 }
+

@@ -790,6 +790,16 @@ check "...and is one undo step" "undid: batch: clip.new, clip.update, song.place
 s tempo 120 >/dev/null
 s song mode pattern >/dev/null
 s instrument rm song >/dev/null
+# The clip table is full: undoing an instrument's removal (it needs a clip)
+# fails cleanly instead of taking the daemon down.
+s instrument add tb303 --id full --no-channel >/dev/null
+s instrument rm full >/dev/null
+FREE=$(s --json state | python3 -c "import json,sys;print(256 - len(json.load(sys.stdin)['clips']))")
+python3 -c "import json;print(json.dumps([{'method':'clip.new','params':{'instrument':'drums','select':False}}]*$FREE))" > "$TMP/fill.json"
+s --user other batch "$(cat "$TMP/fill.json")" >/dev/null
+check "undo that needs a clip when the table is full says so" "at most 256 clips" s undo
+check "...and the daemon is still up" "transport:" s status
+s --user other undo >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
 check "daemon logs" "listening on ws://" s daemon logs

@@ -1751,6 +1751,16 @@ impl Core {
         if adding.len() > free {
             return Err(RpcError::failed(format!("at most {MAX_INSTRUMENTS} instruments")));
         }
+        // Each instrument it makes has a clip, and so does each clip it
+        // brings back.
+        let new_clips = clip_sets
+            .clips
+            .iter()
+            .filter(|((id, n), v)| v.is_some() && !self.tracks.get(id).is_some_and(|t| t.clips.contains_key(n)))
+            .count();
+        if adding.len() + new_clips > self.free_clips() {
+            return Err(RpcError::failed(format!("at most {MAX_CLIPS} clips in a project")));
+        }
         if self.in_flight + removing.len() > RETURN_CAPACITY {
             return Err(RpcError::failed(format!(
                 "{} removed instruments are still waiting to be returned by the audio engine",

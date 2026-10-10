@@ -679,8 +679,19 @@ impl Core {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn record_note(&mut self, slot: u8, note: u8, velocity: f32, on: bool, gate: bool, tick: f64, pos: f64) {
         let offset = ms_to_ticks(self.record.offset_ms, self.global(params::TEMPO));
+        let looping = self.song_loop();
         if let Some(t) = self.take.as_mut().filter(|t| t.slot == slot) {
-            t.take.note(on, gate, note, velocity, tick - offset, pos - offset);
+            // Moved earlier past a song loop's start, it was played before
+            // the wrap: at the loop's end.
+            let mut p = pos - offset;
+            if let (true, Some((ls, le))) = (t.song, looping)
+                && p < ls as f64
+                && pos >= ls as f64
+                && tick - offset >= 0.0
+            {
+                p += (le - ls) as f64;
+            }
+            t.take.note(on, gate, note, velocity, tick - offset, p);
         }
     }
 
