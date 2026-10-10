@@ -71,6 +71,11 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   ends or restarts is lost (only pass writes are retried); `write_take`
   tells a busy engine from an invalid clip by comparing error codes; name
   the codes.
+- (2026-10-10, recording branch review) recording: in `replace` mode the
+  write when a take ends or restarts clears up to the end of the current
+  step (`play_tick + TICKS_PER_STEP`), including the part the playhead had
+  not reached; bound the cleared span by the heard tick
+  (`crates/daemon/src/core/record.rs`, `end_take`/`restart_take`).
 
 ## Follow-ups
 

@@ -108,7 +108,6 @@ pub fn render_graph(spec: &RenderSpec, sample_rate: u32, bars: f64, tail: f64, i
         cmds.push((at(n.time), true, on));
         cmds.push((at(n.time + n.duration.max(0.0)), false, Command::NoteOff { slot: n.slot, note: n.note }));
     }
-    cmds.sort_by_key(|(f, on, _)| (*f, *on));
     cmds.push((play_frames, false, Command::Stop));
     cmds.sort_by_key(|(f, on, _)| (*f, *on));
 

@@ -88,7 +88,7 @@ function RecordControls() {
           data-testid="record-strength"
           onChange={(e) => void record({ strength: Number(e.target.value) / 100 })}
         >
-          {[25, 50, 75, 100].map((p) => (
+          {[...new Set([25, 50, 75, 100, Math.round(r.strength * 100)])].sort((a, b) => a - b).map((p) => (
             <option key={p} value={p}>
               {p}%
             </option>

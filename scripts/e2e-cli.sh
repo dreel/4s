@@ -668,8 +668,9 @@ s clip clear seq >/dev/null
 check "record starts the transport" "recording into seq" s record --to seq --count-in 0 --quantize 1/16
 sleep 0.4
 s key C2 --instrument seq --for 0.2 >/dev/null
-sleep 2
-check "the pass is written into the clip" "seq: 1 notes" s clip show seq
+# Written one step before the loop's end (1.875 s in); poll rather than
+# guess how long a loaded machine takes.
+check "the pass is written into the clip" "seq: 1 notes" bash -c "for i in \$(seq 60); do $BIN/4s clip show seq | grep -q 'seq: 1 notes' && break; sleep 0.1; done; $BIN/4s clip show seq"
 check "as one journal entry: the clip.update that writes it" '"recorded":true' s journal --limit 3
 check "record --off ends the take, still playing" "not recording" s record --off
 check "status shows the next take's settings" "record: not recording (next take: overdub, quantize 1/16 at 100%" s status

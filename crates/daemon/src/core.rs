@@ -92,9 +92,10 @@ pub struct Core {
     /// Engine tick (from play, after any count-in) of the last playhead
     /// step.
     play_tick: u64,
-    /// `Play` was sent and the engine has not confirmed it yet: steps and
-    /// live notes still count from the previous start.
-    starting: bool,
+    /// `Play`s sent that the engine has not confirmed yet: until it has
+    /// confirmed the last one, steps and live notes count from an earlier
+    /// start.
+    starting: u32,
     /// Recording settings and the take in progress (RFC 0008).
     record: RecordSettings,
     take: Option<LiveTake>,
@@ -163,7 +164,7 @@ impl Core {
             playing: false,
             playhead: None,
             play_tick: 0,
-            starting: false,
+            starting: 0,
             record: RecordSettings::default(),
             take: None,
             in_request: false,
@@ -861,7 +862,7 @@ impl Core {
     fn start(&mut self, origin: &str, count_in: u32) -> TransportState {
         // Wait for the engine's confirmation only if the command got there.
         match self.commands.push(Command::Play { count_in }) {
-            Ok(()) => self.starting = true,
+            Ok(()) => self.starting += 1,
             Err(_) => tracing::warn!("engine command queue full; dropped Play"),
         }
         self.play_tick = 0;
@@ -1183,7 +1184,7 @@ impl Core {
     pub fn handle_feedback(&mut self, fb: Feedback) {
         match fb {
             Feedback::Step { step, tick, time } => {
-                if !self.playing || self.starting {
+                if !self.playing || self.starting > 0 {
                     return;
                 }
                 self.play_tick = tick;
@@ -1204,10 +1205,10 @@ impl Core {
                     self.emit("engine", Event::Trigger { instrument, voice, note, velocity, time });
                 }
             }
-            Feedback::Live { slot, note, velocity, on, gate, tick: Some(tick), .. } if !self.starting => {
+            Feedback::Live { slot, note, velocity, on, gate, tick: Some(tick), .. } if self.starting == 0 => {
                 self.record_note(slot, note, velocity, on, gate, tick);
             }
-            Feedback::Started { .. } => self.starting = false,
+            Feedback::Started { .. } => self.starting = self.starting.saturating_sub(1),
             Feedback::Live { .. } | Feedback::Stopped { .. } => {}
             Feedback::Meters { channels, master } => {
                 let levels: Vec<ChannelLevel> = self
@@ -1855,7 +1856,10 @@ impl Core {
             return self.dispatch(req, origin, client, &user);
         }
         // A transport request that ends or restarts a take writes it first,
-        // as its own entry before the request's.
+        // as its own entry before the request's (if the request is valid).
+        if let Request::TransportRecord(p) = &req {
+            RecordSettings::default().update(p)?;
+        }
         self.settle_take(&req, origin, client);
         // A layout is journaled with the ports it applies (see
         // `SeatApplyLayoutParams`).
