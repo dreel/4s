@@ -191,6 +191,7 @@ jobs:
             REVIEW_BASE="$BASE_SHA" \
             REVIEW_PROMPT_FILE="$GITHUB_WORKSPACE/base/docs/review/reviewer.md" \
             REVIEW_DOCS_ROOT="$GITHUB_WORKSPACE/base" \
+            REVIEW_TIMEOUT=840 \
             timeout 900 "$GITHUB_WORKSPACE/base/scripts/review.sh"
           STATUS=$?
           set -e

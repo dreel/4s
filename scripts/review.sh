@@ -2,7 +2,7 @@
 # G4: independent review. Starts a fresh agent process -- no conversation,
 # plan, or memory from whoever wrote the change -- with read-only tools, the
 # reviewer instructions (docs/review/reviewer.md), and the committed diff
-# against origin/main. See docs/gates.md.
+# against the base branch (see REVIEW_BASE). See docs/gates.md.
 #
 # Env:
 #   REVIEW_BASE         base ref (default: origin/<base> of this branch's open
@@ -36,11 +36,16 @@ fi
 
 # A stacked PR is reviewed against its parent branch, as CI does.
 if [[ -z ${REVIEW_BASE:-} ]] && command -v gh >/dev/null; then
-  PR_BASE=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || true)
+  PR_BASE=$(gh pr list --head "$(git branch --show-current)" --state open --json baseRefName \
+    -q '.[0].baseRefName // empty' 2>/dev/null || true)
   [[ -n $PR_BASE ]] && REVIEW_BASE=origin/$PR_BASE
 fi
 BASE_REF=${REVIEW_BASE:-origin/main}
 if [[ $BASE_REF == origin/* ]]; then git fetch -q origin "${BASE_REF#origin/}" 2>/dev/null || true; fi
+if ! git rev-parse --verify -q "$BASE_REF^{commit}" >/dev/null; then
+  echo "review.sh: base '$BASE_REF' not found; set REVIEW_BASE to the branch this change builds on" >&2
+  exit 2
+fi
 BASE=$(git merge-base HEAD "$BASE_REF")
 HEAD=$(git rev-parse HEAD)
 PROMPT_FILE=${REVIEW_PROMPT_FILE:-docs/review/reviewer.md}
@@ -87,12 +92,16 @@ rm -f "$OUT" "$OUT.tmp" # never leave an older review behind on failure
 echo "==> independent review of $HEAD against $BASE_REF (diff $HASH)" >&2
 
 # Run the agent with a time limit (macOS has no `timeout`): a watchdog stops
-# it and its children after REVIEW_TIMEOUT seconds.
+# it, and everything it started, after REVIEW_TIMEOUT seconds. The agent runs
+# in its own process group (job control), so the watchdog signals the group:
+# TERM, then KILL after a grace period.
 TIMEOUT=${REVIEW_TIMEOUT:-1800}
 run_agent() {
   rm -f "$OUT.timedout"
+  set -m
   "$@" < "$PROMPT" > "$OUT.tmp" &
   local pid=$! rc=0
+  set +m
   (
     s=
     trap 'kill $s 2>/dev/null; exit 0' TERM
@@ -100,14 +109,18 @@ run_agent() {
     s=$!
     wait $s
     touch "$OUT.timedout"
-    pkill -TERM -P "$pid" 2>/dev/null || true
-    kill -TERM "$pid" 2>/dev/null || true
+    kill -TERM -- "-$pid" 2>/dev/null || true
+    sleep 10 &
+    s=$!
+    wait $s
+    kill -KILL -- "-$pid" 2>/dev/null || true
   ) &
   local watchdog=$!
   wait "$pid" || rc=$?
   kill -TERM "$watchdog" 2>/dev/null || true
   wait "$watchdog" 2>/dev/null || true
   if [[ -e $OUT.timedout ]]; then
+    kill -KILL -- "-$pid" 2>/dev/null || true # whatever outlived its leader
     rm -f "$OUT.timedout"
     echo "review.sh: agent timed out after ${TIMEOUT}s" >&2
     exit 4
