@@ -778,7 +778,7 @@ impl Core {
             Request::TransportPlay(_) => self.restart_take(),
             // Jumping while recording in song mode: what was played is
             // written, and the take goes on from the new position.
-            Request::TransportLocate(p) if self.playing && self.song_mode() => {
+            Request::TransportLocate(p) if self.playing && self.take.as_ref().is_some_and(|t| t.song) => {
                 let (tick, pos) = self.take_upto();
                 self.write_take(tick, pos, true);
                 let from = self.play_tick as f64;
@@ -796,9 +796,9 @@ impl Core {
         if self.take.is_some() {
             let (tick, pos) = self.take_upto();
             self.write_take(tick, pos, true);
-            let pos = if self.song_mode() { self.locate as f64 } else { 0.0 };
+            let locate = self.locate as f64;
             if let Some(t) = self.take.as_mut() {
-                t.take = Take::new(0.0, pos);
+                t.take = Take::new(0.0, if t.song { locate } else { 0.0 });
             }
         }
     }

@@ -163,7 +163,8 @@ above, these win:
 - **Loops**: a bar range loops when the playhead reaches its end, so
   playing from past it goes on; the whole song loops from anywhere past its
   end. Without a loop, playback stops at the song's end, except while
-  recording.
+  recording; a take that ends past the song's end leaves it playing on
+  (silence) until stopped, as playing from past a bar loop does.
 - **Recording in song mode** writes each note into the clip of the
   placement under it (at its local tick, quantized at that clip's length).
   Notes with nothing under them go into a clip the take makes: whole bars

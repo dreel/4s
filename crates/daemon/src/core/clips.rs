@@ -222,8 +222,11 @@ impl ClipSets {
                 };
                 self.events.entry((id.to_string(), n)).or_default().push((tick, note, val));
             }
+            // `null` when its instrument goes, which takes the track with it.
             "selected" => {
-                self.selected.insert(rest.to_string(), v.as_u64()? as u32);
+                if let Some(n) = v.as_u64() {
+                    self.selected.insert(rest.to_string(), n as u32);
+                }
             }
             "place" => {
                 let (id, start) = rest.split_once('.')?;

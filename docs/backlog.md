@@ -156,6 +156,12 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   an empty, unplaced one (`crates/daemon/src/core/record.rs`,
   `write_take`). Make `batch` all or nothing, or check room for the whole
   write first.
+- (2026-10-10, song branch review) a song-mode take's `Write::New` relies
+  on `clip.new` giving the id `make_clip` computed (`next_id`); a partial
+  write that failed shifts it (same fix as the item above).
+- (2026-10-10, song branch review) `song.loop_start` and `song.loop_end`
+  are set separately, so `start >= end` is accepted and the loop silently
+  does nothing; the CLI checks it, the UI inputs and `param.set` do not.
 - (2026-10-10, song branch) `song.loop` is an integer parameter (0 off, 1
   song, 2 bars); the registry has no enum kind, so `4s params` and generic
   controls show a number. Add a choice kind with labels.
