@@ -6,6 +6,7 @@
 
 mod client;
 mod daemon_ctl;
+mod replay;
 
 use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -294,8 +295,10 @@ enum Cmd {
     /// Your undo and redo stacks.
     History,
     /// The journal: every request that could change state, who sent it, and
-    /// what it changed. Times are UTC.
+    /// what it changed. Times are UTC. See docs/journal.md.
     Journal {
+        #[command(subcommand)]
+        cmd: Option<JournalCmd>,
         /// Only entries after this seq.
         #[arg(long)]
         since: Option<u64>,
@@ -407,6 +410,46 @@ enum Level {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+enum JournalCmd {
+    /// Save this session (since daemon start or the last project
+    /// new/load/import) as a replayable recording.
+    Export {
+        /// Write here (on this machine); default stdout.
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        #[arg(long, value_enum, default_value = "json")]
+        format: ExportFormat,
+    },
+    /// Replay a recording (or a <data-dir>/journal/*.jsonl file) into the
+    /// daemon and check it ends up the same, entry by entry. Replaces the
+    /// daemon's project: use an isolated daemon.
+    Replay {
+        file: PathBuf,
+        /// Wait between entries as long as the recording did.
+        #[arg(long)]
+        realtime: bool,
+        /// For a .jsonl file: which segment (0-based; default the last).
+        #[arg(long)]
+        segment: Option<usize>,
+        /// Replay even if the daemon has unsaved changes.
+        #[arg(long)]
+        force: bool,
+        /// If it diverges, rewrite the recording with what the replay did
+        /// (after a deliberate behavior change; review with `git diff`).
+        #[arg(long)]
+        accept: bool,
+    },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy)]
+enum ExportFormat {
+    /// A recording for `4s journal replay`.
+    Json,
+    /// A shell script of `4s call` lines (approximate, editable).
+    Sh,
+}
+
+#[derive(Subcommand, Debug, Clone)]
 enum ProjectCmd {
     /// Start a fresh empty project.
     New,
@@ -414,6 +457,9 @@ enum ProjectCmd {
     Save { path: Option<String> },
     /// Load a project bundle.
     Load { path: String },
+    /// Load a project file from this machine (a bundle dir or its
+    /// project.json), sent inline. Works with a remote daemon.
+    Import { file: PathBuf },
     /// List saved projects.
     List,
     /// Print the current project's location and show it in Finder/Explorer
@@ -466,6 +512,10 @@ enum MidiCmd {
         /// Hex bytes.
         #[arg(required = true)]
         bytes: Vec<String>,
+        /// Read the bytes as this kind of device (default: the connected
+        /// device's kind, else generic).
+        #[arg(long, value_enum)]
+        profile: Option<ProfileArg>,
     },
     /// Print raw incoming MIDI (for discovering controller mappings).
     Monitor {
@@ -524,6 +574,13 @@ impl RecordArgs {
     }
 }
 
+fn device_profile(p: ProfileArg) -> DeviceProfile {
+    match p {
+        ProfileArg::Generic => DeviceProfile::Generic,
+        ProfileArg::Block => DeviceProfile::LividBlock,
+    }
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum ClipCmd {
     /// Show a clip (default: your focus).
@@ -550,6 +607,17 @@ enum ClipCmd {
     },
     /// Remove the note at a tick.
     Rm { instrument: String, tick: u32, note: String },
+    /// Remove and add notes in one edit (one undo step), e.g.
+    /// `4s clip update bass --rm "24:D#2" --add "36:C3:6:100"`.
+    Update {
+        instrument: String,
+        /// `tick:note` tokens to remove.
+        #[arg(long, allow_hyphen_values = true)]
+        rm: Option<String>,
+        /// `tick:note[:len[:vel]]` tokens to add.
+        #[arg(long, allow_hyphen_values = true)]
+        add: Option<String>,
+    },
     /// Set a clip's length in steps (`auto` follows sequencer.length), e.g.
     /// `4s clip length bass 12` for a 12-step loop against a 16-step beat.
     Length { instrument: String, steps: String },
@@ -937,6 +1005,12 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             ProjectCmd::New => vec![Request::ProjectNew(e)],
             ProjectCmd::Save { path } => vec![Request::ProjectSave(ProjectSaveParams { path: path.clone() })],
             ProjectCmd::Load { path } => vec![Request::ProjectLoad(ProjectLoadParams { path: path.clone() })],
+            ProjectCmd::Import { file } => {
+                let path = if file.is_dir() { file.join(PROJECT_FILE_NAME) } else { file.clone() };
+                let json = std::fs::read_to_string(&path).map_err(|e| anyhow!("read {}: {e}", path.display()))?;
+                let file = parse_project(&json).map_err(|e| anyhow!("{}: {e}", path.display()))?;
+                vec![Request::ProjectImport(ProjectImportParams { file })]
+            }
             ProjectCmd::List => vec![Request::ProjectList(e)],
             ProjectCmd::Reveal { .. } => vec![Request::StateGet(e)],
         },
@@ -946,10 +1020,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 input: input.clone(),
                 output: output.clone(),
                 name: name.clone(),
-                profile: profile.map(|p| match p {
-                    ProfileArg::Generic => DeviceProfile::Generic,
-                    ProfileArg::Block => DeviceProfile::LividBlock,
-                }),
+                profile: profile.map(device_profile),
             })],
             MidiCmd::Disconnect { input } => {
                 vec![Request::MidiDisconnect(MidiDisconnectParams { input: input.clone() })]
@@ -961,12 +1032,20 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             MidiCmd::Models => vec![Request::MidiModels(e)],
             MidiCmd::Layout { apply: false, .. } => vec![Request::MidiPorts(e.clone()), Request::MidiModels(e)],
             MidiCmd::Layout { device, apply: true } => {
-                vec![Request::SeatApplyLayout(SeatApplyLayoutParams { seat: None, device: device.clone() })]
+                vec![Request::SeatApplyLayout(SeatApplyLayoutParams {
+                    seat: None,
+                    device: device.clone(),
+                    model: None,
+                    ports: vec![],
+                })]
             }
-            MidiCmd::Send { device, bytes } => vec![Request::MidiInput(MidiInputParams {
+            MidiCmd::Send { device, bytes, profile } => vec![Request::MidiInput(MidiInputParams {
                 device: device.clone(),
                 data: hex_bytes(bytes)?,
                 seat: None,
+                profile: profile.map(device_profile),
+                model: None,
+                role: None,
             })],
             MidiCmd::Monitor { .. } => vec![
                 Request::EventsSubscribe(SubscribeParams { types: Some(vec!["midi_in".into()]) }),
@@ -1007,6 +1086,23 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             ClipCmd::Rm { instrument, tick, note } => Request::ClipRemove(ClipRemoveParams {
                 instrument: Some(instrument),
                 events: vec![EventKey { tick, note: note_arg(&note)? }],
+            }),
+            ClipCmd::Update { instrument, rm, add } => Request::ClipUpdate(ClipUpdateParams {
+                instrument: Some(instrument),
+                remove: rm
+                    .as_deref()
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .map(|tok| match tok.split_once(':') {
+                        Some((t, n)) => Ok(EventKey {
+                            tick: t.parse().map_err(|_| anyhow!("invalid tick in '{tok}'"))?,
+                            note: note_arg(n)?,
+                        }),
+                        None => bail!("invalid event key '{tok}' (expected tick:note, e.g. 24:D#2)"),
+                    })
+                    .collect::<Result<_>>()?,
+                add: add.as_deref().map(parse_events).transpose().map_err(|e| anyhow!(e))?.unwrap_or_default(),
+                recorded: false,
             }),
             ClipCmd::Length { instrument, steps } => Request::ClipLength(ClipLengthParams {
                 instrument: Some(instrument),
@@ -1101,6 +1197,9 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
         Cmd::Undo => vec![Request::HistoryUndo(e)],
         Cmd::Redo => vec![Request::HistoryRedo(e)],
         Cmd::History => vec![Request::HistoryGet(e)],
+        Cmd::Journal { cmd: Some(JournalCmd::Export { .. }), .. } => vec![Request::JournalExport(e)],
+        // Client-side: see `replay::run`.
+        Cmd::Journal { cmd: Some(JournalCmd::Replay { .. }), .. } => vec![],
         Cmd::Journal { follow: true, .. } => vec![
             Request::EventsSubscribe(SubscribeParams { types: Some(vec!["journal".into()]) }),
             Request::EventsUnsubscribe(e),
@@ -1578,6 +1677,20 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             }
         }
         Cmd::History => print_history(&serde_json::from_value(last)?),
+        Cmd::Journal { cmd: Some(JournalCmd::Export { out, format }), .. } => {
+            let r: Recording = serde_json::from_value(last)?;
+            let text = match format {
+                ExportFormat::Json => serde_json::to_string_pretty(&r)? + "\n",
+                ExportFormat::Sh => replay::to_script(&r),
+            };
+            match out {
+                Some(path) => {
+                    std::fs::write(path, text).map_err(|e| anyhow!("write {}: {e}", path.display()))?;
+                    println!("wrote {} ({} entries, digest {})", path.display(), r.entries.len(), r.digest);
+                }
+                None => print!("{text}"),
+            }
+        }
         Cmd::Journal { .. } => {
             let r: JournalGetResult = serde_json::from_value(last)?;
             for e in &r.entries {
@@ -1985,12 +2098,24 @@ async fn run(cli: Cli) -> Result<()> {
     }
     let reqs = plan(&cli.cmd)?;
     let url = resolve_url(&cli, &data_dir)?;
+    if let Cmd::Journal { cmd: Some(JournalCmd::Replay { file, realtime, segment, force, accept }), .. } = &cli.cmd {
+        return replay::run(replay::Options {
+            url: &url,
+            token: cli.token.clone(),
+            file,
+            realtime: *realtime,
+            segment: *segment,
+            force: *force,
+            accept: *accept,
+        })
+        .await;
+    }
     let mut client = connect(&cli, &url).await?;
 
     let stream_count = match &cli.cmd {
         Cmd::Watch { count, .. } => Some(*count),
         Cmd::Midi { cmd: MidiCmd::Monitor { count } } => Some(*count),
-        Cmd::Journal { follow: true, .. } => Some(None),
+        Cmd::Journal { cmd: None, follow: true, .. } => Some(None),
         _ => None,
     };
     if let Some(count) = stream_count {
@@ -2058,11 +2183,14 @@ mod tests {
             "cc unmap knobs 21", "cc learn bass.cutoff", "knobs page decay", "knobs follow knobs 21 22",
             "daemon status", "daemon stop", "undo", "redo", "history", "journal",
             "clip", "clip show bass", "clip set bass 0:C2:12", "clip add bass 36 C3 --len 6", "clip rm bass 36 C3",
-            "clip length bass 12", "clip clear bass", "clip quantize bass 1/8", "record", "record --off",
+            "clip length bass 12", "clip clear bass", "clip quantize bass 1/8", "clip update bass --rm 0:C2", "record", "record --off",
             "metronome on", "render --record --input 0.5:C2",
             "midi models", "midi layout mpk --apply",
         ];
         let mut covered: BTreeSet<&str> = commands.iter().flat_map(|c| methods_for(c)).collect();
+        let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../protocol/fixtures/project-v2.json");
+        covered.extend(methods_for(&format!("project import {fixture}")));
+        covered.extend(methods_for("journal export"));
         covered.insert("session.hello"); // sent by every command on connect
         let all: BTreeSet<&str> = METHODS.iter().copied().collect();
         let missing: Vec<_> = all.difference(&covered).collect();

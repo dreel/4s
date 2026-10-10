@@ -19,7 +19,7 @@ use crate::journal::{self, Doc, History, Journal};
 use crate::midi::{Midi, MidiMessage, list_ports};
 use clips::ClipState;
 use record::{LiveTake, RecordSettings};
-use seats::{ClientState, Held, Pickup, SeatState, check_seat_config};
+use seats::{ClientState, Held, InputEffect, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
 use fours_engine::offline::{RenderInstrument, RenderSpec};
 use fours_engine::params::{self, CHANNEL_PARAMS, NUM_GLOBALS};
@@ -89,8 +89,9 @@ pub struct Core {
     sample_rate: u32,
     playing: bool,
     playhead: Option<u32>,
-    /// The song tick of the last step the engine started.
-    song_tick: u64,
+    /// Engine tick (from play, after any count-in) of the last playhead
+    /// step.
+    play_tick: u64,
     /// `Play` was sent and the engine has not confirmed it yet: steps and
     /// live notes still count from the previous start.
     starting: bool,
@@ -131,6 +132,10 @@ pub struct Core {
     meters_silent: bool,
     journal: Journal,
     history: History,
+    /// Where the current history segment starts (daemon start, or the last
+    /// project new/load/import): the journal seq and the project then.
+    segment_seq: u64,
+    segment_base: ProjectFile,
 }
 
 impl Core {
@@ -157,7 +162,7 @@ impl Core {
             sample_rate: audio.sample_rate,
             playing: false,
             playhead: None,
-            song_tick: 0,
+            play_tick: 0,
             starting: false,
             record: RecordSettings::default(),
             take: None,
@@ -183,10 +188,35 @@ impl Core {
             meters_silent: false,
             journal: Journal::new(journal_dir),
             history: History::default(),
+            segment_seq: 0,
+            segment_base: default_project(),
         };
         core.rebuild_params();
         core.apply_project_file(&default_project(), "engine").expect("default project applies");
+        core.start_segment();
         core
+    }
+
+    /// Start a history segment at the current state (see `journal.export`).
+    fn start_segment(&mut self) {
+        self.segment_seq = self.journal.seq();
+        self.segment_base = self.to_project_file();
+        self.journal.push_segment(&self.segment_base, unix_time());
+    }
+
+    fn journal_export(&self) -> Result<Recording, RpcError> {
+        let entries = self.journal.since(self.segment_seq).ok_or_else(|| {
+            RpcError::failed(
+                "the start of this session is no longer in memory (over 100000 entries); \
+                 replay the journal file under <data-dir>/journal instead",
+            )
+        })?;
+        Ok(Recording {
+            format_version: RECORDING_FORMAT_VERSION,
+            base: self.segment_base.clone(),
+            entries,
+            digest: journal::digest(&self.doc()),
+        })
     }
 
     // ---- infrastructure ----------------------------------------------------
@@ -238,6 +268,16 @@ impl Core {
     fn grid_length(&self) -> u32 {
         let own = self.drum_focus(&self.host_seat).and_then(|id| self.clips.get(&id).and_then(|c| c.length));
         own.map(|l| l.div_ceil(TICKS_PER_STEP).min(MAX_STEPS as u32)).unwrap_or_else(|| self.length())
+    }
+
+    /// The Block grid's playhead: the step of the host's focus clip, which
+    /// loops from play at its own length when it has one.
+    fn grid_playhead(&self) -> Option<u32> {
+        let own = self.drum_focus(&self.host_seat).and_then(|id| self.clips.get(&id).and_then(|c| c.length));
+        match own {
+            Some(l) => self.playhead.map(|_| (self.play_tick % l.max(1) as u64) as u32 / TICKS_PER_STEP),
+            None => self.playhead,
+        }
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -645,7 +685,7 @@ impl Core {
             self.controller.page = pages - 1;
         }
         let pattern = self.target_pattern();
-        let leds = self.controller.compute_leds(pattern.as_ref(), self.grid_length(), self.playhead);
+        let leds = self.controller.compute_leds(pattern.as_ref(), self.grid_length(), self.grid_playhead());
         let diff = self.controller.set_leds(leds);
         for (r, c, v) in &diff {
             let msg = self.block_map.led_message(*r, *c, *v);
@@ -819,15 +859,12 @@ impl Core {
 
     /// Play from tick 0 after `count_in` ticks of metronome.
     fn start(&mut self, origin: &str, count_in: u32) -> TransportState {
-        // Playing again during a take writes what was played and carries on
-        // recording from the new start.
-        self.restart_take();
         // Wait for the engine's confirmation only if the command got there.
         match self.commands.push(Command::Play { count_in }) {
             Ok(()) => self.starting = true,
             Err(_) => tracing::warn!("engine command queue full; dropped Play"),
         }
-        self.song_tick = 0;
+        self.play_tick = 0;
         if !self.playing {
             self.playing = true;
             self.emit(origin, Event::Transport { playing: true });
@@ -921,39 +958,35 @@ impl Core {
     /// Handle a raw message from a connected MIDI device. It plays in the
     /// host seat, and is handled (and journaled, RFC 0006) as `midi.input`
     /// from the host user, with the port (`midi:<port>`) as origin and the
-    /// device (`midi:<device>`) holding the notes it plays.
+    /// device (`midi:<device>`) holding the notes it plays. Input that can
+    /// do nothing (clock, active sensing, a pad release) stops here.
     pub fn handle_midi(&mut self, msg: MidiMessage) {
         let origin = format!("midi:{}", msg.port);
         self.emit(&origin, Event::MidiIn { port: msg.port.clone(), data: msg.data.clone() });
         let Some(c) = self.midi.connection(&msg.port) else { return };
-        let (device, profile) = (c.device.clone(), c.profile);
-        // Only input that can do something is handled and journaled: notes
-        // and CCs (a Block's pads and knobs). Clock, active sensing, sysex,
-        // and aftertouch would flood the journal. Pitch bend is a gesture,
-        // not an edit: it plays at once and is not journaled.
+        let (device, profile, model, role) = (c.device.clone(), c.profile, c.model.clone(), c.role.clone());
+        // Pitch bend is a gesture, not an edit: it plays at once and is not
+        // journaled.
         if profile == DeviceProfile::Generic && msg.data.len() >= 3 && msg.data[0] & 0xf0 == 0xe0 {
             let seat = self.host_seat.clone();
-            self.device_input(&seat, &device, profile, &format!("midi:{device}"), &msg.data, &origin);
+            let model = model.as_deref().zip(role.as_deref());
+            self.device_input(&seat, &device, profile, model, &format!("midi:{device}"), &msg.data, &origin);
             return;
         }
-        let useful = match profile {
-            DeviceProfile::LividBlock => decode_block(&self.block_map, &msg.data).is_some(),
-            DeviceProfile::Generic => {
-                msg.data.len() >= 3 && matches!(msg.data[0] & 0xf0, 0x80 | 0x90 | 0xb0) && msg.data[0] < 0xf0
-            }
+        let p = MidiInputParams {
+            device: device.clone(),
+            data: msg.data,
+            seat: Some(self.host_seat.clone()),
+            profile: Some(profile),
+            model,
+            role,
         };
-        if !useful {
+        let client = format!("midi:{device}");
+        if self.input_effect(&p, &client) == InputEffect::None {
             return;
         }
-        // A Block pad release does nothing (pads toggle on press): not journaled.
-        if profile == DeviceProfile::LividBlock
-            && matches!(decode_block(&self.block_map, &msg.data), Some(BlockInput::Pad { pressed: false, .. }))
-        {
-            return;
-        }
-        let req = Request::MidiInput(MidiInputParams { device: device.clone(), data: msg.data, seat: Some(self.host_seat.clone()) });
         let user = self.host_user.clone();
-        let _ = self.handle(req, &origin, &format!("midi:{device}"), Some(&user));
+        let _ = self.handle(Request::MidiInput(p), &origin, &client, Some(&user));
     }
 
     // ---- midi --------------------------------------------------------------
@@ -990,21 +1023,25 @@ impl Core {
             return Err(RpcError::failed(format!("'{port}' is already connected")));
         }
         // A name held by a port that is not here any more moves to this one
-        // (a replacement keyboard keeps `keys`).
-        if let Some(n) = &p.name
-            && let Some(old) = self.hardware.port_named(n)
-            && old != port
-            && !list_ports().0.contains(&old)
-        {
-            self.hardware.forget(&old);
-        }
-        let r = self.hardware.resolve(&port, p.name.as_deref(), p.profile).map_err(RpcError::invalid)?;
+        // (a replacement keyboard keeps `keys`), once the connect succeeds.
+        let replaces = p
+            .name
+            .as_deref()
+            .and_then(|n| self.hardware.port_named(n))
+            .filter(|old| *old != port && !list_ports().0.contains(old));
+        let r = self
+            .hardware
+            .resolve(&port, p.name.as_deref(), p.profile, replaces.as_deref())
+            .map_err(RpcError::invalid)?;
         if self.midi.by_device(&r.name).is_some() {
             return Err(RpcError::invalid(format!("a connected device is already named '{}'", r.name)));
         }
         self.midi
             .connect(&port, p.output.as_deref(), &r, self.midi_tx.clone())
             .map_err(|e| RpcError::failed(e.to_string()))?;
+        if let Some(old) = &replaces {
+            self.hardware.forget(old);
+        }
         self.hardware.connected(&port, &r);
         self.midi_changed(origin);
         Ok(self.midi_ports())
@@ -1064,6 +1101,9 @@ impl Core {
                 "data must be one MIDI message: a status byte (0x80..0xFF), then data bytes (0..0x7F)",
             ));
         }
+        let profile = self.input_profile(&p);
+        let model = self.input_model(&p);
+        let model = model.as_ref().map(|(m, r)| (m.as_str(), r.as_str()));
         let seat = match p.seat {
             Some(s) => {
                 self.check_seat(&s)?;
@@ -1071,7 +1111,6 @@ impl Core {
             }
             None => self.client_seat(client).unwrap_or_else(|| self.host_seat.clone()),
         };
-        let profile = self.midi.by_device(&p.device).map(|c| c.profile).unwrap_or_default();
         // From a device on this machine (`handle_midi`): it already emitted
         // `midi_in`, and the device itself holds its notes.
         let local = format!("midi:{}", p.device);
@@ -1081,8 +1120,21 @@ impl Core {
             self.emit(origin, Event::MidiIn { port: p.device.clone(), data: p.data.clone() });
             format!("input:{client}:{}", p.device)
         };
-        self.device_input(&seat, &p.device, profile, &holder, &p.data, origin);
+        self.device_input(&seat, &p.device, profile, model, &holder, &p.data, origin);
         Ok(())
+    }
+
+    fn input_profile(&self, p: &MidiInputParams) -> DeviceProfile {
+        p.profile.or_else(|| self.midi.by_device(&p.device).map(|c| c.profile)).unwrap_or_default()
+    }
+
+    /// The (model, port role) whose layout applies to `p`: its own, else
+    /// the connected device's.
+    fn input_model(&self, p: &MidiInputParams) -> Option<(String, String)> {
+        p.model.clone().zip(p.role.clone()).or_else(|| {
+            let c = self.midi.by_device(&p.device)?;
+            c.model.clone().zip(c.role.clone())
+        })
     }
 
     /// Hotplug: drop vanished ports and, if `auto`, connect a Livid Block
@@ -1107,7 +1159,7 @@ impl Core {
                 if !inputs.contains(&port) || self.midi.is_connected(&port) {
                     continue;
                 }
-                let Ok(r) = self.hardware.resolve(&port, None, None) else { continue };
+                let Ok(r) = self.hardware.resolve(&port, None, None, None) else { continue };
                 if self.midi.by_device(&r.name).is_some() {
                     continue;
                 }
@@ -1134,11 +1186,13 @@ impl Core {
                 if !self.playing || self.starting {
                     return;
                 }
-                self.song_tick = tick;
+                self.play_tick = tick;
                 self.record_step(tick);
                 self.playhead = Some(step);
-                if self.controller.follow {
-                    self.controller.page = step / crate::controller::GRID as u32;
+                if self.controller.follow
+                    && let Some(at) = self.grid_playhead()
+                {
+                    self.controller.page = at / crate::controller::GRID as u32;
                 }
                 self.emit("engine", Event::Playhead { step, time });
                 self.refresh_controller("engine", false);
@@ -1385,6 +1439,7 @@ impl Core {
 
     pub fn project_new(&mut self, origin: &str) -> Result<ProjectInfo, RpcError> {
         self.apply_project_file(&default_project(), origin)?;
+        self.start_segment();
         self.project = ProjectInfo { path: None, dirty: false };
         let info = self.project.clone();
         self.emit(origin, Event::Project { info: info.clone() });
@@ -1417,7 +1472,20 @@ impl Core {
         for w in self.apply_project_file(&project, origin)? {
             tracing::warn!("{}: {w}", file.display());
         }
+        self.start_segment();
         self.project = ProjectInfo { path: Some(bundle.to_string_lossy().into_owned()), dirty: false };
+        let info = self.project.clone();
+        self.emit(origin, Event::Project { info: info.clone() });
+        Ok(info)
+    }
+
+    /// Load a project sent inline. It is unsaved: no bundle path, dirty.
+    pub fn project_import(&mut self, file: &ProjectFile, origin: &str) -> Result<ProjectInfo, RpcError> {
+        for w in self.apply_project_file(file, origin)? {
+            tracing::warn!("project.import: {w}");
+        }
+        self.start_segment();
+        self.project = ProjectInfo { path: None, dirty: true };
         let info = self.project.clone();
         self.emit(origin, Event::Project { info: info.clone() });
         Ok(info)
@@ -1472,8 +1540,13 @@ impl Core {
         d
     }
 
-    fn journal_context(&self) -> JournalContext {
-        JournalContext { playing: self.playing, step: self.playhead, page: self.controller.page }
+    fn journal_context(&self, client: &str) -> JournalContext {
+        JournalContext {
+            playing: self.playing,
+            step: self.playhead,
+            page: self.controller.page,
+            seat: self.client_seat(client),
+        }
     }
 
     fn journal_push(&mut self, entry: JournalEntry, origin: &str) {
@@ -1497,7 +1570,13 @@ impl Core {
 
     /// Undo (or redo) the user's last step, leaving keys another user
     /// changed since. Journaled as its own entry that `reverts` the step.
-    fn history_step(&mut self, user: &str, origin: &str, redo: bool) -> Result<HistoryStepResult, RpcError> {
+    fn history_step(
+        &mut self,
+        user: &str,
+        origin: &str,
+        client: &str,
+        redo: bool,
+    ) -> Result<HistoryStepResult, RpcError> {
         let Some(plan) = self.history.plan(user, redo) else {
             return Ok(HistoryStepResult {
                 label: None,
@@ -1506,7 +1585,7 @@ impl Core {
                 history: self.history.info(user),
             });
         };
-        let context = self.journal_context();
+        let context = self.journal_context(client);
         let before = self.doc();
         let mut skipped = plan.skipped;
         let applied = self.apply_sets(&plan.sets, origin);
@@ -1715,13 +1794,18 @@ impl Core {
         skipped.extend(self.apply_clip_sets(events, lengths, origin));
         if !seats.is_empty() {
             for (name, config) in seats {
+                // A session-only seat of the same name is someone else's:
+                // it does not become a saved seat.
+                if self.seats.get(&name).is_some_and(|s| !s.saved) {
+                    skipped.push(format!("seat:{name}"));
+                    continue;
+                }
                 let seat = self.seats.entry(name).or_insert(SeatState {
                     config: SeatConfig::default(),
                     saved: true,
                     learning: None,
                 });
                 seat.config = config;
-                seat.saved = true;
             }
             self.seats_changed(origin, true);
         }
@@ -1759,27 +1843,44 @@ impl Core {
     pub fn handle(&mut self, req: Request, origin: &str, client: &str, user: Option<&str>) -> RpcResult {
         let user = user.unwrap_or(&self.host_user).to_string();
         match &req {
-            Request::HistoryUndo(_) => return ok(self.history_step(&user, origin, false)?),
-            Request::HistoryRedo(_) => return ok(self.history_step(&user, origin, true)?),
+            Request::HistoryUndo(_) => return ok(self.history_step(&user, origin, client, false)?),
+            Request::HistoryRedo(_) => return ok(self.history_step(&user, origin, client, true)?),
             Request::HistoryGet(_) => return ok(self.history.info(&user)),
             Request::JournalGet(p) => return ok(JournalGetResult { entries: self.journal.get(p) }),
+            Request::JournalExport(_) => return ok(self.journal_export()?),
             _ => {}
         }
-        if read_only(&req) {
+        let inert = matches!(&req, Request::MidiInput(p) if self.input_effect(p, client) == InputEffect::None);
+        if read_only(&req) || inert {
             return self.dispatch(req, origin, client, &user);
         }
+        // A transport request that ends or restarts a take writes it first,
+        // as its own entry before the request's.
+        self.settle_take(&req, origin, client);
+        // A layout is journaled with the ports it applies (see
+        // `SeatApplyLayoutParams`).
+        let req = match req {
+            Request::SeatApplyLayout(mut p) if p.model.is_none() => {
+                if let Some((model, ports)) = self.layout_ports(&p.device) {
+                    (p.model, p.ports) = (Some(model), ports);
+                }
+                Request::SeatApplyLayout(p)
+            }
+            req => req,
+        };
         let method = req.method();
         let params = serde_json::to_value(&req).ok().and_then(|mut v| v.get_mut("params").map(Value::take));
         let params = params.unwrap_or(Value::Null);
         // A project load or new replaces everything and starts a fresh history.
-        let fresh = matches!(req, Request::ProjectNew(_) | Request::ProjectLoad(_));
-        let context = self.journal_context();
-        let before = (!fresh && self.changes_doc(&req)).then(|| self.doc());
+        let fresh = matches!(req, Request::ProjectNew(_) | Request::ProjectLoad(_) | Request::ProjectImport(_));
+        let context = self.journal_context(client);
+        let before = (!fresh && self.changes_doc(&req, client)).then(|| self.doc());
+        // Taken first, so a segment this request starts begins after it.
+        let seq = self.journal.next_seq();
         self.in_request = before.is_some();
         let result = self.dispatch(req, origin, client, &user);
         self.in_request = false;
         let changes = before.map(|b| journal::diff(&b, &self.doc())).unwrap_or_default();
-        let seq = self.journal.next_seq();
         if fresh && result.is_ok() {
             for u in self.history.clear() {
                 self.emit_history(&u, origin);
@@ -1814,6 +1915,7 @@ impl Core {
     fn journaled<T>(
         &mut self,
         user: &str,
+        client: &str,
         origin: &str,
         method: &str,
         params: Value,
@@ -1822,7 +1924,7 @@ impl Core {
         if self.in_request {
             return f(self);
         }
-        let context = self.journal_context();
+        let context = self.journal_context(client);
         let before = self.doc();
         let result = f(self);
         let changes = journal::diff(&before, &self.doc());
@@ -2003,6 +2105,7 @@ impl Core {
             Request::ProjectNew(_) => ok(self.project_new(origin)?),
             Request::ProjectSave(p) => ok(self.project_save(p.path, origin)?),
             Request::ProjectLoad(p) => ok(self.project_load(&p.path, origin)?),
+            Request::ProjectImport(p) => ok(self.project_import(&p.file, origin)?),
             Request::ProjectList(_) => ok(self.project_list()),
             Request::EngineStatus(_) => ok(self.audio.clone()),
             Request::Hello(_)
@@ -2011,7 +2114,11 @@ impl Core {
             | Request::RenderOffline(_)
             | Request::DaemonInfo(_)
             | Request::DaemonShutdown(_) => Err(RpcError::failed("handled by connection")),
-            Request::HistoryUndo(_) | Request::HistoryRedo(_) | Request::HistoryGet(_) | Request::JournalGet(_) => {
+            Request::HistoryUndo(_)
+            | Request::HistoryRedo(_)
+            | Request::HistoryGet(_)
+            | Request::JournalGet(_)
+            | Request::JournalExport(_) => {
                 Err(RpcError::failed("handled by Core::handle"))
             }
             Request::SeatList(_)
@@ -2032,6 +2139,7 @@ impl Core {
             | Request::ClipSet(_)
             | Request::ClipAdd(_)
             | Request::ClipRemove(_)
+            | Request::ClipUpdate(_)
             | Request::ClipLength(_)
             | Request::ClipClear(_)
             | Request::ClipQuantize(_) => unreachable!("handled by handle_clip"),
@@ -2046,17 +2154,17 @@ fn read_only(req: &Request) -> bool {
     match req {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
-        | JournalGet(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_) | EngineStatus(_)
-        | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) => true,
+        | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
+        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
         | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
         | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
         | PatternSetNote(_) | VoiceTrigger(_) | VoiceNoteOn(_) | VoiceNoteOff(_) | ControllerPress(_)
         | ControllerKnob(_) | ControllerSetMode(_) | MidiConnect(_) | MidiDisconnect(_) | ProjectNew(_)
-        | ProjectSave(_) | ProjectLoad(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_) | SeatClaim(_)
-        | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_) | SeatUnbind(_)
-        | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) => false,
+        | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
+        | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
+        | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
+        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) => false,
     }
 }
 
@@ -2064,15 +2172,11 @@ impl Core {
     /// Whether a journaled request can change the doc (`Core::doc`). Those
     /// that cannot (performance, transport, connections) skip building it
     /// twice, which matters for a stream of notes from a keyboard.
-    fn changes_doc(&self, req: &Request) -> bool {
+    fn changes_doc(&self, req: &Request, client: &str) -> bool {
         match req {
-            // Notes from a generic device only play; CCs set parameters, and a
-            // Block's pads and knobs edit steps and parameters.
-            Request::MidiInput(p) => {
-                let block = self.midi.by_device(&p.device).is_some_and(|c| c.profile == DeviceProfile::LividBlock);
-                block || p.data.first().is_some_and(|s| s & 0xf0 == 0xb0)
-            }
-            // Takes are journaled as entries of their own (`record.take`).
+            // Notes only play; mapped CCs set parameters, and a Block's pads
+            // and knobs edit steps and parameters.
+            Request::MidiInput(p) => self.input_effect(p, client) == InputEffect::Edits,
             _ => !matches!(
                 req,
                 Request::TransportPlay(_)

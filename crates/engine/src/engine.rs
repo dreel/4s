@@ -236,6 +236,10 @@ pub struct Engine {
     tick: u64,
     /// Count-in ticks before the song's tick 0.
     count_in: u64,
+    /// Position of the next tick in the `sequencer.length` loop. It wraps
+    /// to the start when it runs past the end, so shortening the loop
+    /// while playing goes back to step 1 and lengthening it continues.
+    loop_tick: u32,
     /// Absolute sample position at which it fires.
     next_tick_at: f64,
     /// Samples between the last tick fired and the next.
@@ -266,6 +270,7 @@ impl Engine {
             playing: false,
             tick: 0,
             count_in: 0,
+            loop_tick: 0,
             next_tick_at: 0.0,
             tick_len: 1.0,
             output_latency: 0.0,
@@ -437,6 +442,7 @@ impl Engine {
                 self.tick = 0;
                 // Whole bars, so swing pairs and beats line up with the song.
                 self.count_in = (count_in as u64).div_ceil(TICKS_PER_BAR as u64) * TICKS_PER_BAR as u64;
+                self.loop_tick = 0;
                 self.next_tick_at = self.pos as f64;
                 self.tick_len = self.step_samples(0) / TICKS_PER_STEP as f64;
                 emit(Feedback::Started { time: self.time() });
@@ -506,17 +512,26 @@ impl Engine {
             self.tick = tick + 1;
             return;
         }
+        // Ticks from the song's start, after any count-in.
         let song = tick - self.count_in;
-        let step = (song / TICKS_PER_STEP as u64) as u32;
         let time = self.time();
-        if song % TICKS_PER_STEP as u64 == 0 {
-            emit(Feedback::Step { step: step % steps, tick: song, time });
+        if self.loop_tick >= steps * TICKS_PER_STEP {
+            self.loop_tick = 0;
+        }
+        let loop_tick = self.loop_tick;
+        let step = loop_tick / TICKS_PER_STEP;
+        if loop_tick % TICKS_PER_STEP == 0 {
+            emit(Feedback::Step { step, tick: song, time });
         }
         self.release_clip_notes(Some(tick));
         for (slot, t) in self.tracks.iter_mut().enumerate() {
             let Some(Some(s)) = self.slots.get_mut(slot) else { continue };
-            let length = t.length.unwrap_or(steps * TICKS_PER_STEP) as u64;
-            let pos = (song % length) as u32;
+            // A clip with its own length loops from the song's start; the
+            // others follow the global loop.
+            let pos = match t.length {
+                Some(length) => (song % length as u64) as u32,
+                None => loop_tick,
+            };
             let first = t.events.partition_point(|e| e.tick < pos);
             for e in t.events[first..].iter().take_while(|e| e.tick == pos) {
                 let velocity = e.velocity as f32 / 127.0;
@@ -541,9 +556,10 @@ impl Engine {
             }
         }
         // Swing pairs count from the pattern's first step, as the playhead does.
-        self.tick_len = self.step_samples(step % steps) / TICKS_PER_STEP as f64;
+        self.tick_len = self.step_samples(step) / TICKS_PER_STEP as f64;
         self.next_tick_at += self.tick_len;
         self.tick = tick + 1;
+        self.loop_tick = loop_tick + 1;
     }
 
     /// Render interleaved audio into `out` (`channels` >= 1; channels beyond

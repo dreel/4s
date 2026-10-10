@@ -48,12 +48,14 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop`), recording (`transport.record`, RFC 0008), the
 instrument graph (`instrument.*`, `channel.*`,
-`route.set`), clips (`clip.*`: timed note events, RFC 0007) and their step
+`route.set`), clips (`clip.*`: timed note events, RFC 0007; `clip.update`
+removes and adds in one step, and is how recorded takes are journaled) and their step
 views (`pattern.*`, drum steps and note steps),
 auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
 seats and their bindings (`seat.*`, RFC 0007), undo and the journal
-(`history.*`, `journal.get`), projects
-(`project.*`), rendering (`render.offline`), status (`engine.status`), and the
+(`history.*`, `journal.get`, `journal.export`), projects (`project.*`,
+including `project.import` to load a project sent inline), rendering
+(`render.offline`), status (`engine.status`), and the
 daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).
 
 ### Generic parameters

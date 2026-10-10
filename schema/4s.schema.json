@@ -824,6 +824,14 @@
           "playing": {
             "type": "boolean"
           },
+          "seat": {
+            "default": null,
+            "description": "The caller's seat, which seat-relative requests apply to.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "step": {
             "format": "uint32",
             "minimum": 0,
@@ -1848,6 +1856,24 @@
         },
         "type": "object"
       },
+      "ChannelInfo": {
+        "properties": {
+          "n": {
+            "description": "Stable channel number (1..=MAX_CHANNELS); paths are `mixer.<n>.*`.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "name"
+        ],
+        "type": "object"
+      },
       "ChannelMoveParams": {
         "properties": {
           "n": {
@@ -2042,6 +2068,41 @@
         "required": [
           "events"
         ],
+        "type": "object"
+      },
+      "ClipUpdateParams": {
+        "description": "Remove and add events in one edit (one undo step).",
+        "properties": {
+          "add": {
+            "default": [],
+            "description": "Events to add (replacing any at the same tick and note).",
+            "items": {
+              "$ref": "#/$defs/ClipEvent"
+            },
+            "type": "array"
+          },
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recorded": {
+            "default": false,
+            "description": "Marks a recorded take (RFC 0008): the daemon journals each recorded\npass as this call, so a replay writes the same notes. It changes\nnothing else.",
+            "type": "boolean"
+          },
+          "remove": {
+            "default": [],
+            "description": "Events to remove first.",
+            "items": {
+              "$ref": "#/$defs/EventKey"
+            },
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "ControllerModeParams": {
@@ -2321,6 +2382,22 @@
         ],
         "type": "object"
       },
+      "LayoutPort": {
+        "description": "A device and the role its port plays in its model.",
+        "properties": {
+          "device": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "device",
+          "role"
+        ],
+        "type": "object"
+      },
       "MidiConnectParams": {
         "properties": {
           "input": {
@@ -2387,6 +2464,31 @@
           "device": {
             "description": "Logical device name the input comes from.",
             "type": "string"
+          },
+          "model": {
+            "description": "The device model and port role whose default layout applies (see\n`midi.models`); default: the connected device's. Carried like\n`profile`, so a replay reads the input through the same layout.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DeviceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How to read the bytes; default: the connected device's profile, else\ngeneric. Input from a device on the engine host carries it, so the\njournal replays it the same way where that device is not connected."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "seat": {
             "default": null,
@@ -2771,6 +2873,145 @@
         ],
         "type": "object"
       },
+      "ProjectClip": {
+        "description": "A clip in a project file: events in text form (`tick:note:len:vel`, see\n`format_events`) and an optional length in ticks.",
+        "properties": {
+          "events": {
+            "type": "string"
+          },
+          "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
+      "ProjectController": {
+        "properties": {
+          "follow": {
+            "description": "The grid page follows the playhead.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "follow"
+        ],
+        "type": "object"
+      },
+      "ProjectFile": {
+        "properties": {
+          "channels": {
+            "description": "In display order. `n` is the channel number in `mixer.<n>.*` paths.",
+            "items": {
+              "$ref": "#/$defs/ChannelInfo"
+            },
+            "type": "array"
+          },
+          "clips": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ProjectClip"
+            },
+            "default": {},
+            "description": "Per instrument id (RFC 0007): clips that do not fit a step pattern\n(off-grid events, other lengths or velocities) or have their own\nlength. An instrument is in `patterns` or here, not both.",
+            "type": "object"
+          },
+          "controller": {
+            "$ref": "#/$defs/ProjectController"
+          },
+          "format_version": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "instruments": {
+            "description": "In creation order.",
+            "items": {
+              "$ref": "#/$defs/ProjectInstrument"
+            },
+            "type": "array"
+          },
+          "params": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "description": "Parameter values by path. Unknown paths are ignored on load; missing\npaths take their defaults.",
+            "type": "object"
+          },
+          "patterns": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ProjectPattern"
+            },
+            "description": "Per instrument id: drum step strings per voice\n(`{\"kick\": \"x---x---x---x---\"}`) or a note string (`\"C2 C2! D#2~ -\"`).\nInstruments with an empty pattern are omitted.",
+            "type": "object"
+          },
+          "routes": {
+            "additionalProperties": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Source (`drums`, `drums.kick`) -> channel number.",
+            "type": "object"
+          },
+          "seats": {
+            "additionalProperties": {
+              "$ref": "#/$defs/SeatConfig"
+            },
+            "default": {},
+            "description": "Performer setups by seat name (RFC 0007): focus, knob page, note\nbindings, CC maps.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "format_version",
+          "instruments",
+          "channels",
+          "routes",
+          "params",
+          "patterns",
+          "controller"
+        ],
+        "type": "object"
+      },
+      "ProjectImportParams": {
+        "properties": {
+          "file": {
+            "$ref": "#/$defs/ProjectFile",
+            "description": "A project sent inline (the contents of a bundle's `project.json`)."
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "ProjectInstrument": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/$defs/InstrumentType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name"
+        ],
+        "type": "object"
+      },
       "ProjectLoadParams": {
         "properties": {
           "path": {
@@ -2781,6 +3022,43 @@
           "path"
         ],
         "type": "object"
+      },
+      "ProjectPattern": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "clap": {
+                "type": "string"
+              },
+              "closed_hat": {
+                "type": "string"
+              },
+              "cowbell": {
+                "type": "string"
+              },
+              "high_tom": {
+                "type": "string"
+              },
+              "kick": {
+                "type": "string"
+              },
+              "low_tom": {
+                "type": "string"
+              },
+              "open_hat": {
+                "type": "string"
+              },
+              "snare": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        ]
       },
       "ProjectSaveParams": {
         "properties": {
@@ -3026,6 +3304,19 @@
             "description": "A connected device of a known model.",
             "type": "string"
           },
+          "model": {
+            "description": "The model and its ports to apply; default: the connected ports of\n`device`'s model. The daemon journals them, so a replay applies the\nsame layout where the devices are not connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ports": {
+            "items": {
+              "$ref": "#/$defs/LayoutPort"
+            },
+            "type": "array"
+          },
           "seat": {
             "default": null,
             "description": "Default: the caller's seat.",
@@ -3056,6 +3347,57 @@
         "required": [
           "binding"
         ],
+        "type": "object"
+      },
+      "SeatConfig": {
+        "description": "One performer's setup: saved in the project.",
+        "properties": {
+          "bindings": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/NoteBinding"
+            },
+            "type": "array"
+          },
+          "cc": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/CcMap"
+            },
+            "type": "array"
+          },
+          "focus": {
+            "default": null,
+            "description": "Instrument that `focus` bindings, the Block, and following knobs\nplay. The first instrument if absent.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "knob_page": {
+            "default": null,
+            "description": "Knob page id; the focused instrument's first page if absent or not\none of its pages.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "knobs": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/KnobFollow"
+            },
+            "type": "array"
+          },
+          "pitch_bend": {
+            "default": null,
+            "description": "Where pitch bend goes: `focus`, an instrument id, or `@<type>`.\nDefault: the focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "SeatCreateParams": {
@@ -3772,6 +4114,23 @@
         "type": "object"
       },
       {
+        "description": "The current history segment as a replayable recording.",
+        "properties": {
+          "method": {
+            "const": "journal.export",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Read a drum pattern (one voice or all).",
         "properties": {
           "method": {
@@ -3967,6 +4326,23 @@
           },
           "params": {
             "$ref": "#/$defs/ClipRemoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove and add events in one edit; recorded takes are journaled as\nthis.",
+        "properties": {
+          "method": {
+            "const": "clip.update",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipUpdateParams"
           }
         },
         "required": [
@@ -4545,6 +4921,23 @@
           },
           "params": {
             "$ref": "#/$defs/ProjectLoadParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Load a project sent inline (unsaved; no bundle path).",
+        "properties": {
+          "method": {
+            "const": "project.import",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ProjectImportParams"
           }
         },
         "required": [

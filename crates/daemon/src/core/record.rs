@@ -250,6 +250,9 @@ pub(super) struct LiveTake {
     pub instrument: String,
     pub slot: u8,
     pub user: String,
+    /// The connection that started it (`conn:<id>`), whose seat the
+    /// journal records.
+    pub client: String,
     pub origin: String,
 }
 
@@ -340,18 +343,26 @@ impl Core {
         match p.arm {
             Some(true) => {
                 let id = target.expect("resolved above");
+                // (`settle_take` already ended a take into another one.)
                 if self.take.as_ref().is_some_and(|t| t.instrument != id) {
                     self.end_take();
                 }
                 if self.take.is_none() {
                     let slot = self.slot(&id)?;
-                    let from = if self.playing { self.song_tick as f64 } else { 0.0 };
+                    let from = if self.playing { self.play_tick as f64 } else { 0.0 };
                     if !self.playing {
                         self.start(origin, self.record.count_in * TICKS_PER_BAR);
                     }
                     let take = Take::new(from);
                     self.take =
-                        Some(LiveTake { take, instrument: id, slot, user: user.to_string(), origin: origin.to_string() });
+                        Some(LiveTake {
+                        take,
+                        instrument: id,
+                        slot,
+                        user: user.to_string(),
+                        client: client.to_string(),
+                        origin: origin.to_string(),
+                    });
                 }
             }
             Some(false) => self.end_take(),
@@ -381,7 +392,7 @@ impl Core {
     /// End the take, writing the notes played (those still held end now).
     pub(super) fn end_take(&mut self) {
         if self.take.is_some() {
-            self.write_take((self.song_tick + TICKS_PER_STEP as u64) as f64, true);
+            self.write_take((self.play_tick + TICKS_PER_STEP as u64) as f64, true);
             self.take = None;
         }
     }
@@ -395,8 +406,18 @@ impl Core {
         let unwritten = t.take.clone();
         if let Some(events) = t.take.flush(upto, end, &settings, length, &existing) {
             let (id, origin) = (t.instrument.clone(), t.origin.clone());
-            let params = json!({ "instrument": id, "mode": settings.mode, "quantize": settings.quantize });
-            let result = self.journaled(&t.user, &origin, "record.take", params, |c| c.edit_clip(&id, events, None, &origin));
+            // Journaled as the `clip.update` that makes the same change, so
+            // a replay writes the same notes.
+            let remove = existing
+                .iter()
+                .filter(|e| events.binary_search_by_key(&e.key(), ClipEvent::key).is_err())
+                .map(|e| EventKey { tick: e.tick, note: e.note })
+                .collect();
+            let add = events.iter().filter(|e| !existing.contains(e)).copied().collect();
+            let update = ClipUpdateParams { instrument: Some(id.clone()), remove, add, recorded: true };
+            let params = serde_json::to_value(&update).expect("params serialize");
+            let result =
+                self.journaled(&t.user, &t.client, &origin, "clip.update", params, |c| c.edit_clip(&id, events, None, &origin));
             if let Err(e) = result {
                 tracing::warn!("recording into {id}: {}", e.message);
                 // A busy engine may take it next pass; an invalid clip (too
@@ -409,11 +430,36 @@ impl Core {
         self.take = Some(t);
     }
 
+    /// Before a transport request: stopping (or `record --off`) ends a
+    /// take, and playing again restarts it from the new start, writing what
+    /// was played. Done before the request is journaled, so the take's entry
+    /// comes first and a replay sees the same entries.
+    pub(super) fn settle_take(&mut self, req: &Request, origin: &str, client: &str) {
+        let Some(current) = self.take.as_ref().map(|t| t.instrument.clone()) else { return };
+        let ends = match req {
+            Request::TransportStop(_) | Request::TransportRecord(RecordParams { arm: Some(false), .. }) => true,
+            // Recording into another instrument ends this take.
+            Request::TransportRecord(p @ RecordParams { arm: Some(true), .. }) => {
+                self.clip_target(p.instrument.as_deref(), client).is_ok_and(|id| id != current)
+            }
+            _ => false,
+        };
+        if ends {
+            self.end_take();
+            self.record_changed(origin);
+            return;
+        }
+        match req {
+            Request::TransportPlay(_) => self.restart_take(),
+            _ => {}
+        }
+    }
+
     /// The transport restarts from tick 0: write the take so far, then
     /// keep recording from the start.
     pub(super) fn restart_take(&mut self) {
         if self.take.is_some() {
-            self.write_take((self.song_tick + TICKS_PER_STEP as u64) as f64, true);
+            self.write_take((self.play_tick + TICKS_PER_STEP as u64) as f64, true);
             if let Some(t) = self.take.as_mut() {
                 t.take = Take::new(0.0);
             }

@@ -80,9 +80,17 @@ echo "pad 0 2" >&7
 echo "raw 91 03 7F" >&7   # note-on on MIDI channel 2: must be ignored
 sleep 0.5
 check "pad press from device edits pattern (other channels ignored)" "kick        --x- ---- ---- ----" s pattern show kick
-check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","seat":"e2e"} -> event:drums.48.36' s journal
+check "device input is journaled as midi.input" 'midi:'"$VDEV"'  midi.input {"data":[144,16,127],"device":"pad","profile":"livid_block","seat":"e2e"} -> event:drums.48.36' s journal
 check "undo takes back a device pad press (the host user's)" "kick        ---- ---- ---- ----" bash -c "$BIN/4s undo >/dev/null && $BIN/4s pattern show kick"
 check "redo" "kick        --x- ---- ---- ----" bash -c "$BIN/4s redo >/dev/null && $BIN/4s pattern show kick"
+# Input that can do nothing is not journaled, from a device or over RPC:
+# clock, active sensing, pitch bend, a pad release, an unmapped CC.
+last_seq() { echo "seq=$("$BIN/4s" --json journal --limit 1 | python3 -c "import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])")"; }
+BEFORE=$(last_seq)
+for m in "F8" "FE" "E0 00 40" "80 10 00"; do echo "raw $m" >&7; done
+s midi send knobs F8 >/dev/null; s midi send knobs E0 00 40 >/dev/null; s midi send knobs B0 63 40 >/dev/null
+sleep 0.5
+check "input that can do nothing is not journaled" "$BEFORE" last_seq
 # Knob 2 (CC 2) on the decay page -> snare decay. Knobs pick up: one far
 # from the current value does nothing until it passes it.
 echo "knob 1 0" >&7; sleep 0.5
@@ -158,6 +166,13 @@ WATCH=$!; sleep 0.5
 echo "raw 90 24 64" >&8   # note on, C2 (36)
 wait $WATCH
 check "key down plays the note" '"instrument":"bass","voice":null,"note":36' cat "$TMP/key.json"
+s cc map keys 21 bass.cutoff >/dev/null
+"$BIN/4s" watch --type trigger --json > "$TMP/key-cc.json" &
+WATCH=$!; sleep 0.5
+echo "raw 90 26 64" >&8; echo "raw 80 26 00" >&8   # D2 (38)
+sleep 0.5; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "a keyboard with only a CC map still plays the focus" '"instrument":"bass","voice":null,"note":38' cat "$TMP/key-cc.json"
+s cc unmap keys 21 >/dev/null
 "$BIN/4s" watch --type meters --json > "$TMP/key-meters.json" &
 WATCH=$!; sleep 0.6
 echo "raw 80 24 00" >&8   # note off
@@ -254,6 +269,11 @@ wait $WATCH; sleep 0.3
 check "keys play the first 303 whatever the focus" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
 check "pads play the 808's voices in order" '"instrument":"drums","voice":"snare"' cat "$TMP/mpk.json"
 s focus bass >/dev/null
+"$BIN/4s" watch --type trigger --json > "$TMP/mpk-daw.json" &
+WATCH=$!; sleep 0.5
+echo "raw 99 25 64" >&6; echo "raw 89 25 00" >&6   # a pad's copy on the DAW Port only
+sleep 0.5; kill $WATCH 2>/dev/null; wait $WATCH 2>/dev/null || true
+check "the DAW Port's pad copies play nothing, whatever the focus" "0 triggers" bash -c "echo \$(grep -c trigger '$TMP/mpk-daw.json') triggers"
 # A held key (channel 1, note 48) survives a pad with the same note number
 # on channel 10 (bank B pad 5) being tapped.
 "$BIN/4s" watch --type meters --json > "$TMP/mpk-hold.json" &
@@ -555,6 +575,32 @@ s --seat bob bind keys --notes C1..B2 --to bass >/dev/null
 check "reveal needs a saved project" "save it first" s project reveal --no-open
 check "save" "e2e.4s" s project save e2e
 check "reveal prints location" "$FOURS_DATA_DIR/projects/e2e.4s" s project reveal --no-open
+# --- Recordings: this whole session, replayed elsewhere (docs/journal.md) ---
+check "export the session as a recording" "entries, digest" s journal export -o "$TMP/session.json"
+B_DIR=$(mktemp -d)
+FOURS_DATA_DIR=$B_DIR s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null
+check "replay it into a fresh daemon: same changes, same final state" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay "$TMP/session.json"
+check "a daemon with unsaved changes is not replaced without --force" "has unsaved changes" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay "$TMP/session.json"
+check "replay the raw journal file from the engine host" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$(ls -t "$FOURS_DATA_DIR"/journal/*.jsonl | head -1)"
+python3 -c "
+import json; r = json.load(open('$TMP/session.json'))
+e = [x for x in r['entries'] if x['changes']][3]; e['changes'][0]['after'] = 'tampered'
+json.dump(r, open('$TMP/tampered.json', 'w'))"
+check "a divergence is caught and the entry named" "replay diverged at entry" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$TMP/tampered.json"
+check "--accept rewrites a diverging recording with what the replay did" "accepted: rewrote" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force --accept "$TMP/tampered.json"
+check "...so it replays cleanly after" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$TMP/tampered.json"
+for f in tests/journals/*.json; do
+  check "fixture $(basename "$f") replays" "replay matched" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$f"
+done
+FOURS_DATA_DIR=$B_DIR s project new >/dev/null
+FOURS_DATA_DIR=$B_DIR s pattern set kick "x-x-x-x-" >/dev/null
+FOURS_DATA_DIR=$B_DIR s tempo 99 >/dev/null
+check "a journal file's last segment (after project new) replays without its starting request" "replay matched: 2 entries" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force "$(ls -t "$B_DIR"/journal/*.jsonl | head -1)"
+check "--accept refuses a journal file before touching the daemon" "rewrites a recording" env FOURS_DATA_DIR="$B_DIR" "$BIN/4s" journal replay --force --accept "$(ls -t "$B_DIR"/journal/*.jsonl | head -1)"
+check "project import sends a local project inline" "ch 2  Bass" bash -c "FOURS_DATA_DIR='$B_DIR' $BIN/4s project import '$FOURS_DATA_DIR/projects/e2e.4s' >/dev/null && FOURS_DATA_DIR='$B_DIR' $BIN/4s mixer"
+check "export as a script of 4s calls" "4s call project.import" s journal export --format sh
+FOURS_DATA_DIR=$B_DIR s daemon stop >/dev/null
+
 check "new clears" "kick        ---- ---- ---- ----" bash -c "$BIN/4s project new >/dev/null && $BIN/4s pattern show kick"
 check "new is the default graph" "ch 1  Drums        vol 100%  pan C          <- drums" s mixer
 check "a new project starts a fresh history" "undo: (empty)" s history
@@ -600,6 +646,8 @@ check "so does a drum step edit" "0:C2:24:100 12:F#2:6:89 96:D2:24:89" bash -c "
 s instrument rm seqd >/dev/null
 check "clip set replaces the events" "seq: 1 notes" s clip set seq "0:60:96:127"
 check "clear" "seq: 0 notes" s clip clear seq
+check "quantize keeps a note past the longest clip on the grid" "1512:C2:6:89" bash -c "$BIN/4s clip set seq 1535:C2:6 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
+s clip clear seq >/dev/null
 # Recording (RFC 0008). Offline first: the same take code over a render's
 # feedback, sample-accurate. At 120 bpm a second is 192 ticks: 0.51 s is
 # tick 97.9, 1.13 s is 217.
@@ -622,7 +670,7 @@ sleep 0.4
 s key C2 --instrument seq --for 0.2 >/dev/null
 sleep 2
 check "the pass is written into the clip" "seq: 1 notes" s clip show seq
-check "as one journal entry" "record.take" s journal --limit 3
+check "as one journal entry: the clip.update that writes it" '"recorded":true' s journal --limit 3
 check "record --off ends the take, still playing" "not recording" s record --off
 check "status shows the next take's settings" "record: not recording (next take: overdub, quantize 1/16 at 100%" s status
 s stop >/dev/null
@@ -635,9 +683,46 @@ s instrument add tb303 --id rec >/dev/null
 s record --to rec --count-in 0 >/dev/null
 check "undoing the instrument's add ends a take into it" "not recording" bash -c "$BIN/4s undo >/dev/null && $BIN/4s record --show"
 s stop >/dev/null
+check "recording into another instrument ends the take and starts one there" "recording into drums" bash -c "$BIN/4s record --to seq --count-in 0 >/dev/null && sleep 0.2 && $BIN/4s key C2 --instrument seq --for 0.1 >/dev/null && $BIN/4s record --to drums"
+check "...writing the first one" "seq: 1 notes" s clip show seq
+s stop >/dev/null
+# A session with takes replays: the takes are entries of their own, and
+# replay does not record the replayed notes again.
+check "a session with recorded takes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/takes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/takes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 check "record settings are checked" "strength must be 0..1" s record --show --strength 2
 s record --show --quantize off --count-in 1 >/dev/null
 s instrument rm seq >/dev/null
+# The loop while playing (at 30 bpm a step is 0.5 s): shortening it past
+# the playhead goes back to step 1, lengthening it continues, and the Block
+# grid's playhead follows a focus clip with its own length.
+cat > "$TMP/loop.py" <<PY
+import subprocess, sys
+def run(*a): return subprocess.check_output(['$BIN/4s', *a], text=True)
+# One stream, so no step is missed between reads; 0-based (watch shows
+# steps from 1).
+watch = subprocess.Popen(['$BIN/4s', 'watch', '--type', 'playhead'], stdout=subprocess.PIPE, text=True)
+def step(): return int(watch.stdout.readline().split('step ')[1].split()[0]) - 1
+def until(ok):
+    while not ok(s := step()): pass
+    return s
+run('tempo', '30'); run('set', 'sequencer.length', sys.argv[1]); run('play')
+try:
+    if sys.argv[2] == 'shorten':
+        until(lambda s: s >= 13); run('set', 'sequencer.length', '12'); print('next step', step())
+    elif sys.argv[2] == 'lengthen':
+        until(lambda s: s == 11); until(lambda s: s == 3); run('set', 'sequencer.length', '16'); print('next step', step())
+    else:
+        s = until(lambda s: s >= 4)
+        col = run('controller').splitlines()[8].split()[s % 3]
+        print('grid playhead at clip step' if col == '#' else run('controller'))
+finally:
+    watch.kill(); run('stop'); run('set', 'sequencer.length', '16'); run('tempo', '120')
+PY
+check "shortening the loop past the playhead goes back to step 1" "next step 0" python3 "$TMP/loop.py" 16 shorten
+check "lengthening it continues" "next step 4" python3 "$TMP/loop.py" 12 lengthen
+s instrument add tr808 --id gridd --no-channel >/dev/null; s focus gridd >/dev/null; s clip length gridd 3 >/dev/null
+check "the Block grid's playhead follows a focus clip with its own length" "grid playhead at clip step" python3 "$TMP/loop.py" 16 grid
+s instrument rm gridd >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
 check "daemon logs" "listening on ws://" s daemon logs

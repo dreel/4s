@@ -7,6 +7,7 @@
 //! - `export_ts()`: exports all param/result types with ts-rs.
 
 use crate::clip::*;
+use crate::project::ProjectFile;
 use crate::types::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -269,6 +270,29 @@ pub struct JournalGetParams {
     pub user: Option<String>,
 }
 
+/// Version of the `Recording` format.
+pub const RECORDING_FORMAT_VERSION: u32 = 1;
+
+/// A replayable session: the project at the start of the current history
+/// segment (daemon start, or the last project new/load/import) and every
+/// journal entry since. `4s journal replay` re-sends the entries to another
+/// daemon and checks it ends up the same.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Recording {
+    pub format_version: u32,
+    pub base: ProjectFile,
+    /// Oldest first.
+    pub entries: Vec<JournalEntry>,
+    /// Hash of the undoable state after the last entry.
+    pub digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ProjectImportParams {
+    /// A project sent inline (the contents of a bundle's `project.json`).
+    pub file: ProjectFile,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct JournalGetResult {
     /// Oldest first.
@@ -338,7 +362,7 @@ pub struct ClipEventsParams {
 }
 
 /// An event's identity in a clip.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct EventKey {
     pub tick: u32,
     pub note: u8,
@@ -349,6 +373,25 @@ pub struct ClipRemoveParams {
     #[serde(default)]
     pub instrument: Option<String>,
     pub events: Vec<EventKey>,
+}
+
+/// Remove and add events in one edit (one undo step).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipUpdateParams {
+    /// Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Events to remove first.
+    #[serde(default)]
+    pub remove: Vec<EventKey>,
+    /// Events to add (replacing any at the same tick and note).
+    #[serde(default)]
+    pub add: Vec<ClipEvent>,
+    /// Marks a recorded take (RFC 0008): the daemon journals each recorded
+    /// pass as this call, so a replay writes the same notes. It changes
+    /// nothing else.
+    #[serde(default)]
+    pub recorded: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -599,6 +642,18 @@ pub struct MidiInputParams {
     /// Block only edits the host seat (its LEDs show that one).
     #[serde(default)]
     pub seat: Option<String>,
+    /// How to read the bytes; default: the connected device's profile, else
+    /// generic. Input from a device on the engine host carries it, so the
+    /// journal replays it the same way where that device is not connected.
+    #[serde(default)]
+    pub profile: Option<DeviceProfile>,
+    /// The device model and port role whose default layout applies (see
+    /// `midi.models`); default: the connected device's. Carried like
+    /// `profile`, so a replay reads the input through the same layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -613,6 +668,20 @@ pub struct SeatApplyLayoutParams {
     pub seat: Option<String>,
     /// A connected device of a known model.
     pub device: String,
+    /// The model and its ports to apply; default: the connected ports of
+    /// `device`'s model. The daemon journals them, so a replay applies the
+    /// same layout where the devices are not connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<LayoutPort>,
+}
+
+/// A device and the role its port plays in its model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LayoutPort {
+    pub device: String,
+    pub role: String,
 }
 
 // ---- seats ---------------------------------------------------------------
@@ -836,6 +905,8 @@ api! {
     HistoryGet = "history.get" (Empty) -> HistoryInfo;
     /// Recent journal entries: every request that could change state.
     JournalGet = "journal.get" (JournalGetParams) -> JournalGetResult;
+    /// The current history segment as a replayable recording.
+    JournalExport = "journal.export" (Empty) -> Recording;
 
     /// Read a drum pattern (one voice or all).
     PatternGet = "pattern.get" (PatternGetParams) -> PatternResult;
@@ -862,6 +933,9 @@ api! {
     ClipAdd = "clip.add" (ClipEventsParams) -> Clip;
     /// Remove events by tick and note.
     ClipRemove = "clip.remove" (ClipRemoveParams) -> Clip;
+    /// Remove and add events in one edit; recorded takes are journaled as
+    /// this.
+    ClipUpdate = "clip.update" (ClipUpdateParams) -> Clip;
     /// Set a clip's own length, or follow `sequencer.length`.
     ClipLength = "clip.length" (ClipLengthParams) -> Clip;
     /// Remove every event.
@@ -940,6 +1014,8 @@ api! {
     ProjectSave = "project.save" (ProjectSaveParams) -> ProjectInfo;
     /// Load a project bundle.
     ProjectLoad = "project.load" (ProjectLoadParams) -> ProjectInfo;
+    /// Load a project sent inline (unsaved; no bundle path).
+    ProjectImport = "project.import" (ProjectImportParams) -> ProjectInfo;
     /// List project bundles in the daemon's projects dir.
     ProjectList = "project.list" (Empty) -> ProjectListResult;
 

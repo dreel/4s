@@ -60,6 +60,12 @@ latency/jitter injection.
 - Unit tests only for complex logic (DSP, timing, parsing) and silent
   invariants; see [testing.md](testing.md).
 
+- **Recordings** ([journal.md](journal.md)). `4s journal export` saves a
+  session (the base project and every request, with its changes), and
+  `4s journal replay` re-sends it to an isolated daemon, comparing each
+  step and the final state digest. Use them to reproduce a person's session
+  and as regression fixtures (`tests/journals/`).
+
 ### Audio
 
 - A **headless/offline render mode**: render N bars of a pattern to a WAV file

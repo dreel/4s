@@ -88,14 +88,15 @@ pub fn normalize_events(events: &[ClipEvent]) -> Result<Vec<ClipEvent>, String> 
 
 /// Move `tick` toward the nearest multiple of `grid` by `strength` (0..1; 1
 /// lands exactly on the grid). A tick that ends up at or past the loop's end
-/// wraps to its start, where it would play.
+/// wraps to its start, where it would play; one past the longest clip takes
+/// the last grid line before it.
 pub fn snap_tick(tick: u32, grid: u32, strength: f32, loop_len: u32) -> u32 {
     let g = grid.max(1);
     let nearest = (tick + g / 2) / g * g;
     let moved = tick as f64 + (nearest as f64 - tick as f64) * strength.clamp(0.0, 1.0) as f64;
     let t = moved.round() as u32;
     let t = if tick < loop_len && t >= loop_len { t - loop_len } else { t };
-    t.min(MAX_CLIP_TICKS - 1)
+    if t >= MAX_CLIP_TICKS { (MAX_CLIP_TICKS - 1) / g * g } else { t }
 }
 
 /// Grid names the CLI and UI offer, with their size in ticks: `1/4` .. `1/32`,

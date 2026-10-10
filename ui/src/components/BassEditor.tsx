@@ -33,10 +33,16 @@ export function BassEditor({ id }: { id: string }) {
   const playhead = useApp((s) => s.snapshot?.transport.step ?? null);
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
   const square = useApp((s) => (s.snapshot?.params[`${id}.waveform`] ?? 0) >= 0.5);
-  // The Block (and this engine's devices) follow the host seat; a remote
-  // UI focuses its own seat.
+  // The Block (and this engine's devices) follow the host seat; the button
+  // focuses this UI's own seat, so it shows by that seat's focus.
   const focused = useApp((s) => s.snapshot?.controller.focus === id);
   const mine = useApp((s) => mySeat(s)?.name ?? null);
+  // As the daemon resolves it: the seat's focus if it exists, else the first instrument.
+  const myFocus = useApp((s) => {
+    const ids = s.snapshot?.graph.instruments.map((i) => i.id) ?? [];
+    const f = mySeat(s)?.config.focus;
+    return (f && ids.includes(f) ? f : ids[0]) === id;
+  });
   if (!pattern || pattern.kind !== "notes") return null;
   const steps = pattern.steps;
 
@@ -114,7 +120,7 @@ export function BassEditor({ id }: { id: string }) {
         >
           audition C2
         </button>
-        {!focused && (
+        {!myFocus && (
           <button
             className="px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 bg-zinc-900 text-xs"
             data-testid="make-target"

@@ -303,6 +303,16 @@ impl Core {
                     .collect();
                 self.edit_clip(&id, events, None, origin)
             })),
+            Request::ClipUpdate(p) => r(self.clip_target(p.instrument.as_deref(), client).and_then(|id| {
+                let mut events: Vec<ClipEvent> = self.clips[&id]
+                    .events
+                    .iter()
+                    .filter(|e| !p.remove.iter().any(|k| (k.tick, k.note) == e.key()))
+                    .copied()
+                    .collect();
+                events.extend(p.add);
+                self.edit_clip(&id, events, None, origin)
+            })),
             Request::ClipLength(p) => r(self.clip_target(p.instrument.as_deref(), client).and_then(|id| {
                 let events = self.clips[&id].events.clone();
                 self.edit_clip(&id, events, Some(p.length), origin)
@@ -318,8 +328,9 @@ impl Core {
                     return Err(RpcError::invalid("strength must be 0..1"));
                 }
                 // Toward the nearest grid line; one that lands on the loop's
-                // end wraps to its start (where it would play). Events that
-                // land together keep the later.
+                // end wraps to its start (where it would play), and one past
+                // the longest clip takes the last line before it. Events
+                // that land together keep the later.
                 let (strength, loop_len) = (p.strength.unwrap_or(1.0), self.loop_len(&id));
                 let events: Vec<ClipEvent> = self.clips[&id]
                     .events

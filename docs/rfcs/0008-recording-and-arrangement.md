@@ -37,7 +37,8 @@ song.
   `count_in` bars of metronome. A take writes once per loop pass, one step
   before the loop's end (so pass 1 plays back in pass 2), and when it ends
   (`arm: false`, or stopping). Each write goes through `edit_clip` and is
-  one journal entry, `record.take`, so one pass is one undo step, owned by
+  one journal entry, a `clip.update` marked `recorded`, so one pass is one
+  undo step and a journal replay writes the same notes, owned by
   the user who armed.
 - **Modes.** `overdub` adds; `replace` clears the part of the loop each
   pass covers, then adds what was played.
@@ -122,7 +123,19 @@ moved, resized, and duplicated through phase B's RPCs.
 - The engine confirms `Play` (`Feedback::Started`); until then the daemon
   ignores steps and live notes, which still count from the previous start.
 - Playing again during a take writes what was played (keys still held end
-  there) and keeps recording from the new start; removing the instrument (including by undo) ends the
-  take without writing.
+  there) and keeps recording from the new start; recording into another
+  instrument ends the take first; removing the instrument (including by
+  undo) ends the take without writing.
+- Journal (RFC 0006): each write is a `clip.update { instrument, remove,
+  add, recorded: true }` entry under the user who armed, with the seat of
+  the connection that armed. A transport request that ends or restarts a
+  take (`stop`, `play`, `record --off`, recording elsewhere) writes it
+  before the request is journaled, so the take's entry comes first.
+  `4s journal replay` sends `transport.record` without `arm` (replayed notes
+  are not recorded again); the `clip.update` entries reproduce the takes.
+- The global loop keeps its own position when `sequencer.length` changes
+  while playing (#24), but a take maps song ticks onto the loop by the
+  current length; a length change during a take can place notes off
+  (see docs/backlog.md).
 - Live take progress (notes drawn while recording) waits for the piano roll
   (phase B).

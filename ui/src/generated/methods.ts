@@ -11,6 +11,7 @@ import type { ClipGetParams } from "./ClipGetParams";
 import type { ClipLengthParams } from "./ClipLengthParams";
 import type { ClipQuantizeParams } from "./ClipQuantizeParams";
 import type { ClipRemoveParams } from "./ClipRemoveParams";
+import type { ClipUpdateParams } from "./ClipUpdateParams";
 import type { ControllerModeParams } from "./ControllerModeParams";
 import type { ControllerState } from "./ControllerState";
 import type { DaemonInfo } from "./DaemonInfo";
@@ -50,12 +51,14 @@ import type { PatternClearParams } from "./PatternClearParams";
 import type { PatternGetParams } from "./PatternGetParams";
 import type { PatternResult } from "./PatternResult";
 import type { PatternSetParams } from "./PatternSetParams";
+import type { ProjectImportParams } from "./ProjectImportParams";
 import type { ProjectInfo } from "./ProjectInfo";
 import type { ProjectListResult } from "./ProjectListResult";
 import type { ProjectLoadParams } from "./ProjectLoadParams";
 import type { ProjectSaveParams } from "./ProjectSaveParams";
 import type { RecordParams } from "./RecordParams";
 import type { RecordState } from "./RecordState";
+import type { Recording } from "./Recording";
 import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
 import type { RouteSetParams } from "./RouteSetParams";
@@ -106,6 +109,7 @@ export interface Methods {
   "history.redo": { params: Empty; result: HistoryStepResult };
   "history.get": { params: Empty; result: HistoryInfo };
   "journal.get": { params: JournalGetParams; result: JournalGetResult };
+  "journal.export": { params: Empty; result: Recording };
   "pattern.get": { params: PatternGetParams; result: PatternResult };
   "pattern.set": { params: PatternSetParams; result: TrackPattern };
   "pattern.set_step": { params: SetStepParams; result: StepResult };
@@ -118,6 +122,7 @@ export interface Methods {
   "clip.set": { params: ClipEventsParams; result: Clip };
   "clip.add": { params: ClipEventsParams; result: Clip };
   "clip.remove": { params: ClipRemoveParams; result: Clip };
+  "clip.update": { params: ClipUpdateParams; result: Clip };
   "clip.length": { params: ClipLengthParams; result: Clip };
   "clip.clear": { params: ClipGetParams; result: Clip };
   "clip.quantize": { params: ClipQuantizeParams; result: Clip };
@@ -152,6 +157,7 @@ export interface Methods {
   "project.new": { params: Empty; result: ProjectInfo };
   "project.save": { params: ProjectSaveParams; result: ProjectInfo };
   "project.load": { params: ProjectLoadParams; result: ProjectInfo };
+  "project.import": { params: ProjectImportParams; result: ProjectInfo };
   "project.list": { params: Empty; result: ProjectListResult };
   "render.offline": { params: RenderParams; result: RenderResult };
   "engine.status": { params: Empty; result: AudioStatus };
@@ -185,6 +191,7 @@ export const METHODS: MethodName[] = [
   "history.redo",
   "history.get",
   "journal.get",
+  "journal.export",
   "pattern.get",
   "pattern.set",
   "pattern.set_step",
@@ -197,6 +204,7 @@ export const METHODS: MethodName[] = [
   "clip.set",
   "clip.add",
   "clip.remove",
+  "clip.update",
   "clip.length",
   "clip.clear",
   "clip.quantize",
@@ -231,6 +239,7 @@ export const METHODS: MethodName[] = [
   "project.new",
   "project.save",
   "project.load",
+  "project.import",
   "project.list",
   "render.offline",
   "engine.status",
