@@ -351,6 +351,9 @@ pub struct ClipGetParams {
     /// Default: the caller's seat focus.
     #[serde(default)]
     pub instrument: Option<String>,
+    /// Clip in the instrument's pool; default: its selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -358,6 +361,9 @@ pub struct ClipEventsParams {
     /// Default: the caller's seat focus.
     #[serde(default)]
     pub instrument: Option<String>,
+    /// Clip in the instrument's pool; default: its selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
     pub events: Vec<ClipEvent>,
 }
 
@@ -372,6 +378,9 @@ pub struct EventKey {
 pub struct ClipRemoveParams {
     #[serde(default)]
     pub instrument: Option<String>,
+    /// Clip in the instrument's pool; default: its selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
     pub events: Vec<EventKey>,
 }
 
@@ -381,6 +390,9 @@ pub struct ClipUpdateParams {
     /// Default: the caller's seat focus.
     #[serde(default)]
     pub instrument: Option<String>,
+    /// Clip in the instrument's pool; default: its selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
     /// Events to remove first.
     #[serde(default)]
     pub remove: Vec<EventKey>,
@@ -398,6 +410,9 @@ pub struct ClipUpdateParams {
 pub struct ClipLengthParams {
     #[serde(default)]
     pub instrument: Option<String>,
+    /// Clip in the instrument's pool; default: its selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
     /// Ticks (1..`MAX_CLIP_TICKS`); omit to follow `sequencer.length`.
     #[serde(default)]
     pub length: Option<u32>,
@@ -407,11 +422,126 @@ pub struct ClipLengthParams {
 pub struct ClipQuantizeParams {
     #[serde(default)]
     pub instrument: Option<String>,
+    /// Clip in the instrument's pool; default: its selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
     /// Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).
     pub grid: u32,
     /// How far to move each note toward the grid, 0..1 (default 1: onto it).
     #[serde(default)]
     pub strength: Option<f32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipNewParams {
+    /// Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Default: its id.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Ticks; default: follow `sequencer.length`.
+    #[serde(default)]
+    pub length: Option<u32>,
+    /// Make it the selected clip (default true).
+    #[serde(default)]
+    pub select: Option<bool>,
+}
+
+/// A clip in a pool (`clip.duplicate`, `clip.delete`, `clip.select`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipRefParams {
+    /// Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Default: the selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipRenameParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    #[serde(default)]
+    pub clip: Option<u32>,
+    pub name: String,
+}
+
+// ---- song (RFC 0008 phase B) ------------------------------------------------
+
+/// Place a clip on the song timeline; it cuts what it overlaps on the track.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SongPlaceParams {
+    /// Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Default: the selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
+    /// Song tick (`TICKS_PER_BAR` per bar).
+    pub start: u32,
+    /// Ticks; default: the clip's length.
+    #[serde(default)]
+    pub length: Option<u32>,
+    /// Ticks into the clip it starts at (default 0).
+    #[serde(default)]
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SongRemoveParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Start tick of the placement.
+    pub start: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SongMoveParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Start tick of the placement.
+    pub start: u32,
+    /// Its new start tick.
+    pub to: u32,
+}
+
+/// The whole song: every track's arrangement and where it ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SongInfo {
+    /// The end of the last placement, in ticks.
+    pub length: u32,
+    pub tracks: Vec<TrackInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LocateParams {
+    /// Song tick that song mode plays from.
+    pub tick: u32,
+}
+
+// ---- batch -----------------------------------------------------------------
+
+/// Several requests as one: applied in order, journaled as one entry, and
+/// undone as one step. Not atomic: it stops at the first error, and what
+/// the requests before it changed stays.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct BatchParams {
+    /// Each `{"method": ..., "params": ...}`. Not `batch` itself, nor
+    /// connection-level methods (hello, subscribe, render, daemon), undo,
+    /// or the journal.
+    #[ts(type = "Array<{ method: string, params?: unknown }>")]
+    #[schemars(with = "Vec<serde_json::Value>")]
+    pub requests: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct BatchResult {
+    /// Each request's result, in order.
+    #[ts(type = "unknown[]")]
+    #[schemars(with = "Vec<serde_json::Value>")]
+    pub results: Vec<serde_json::Value>,
 }
 
 // ---- recording (RFC 0008) -------------------------------------------------
@@ -813,6 +943,9 @@ pub struct RenderParams {
     pub path: Option<String>,
     #[serde(default)]
     pub sample_rate: Option<u32>,
+    /// Song tick to start from, in song mode (default: the locate point).
+    #[serde(default)]
+    pub from: Option<u32>,
     /// Include the metronome click (default off, whatever `metronome.on` is).
     #[serde(default)]
     pub metronome: Option<bool>,
@@ -840,9 +973,10 @@ pub struct RenderResult {
     pub onsets: Vec<f64>,
     /// What the sequencer actually fired, for comparison with `onsets`.
     pub triggers: Vec<RenderTrigger>,
-    /// With `record`: the clip the take would leave.
+    /// With `record`: the clips the take would leave (in song mode, a take
+    /// can write several, and new ones).
     #[serde(default)]
-    pub recorded: Option<Clip>,
+    pub recorded: Vec<Clip>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -877,6 +1011,8 @@ api! {
     /// Arm or end recording into an instrument's clip, or change record
     /// settings (mode, quantize, count-in).
     TransportRecord = "transport.record" (RecordParams) -> RecordState;
+    /// Set where song mode plays from (and jump there while playing).
+    TransportLocate = "transport.locate" (LocateParams) -> TransportState;
 
     /// Available instrument types, with their outputs and parameters.
     InstrumentTypes = "instrument.types" (Empty) -> InstrumentTypesResult;
@@ -942,6 +1078,27 @@ api! {
     ClipClear = "clip.clear" (ClipGetParams) -> Clip;
     /// Move every event to the nearest grid line.
     ClipQuantize = "clip.quantize" (ClipQuantizeParams) -> Clip;
+    /// A new empty clip in an instrument's pool.
+    ClipNew = "clip.new" (ClipNewParams) -> Clip;
+    /// Copy a clip into a new one in the same pool.
+    ClipDuplicate = "clip.duplicate" (ClipRefParams) -> Clip;
+    ClipRename = "clip.rename" (ClipRenameParams) -> Clip;
+    /// Delete a clip and its placements (a track keeps at least one clip).
+    ClipDelete = "clip.delete" (ClipRefParams) -> TrackInfo;
+    /// Select the clip pattern mode plays and the step editors edit.
+    ClipSelect = "clip.select" (ClipRefParams) -> TrackInfo;
+
+    /// Several requests as one journal entry and undo step.
+    Batch = "batch" (BatchParams) -> BatchResult;
+
+    /// Every track's arrangement.
+    SongGet = "song.get" (Empty) -> SongInfo;
+    /// Place a clip on a track's arrangement.
+    SongPlace = "song.place" (SongPlaceParams) -> TrackInfo;
+    /// Remove a placement.
+    SongRemove = "song.remove" (SongRemoveParams) -> TrackInfo;
+    /// Move a placement to another start.
+    SongMove = "song.move" (SongMoveParams) -> TrackInfo;
 
     /// Play a drum voice or a note immediately (audition).
     VoiceTrigger = "voice.trigger" (TriggerParams) -> Empty;

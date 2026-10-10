@@ -3,7 +3,7 @@
 //! added, routed, played, and removed through the command ring.
 
 use fours_engine::instrument::{self, MAX_BLOCK};
-use fours_engine::{Command, Engine, ParamTarget, RtEngine, params};
+use fours_engine::{Command, Engine, ParamTarget, Placement, RtEngine, params};
 use fours_protocol::{ClipEvent, InstrumentType, MAX_EVENTS, NoteStep, STEP_ON, Voice, drum_event, note_event};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -76,14 +76,21 @@ fn process_never_allocates() {
             Command::SetRoute { slot: 0, output: 0, channel: Some(0) },
             Command::SetRoute { slot: 0, output: 1, channel: Some(1) },
             Command::SetRoute { slot: 1, output: 0, channel: Some(1) },
-            Command::ClearClip { slot: 0 },
-            Command::AddEvent { slot: 0, event: kicks[0] },
-            Command::AddEvent { slot: 0, event: kicks[1] },
-            Command::AddEvent { slot: 1, event: bass[0] },
-            Command::AddEvent { slot: 1, event: bass[1] },
-            Command::RemoveEvent { slot: 0, tick: kicks[1].tick, note: kicks[1].note },
-            Command::AddEvent { slot: 0, event: kicks[1] },
-            Command::SetClipLength { slot: 1, length: Some(48) },
+            Command::ClearClip { clip: 0 },
+            Command::AddEvent { clip: 0, event: kicks[0] },
+            Command::AddEvent { clip: 0, event: kicks[1] },
+            Command::AddEvent { clip: 1, event: bass[0] },
+            Command::AddEvent { clip: 1, event: bass[1] },
+            Command::RemoveEvent { clip: 0, tick: kicks[1].tick, note: kicks[1].note },
+            Command::AddEvent { clip: 0, event: kicks[1] },
+            Command::SetClipLength { clip: 1, length: Some(48) },
+            Command::SelectClip { slot: 0, clip: Some(0) },
+            Command::SelectClip { slot: 1, clip: Some(1) },
+            Command::AddPlacement { slot: 0, placement: Placement { start: 0, length: 384, offset: 0, clip: 0 } },
+            Command::AddPlacement { slot: 1, placement: Placement { start: 96, length: 200, offset: 24, clip: 1 } },
+            Command::RemovePlacement { slot: 1, start: 96 },
+            Command::AddPlacement { slot: 1, placement: Placement { start: 96, length: 200, offset: 24, clip: 1 } },
+            Command::Locate { tick: 48 },
             Command::SetParam { target: ParamTarget::Channel { ch: 1, index: 1 }, value: -0.5 },
             Command::SetParam { target: ParamTarget::Instrument { slot: 1, index: 2 }, value: 0.7 },
             Command::NoteOn { slot: 0, note: 42, velocity: 1.0, gate: false },
@@ -116,10 +123,28 @@ fn process_never_allocates() {
         let n = counted(|| rt.process(&mut out, 2));
         assert_eq!(n, 0, "round {round}: {n} heap operations playing live notes");
 
+        // Song mode: the arrangement, a range loop, and locating while
+        // playing.
+        for c in [
+            Command::SetParam { target: ParamTarget::Global(params::SONG_MODE), value: 1.0 },
+            Command::SetParam { target: ParamTarget::Global(params::LOOP), value: 2.0 },
+            Command::SetParam { target: ParamTarget::Global(params::LOOP_END), value: 1.0 },
+            Command::Locate { tick: 0 },
+        ] {
+            assert!(link.commands.push(c).is_ok());
+        }
+        let n = counted(|| {
+            for _ in 0..200 {
+                rt.process(&mut out, 2);
+            }
+        });
+        assert_eq!(n, 0, "round {round}: {n} heap operations in song mode");
+        assert!(link.commands.push(Command::SetParam { target: ParamTarget::Global(params::SONG_MODE), value: 0.0 }).is_ok());
+
         // Filling a clip to capacity stays in its preallocated storage.
         for tick in 0..MAX_EVENTS as u32 {
             let event = ClipEvent { tick, len: 1, note: 38, velocity: 100 };
-            assert!(link.commands.push(Command::AddEvent { slot: 0, event }).is_ok());
+            assert!(link.commands.push(Command::AddEvent { clip: 0, event }).is_ok());
         }
         let n = counted(|| rt.process(&mut out, 2));
         assert_eq!(n, 0, "round {round}: {n} heap operations filling a clip");

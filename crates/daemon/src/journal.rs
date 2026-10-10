@@ -53,12 +53,13 @@ pub fn digest(doc: &Doc) -> String {
 }
 
 /// The instrument id a key belongs to: `instrument:bass`, `param:bass.cutoff`,
-/// `step:drums.kick.3`, `note:bass.2`, `route:drums.kick`. (For
-/// `param:mixer.1.volume` this is `mixer`, a reserved id no instrument has.)
+/// `route:drums.kick`, and its track's `clip:drums.1`, `event:drums.1.0.36`,
+/// `selected:drums`, `place:drums.0`. (For `param:mixer.1.volume` this is
+/// `mixer`, a reserved id no instrument has.)
 pub fn owner(key: &str) -> Option<&str> {
     let (kind, rest) = key.split_once(':')?;
     match kind {
-        "instrument" | "param" | "step" | "note" | "route" => rest.split('.').next(),
+        "instrument" | "param" | "route" | "clip" | "event" | "selected" | "place" => rest.split('.').next(),
         _ => None,
     }
 }
@@ -66,6 +67,14 @@ pub fn owner(key: &str) -> Option<&str> {
 /// A short description of a request for undo menus: the method and the
 /// params that name what it touched, else the first changed key.
 pub fn label(method: &str, params: &Value, changes: &[Change]) -> String {
+    // A batch reads as what it did: `clip.new, clip.update, song.place`.
+    if method == "batch"
+        && let Some(list) = params.get("requests").and_then(Value::as_array)
+    {
+        let mut methods: Vec<&str> = list.iter().filter_map(|r| r.get("method").and_then(Value::as_str)).collect();
+        methods.dedup();
+        return format!("batch: {}", methods.join(", "));
+    }
     let mut parts = vec![method.to_string()];
     for k in ["type", "path", "id", "source", "instrument", "voice", "step", "n"] {
         match params.get(k) {
@@ -500,7 +509,7 @@ mod tests {
         let mut h = History::default();
         let added = doc(&[("instrument:bass", json!({"type": "tb303", "name": "Bass"})), ("route:bass", json!(2))]);
         set(&mut h, "alice", 1, &Doc::new(), &added);
-        h.record("bob", 2, "bob".into(), &diff(&Doc::new(), &doc(&[("note:bass.0", json!({"note": 36}))])));
+        h.record("bob", 2, "bob".into(), &diff(&Doc::new(), &doc(&[("event:bass.1.0.36", json!({"len": 24, "velocity": 89}))])));
         let p = h.plan("alice", false).unwrap();
         assert!(p.sets.is_empty());
         assert_eq!(p.skipped, vec!["instrument:bass".to_string(), "route:bass".to_string()]);
@@ -512,14 +521,17 @@ mod tests {
         let before = doc(&[
             ("channel:2", json!("Bass")),
             ("instrument:bass", json!({"type": "tb303", "name": "Bass"})),
-            ("note:bass.0", json!({"note": 36, "accent": false, "slide": false})),
+            ("clip:bass.1", json!({"name": "1", "length": null})),
+            ("event:bass.1.0.36", json!({"len": 12, "velocity": 89})),
+            ("selected:bass", json!(1)),
+            ("place:bass.0", json!({"clip": 1, "length": 384, "offset": 0})),
             ("param:bass.cutoff", json!(0.3)),
             ("route:bass", json!(2)),
         ]);
         set(&mut h, "alice", 1, &before, &Doc::new());
         let p = h.plan("alice", false).unwrap();
         assert!(p.skipped.is_empty());
-        assert_eq!(p.sets.len(), 5);
+        assert_eq!(p.sets.len(), 8);
         assert!(p.sets.iter().all(|(k, v)| before[k] == *v));
     }
 

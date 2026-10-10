@@ -1,6 +1,7 @@
 // The instrument editor below the console: a tab per instrument (in creation
 // order, each with a remove button that asks once), the selected instrument's
-// output channel, and its panel.
+// output channel, its clip pool (RFC 0008: the step editors edit the
+// selected clip, which pattern mode plays), and its panel.
 
 import { useEffect, useState } from "react";
 import type { InstrumentInfo } from "../generated/InstrumentInfo";
@@ -15,7 +16,8 @@ const TICKS_PER_STEP = 24;
 /** What the step editor cannot show of a clip (RFC 0007): notes between
  * steps or outside the drum voices, and a loop length of its own. */
 function ClipNote({ id, drums }: { id: string; drums: boolean }) {
-  const clip = useApp((s) => s.snapshot?.clips.find((c) => c.instrument === id));
+  const selected = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id)?.selected);
+  const clip = useApp((s) => s.snapshot?.clips.find((c) => c.instrument === id && c.id === selected));
   if (!clip) return null;
   const hidden = clip.events.filter((e) => e.tick % TICKS_PER_STEP !== 0 || (drums && !GM_NOTES.includes(e.note))).length;
   const loop = clip.length === null ? null : clip.length / TICKS_PER_STEP;
@@ -25,6 +27,90 @@ function ClipNote({ id, drums }: { id: string; drums: boolean }) {
       {hidden ? `${hidden} note${hidden === 1 ? "" : "s"} off the step grid (not shown here)` : ""}
       {hidden && loop !== null ? " - " : ""}
       {loop !== null ? `loops every ${loop} steps` : ""}
+    </div>
+  );
+}
+
+/** The instrument's clip pool: select a clip (double-click to rename), add,
+ * duplicate, or delete (asks once). */
+function ClipBar({ id }: { id: string }) {
+  const track = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id));
+  const [armed, setArmed] = useState(false);
+  const [renaming, setRenaming] = useState<{ clip: number; name: string } | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  if (!track) return null;
+  const ref = { instrument: id, clip: track.selected };
+  const btn = "px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:border-zinc-500";
+  const placed = new Set(track.arrangement.map((p) => p.clip));
+  return (
+    <div className="flex items-center gap-1 text-xs" data-testid={`clips-${id}`}>
+      <span className="text-zinc-500 mr-1">clips</span>
+      {track.clips.map((c) =>
+        renaming?.clip === c.id ? (
+          <input
+            key={c.id}
+            autoFocus
+            className="w-20 px-1 py-0.5 rounded bg-zinc-950 border border-zinc-600 text-zinc-100"
+            value={renaming.name}
+            data-testid={`clip-name-input-${id}-${c.id}`}
+            onChange={(e) => setRenaming({ clip: c.id, name: e.target.value })}
+            onBlur={() => setRenaming(null)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setRenaming(null);
+              if (e.key === "Enter") {
+                setRenaming(null);
+                if (renaming.name.trim() && renaming.name !== c.name) {
+                  void act(client.call("clip.rename", { instrument: id, clip: c.id, name: renaming.name }));
+                }
+              }
+            }}
+          />
+        ) : (
+          <button
+            key={c.id}
+            className={`px-2 py-0.5 rounded border ${
+              c.id === track.selected ? "bg-zinc-200 text-zinc-950 border-zinc-100" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
+            }`}
+            title={`clip ${c.id}${placed.has(c.id) ? " (in the song)" : ""}; double-click to rename`}
+            data-testid={`clip-${id}-${c.id}`}
+            data-selected={c.id === track.selected}
+            onClick={() => void act(client.call("clip.select", { instrument: id, clip: c.id }))}
+            onDoubleClick={() => setRenaming({ clip: c.id, name: c.name })}
+          >
+            {c.name}
+            {placed.has(c.id) ? <span className="ml-1 opacity-50">*</span> : null}
+          </button>
+        ),
+      )}
+      <button
+        className={btn}
+        title="new empty clip"
+        data-testid={`clip-new-${id}`}
+        onClick={() => void act(client.call("clip.new", { instrument: id, name: null, length: null, select: true }))}
+      >
+        +
+      </button>
+      <button className={btn} title="duplicate the selected clip" data-testid={`clip-dup-${id}`} onClick={() => void act(client.call("clip.duplicate", ref))}>
+        dup
+      </button>
+      <button
+        className={`${btn} ${armed ? "text-red-500 border-red-500" : ""}`}
+        disabled={track.clips.length < 2}
+        title={armed ? "click again to delete the clip and its placements" : "delete the selected clip"}
+        data-testid={`clip-delete-${id}`}
+        data-armed={armed}
+        onClick={() => {
+          if (!armed) return setArmed(true);
+          setArmed(false);
+          void act(client.call("clip.delete", ref));
+        }}
+      >
+        {armed ? "delete?" : "del"}
+      </button>
     </div>
   );
 }
@@ -107,6 +193,7 @@ export function Editor() {
         {current && <OutputSelect instrument={current} />}
       </div>
       {!current && <div className="text-xs text-zinc-500">No instruments. Add one from the console.</div>}
+      {current && <ClipBar id={current.id} />}
       {current && <ClipNote id={current.id} drums={current.type === "tr808"} />}
       {current?.type === "tr808" && <DrumEditor id={current.id} />}
       {current?.type === "tb303" && <BassEditor id={current.id} />}

@@ -3,6 +3,10 @@
 //! event on the step's first tick at its voice's GM note, a note step an
 //! event on the step's first tick. These conversions live here so the
 //! daemon, the offline renderer, the CLI, and migrations agree.
+//!
+//! Tracks (RFC 0008 phase B): each instrument has a pool of clips, one of
+//! them selected (what pattern mode plays and the step editors edit), and an
+//! arrangement of placements on the song timeline.
 
 use crate::types::*;
 use schemars::JsonSchema;
@@ -17,6 +21,12 @@ pub const TICKS_PER_STEP: u32 = PPQ / 4;
 pub const TICKS_PER_BAR: u32 = PPQ * 4;
 /// Most events a clip holds.
 pub const MAX_EVENTS: usize = 1024;
+/// Most clips, across every track.
+pub const MAX_CLIPS: usize = 256;
+/// Most placements on one track's arrangement.
+pub const MAX_PLACEMENTS: usize = 256;
+/// The song's longest extent, in ticks (999 bars).
+pub const MAX_SONG_TICKS: u32 = 999 * TICKS_PER_BAR;
 /// Longest clip, in ticks (`MAX_STEPS` steps).
 pub const MAX_CLIP_TICKS: u32 = MAX_STEPS as u32 * TICKS_PER_STEP;
 
@@ -53,14 +63,76 @@ impl ClipEvent {
     }
 }
 
-/// An instrument's clip.
+/// A clip in an instrument's pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct Clip {
     pub instrument: String,
+    /// Its id in the instrument's pool (1, 2, ...).
+    pub id: u32,
+    pub name: String,
     /// Length in ticks; `None` follows `sequencer.length`.
     pub length: Option<u32>,
     /// Sorted by (tick, note).
     pub events: Vec<ClipEvent>,
+}
+
+/// A clip without its events.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipHeader {
+    pub id: u32,
+    pub name: String,
+    pub length: Option<u32>,
+}
+
+/// A clip placed on the song timeline. It plays from `offset` ticks into
+/// the clip, looping at the clip's length, for `length` ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Placement {
+    pub clip: u32,
+    /// Song tick it starts at.
+    pub start: u32,
+    pub length: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+impl Placement {
+    pub fn end(&self) -> u32 {
+        self.start + self.length
+    }
+}
+
+/// An instrument's track: its clip pool, the selected clip, and its
+/// arrangement (placements sorted by start, not overlapping).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct TrackInfo {
+    pub instrument: String,
+    pub selected: u32,
+    pub clips: Vec<ClipHeader>,
+    pub arrangement: Vec<Placement>,
+}
+
+/// Lay `p` onto an arrangement: placements it covers go, ones it overlaps
+/// are cut to what is outside it (the right part keeps playing from where
+/// it was, by its offset). Returns the new arrangement, sorted.
+pub fn place(arrangement: &[Placement], p: Placement) -> Vec<Placement> {
+    let mut out = Vec::with_capacity(arrangement.len() + 2);
+    for q in arrangement {
+        if q.end() <= p.start || q.start >= p.end() {
+            out.push(*q);
+            continue;
+        }
+        if q.start < p.start {
+            out.push(Placement { length: p.start - q.start, ..*q });
+        }
+        if q.end() > p.end() {
+            let cut = p.end() - q.start;
+            out.push(Placement { start: p.end(), length: q.end() - p.end(), offset: q.offset + cut, ..*q });
+        }
+    }
+    out.push(p);
+    out.sort_by_key(|q| q.start);
+    out
 }
 
 /// Check and normalize events: in range, sorted, unique by (tick, note)
@@ -270,6 +342,18 @@ mod tests {
         assert_eq!(parse_grid("1/8T").unwrap(), Some(32));
         assert_eq!(parse_grid("off").unwrap(), None);
         assert!(parse_grid("1/7").is_err());
+    }
+
+    #[test]
+    fn placing_over_placements_cuts_them() {
+        let a = |clip, start, length, offset| Placement { clip, start, length, offset };
+        let song = vec![a(1, 0, 100, 0), a(2, 100, 100, 0)];
+        // Over the end of the first and the start of the second.
+        assert_eq!(place(&song, a(3, 50, 100, 0)), vec![a(1, 0, 50, 0), a(3, 50, 100, 0), a(2, 150, 50, 50)]);
+        // Inside one: it splits around it.
+        assert_eq!(place(&song, a(3, 10, 20, 0))[..3], [a(1, 0, 10, 0), a(3, 10, 20, 0), a(1, 30, 70, 30)]);
+        // Over everything.
+        assert_eq!(place(&song, a(3, 0, 300, 0)), vec![a(3, 0, 300, 0)]);
     }
 
     #[test]

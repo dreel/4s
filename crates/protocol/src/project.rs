@@ -1,5 +1,6 @@
 //! Project file format (`<name>.4s/project.json`). See docs/project-format.md.
 
+use crate::clip::Placement;
 use crate::types::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,7 @@ use ts_rs::TS;
 
 /// Current project format version. Bump and add a migration when the format
 /// changes incompatibly.
-pub const PROJECT_FORMAT_VERSION: u32 = 4;
+pub const PROJECT_FORMAT_VERSION: u32 = 5;
 /// Oldest version this build can load. Version 1 (the fixed 8-track kit)
 /// was dropped with RFC 0004, without a migration.
 pub const OLDEST_PROJECT_FORMAT_VERSION: u32 = 2;
@@ -28,15 +29,10 @@ pub struct ProjectFile {
     /// Parameter values by path. Unknown paths are ignored on load; missing
     /// paths take their defaults.
     pub params: BTreeMap<String, f64>,
-    /// Per instrument id: drum step strings per voice
-    /// (`{"kick": "x---x---x---x---"}`) or a note string (`"C2 C2! D#2~ -"`).
-    /// Instruments with an empty pattern are omitted.
-    pub patterns: BTreeMap<String, ProjectPattern>,
-    /// Per instrument id (RFC 0007): clips that do not fit a step pattern
-    /// (off-grid events, other lengths or velocities) or have their own
-    /// length. An instrument is in `patterns` or here, not both.
+    /// Per instrument id (RFC 0008): its clip pool, selected clip, and
+    /// arrangement. An instrument left out has one empty clip.
     #[serde(default)]
-    pub clips: BTreeMap<String, ProjectClip>,
+    pub tracks: BTreeMap<String, ProjectTrack>,
     pub controller: ProjectController,
     /// Performer setups by seat name (RFC 0007): focus, knob page, note
     /// bindings, CC maps.
@@ -60,13 +56,34 @@ pub enum ProjectPattern {
     Drums(BTreeMap<Voice, String>),
 }
 
-/// A clip in a project file: events in text form (`tick:note:len:vel`, see
-/// `format_events`) and an optional length in ticks.
+/// An instrument's track in a project file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ProjectTrack {
+    /// The selected clip's id.
+    pub selected: u32,
+    /// The pool by clip id.
+    pub clips: BTreeMap<u32, ProjectClip>,
+    /// Placements on the song timeline, by start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arrangement: Vec<Placement>,
+}
+
+/// A clip in a project file: a step pattern when one says exactly the same
+/// thing (drum step strings per voice, `{"kick": "x---x---"}`, or a note
+/// string, `"C2 C2! D#2~ -"`), else events in text form (`tick:note:len:vel`,
+/// see `format_events`); both absent for an empty clip.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ProjectClip {
+    /// Default: the clip's id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Ticks; absent follows `sequencer.length`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length: Option<u32>,
-    pub events: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<ProjectPattern>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -79,7 +96,27 @@ pub struct ProjectController {
 /// `MIGRATIONS[0]` upgrades `OLDEST_PROJECT_FORMAT_VERSION` to the next one,
 /// and so on.
 type Migration = fn(Value) -> Result<Value, String>;
-const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4];
+const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4, v4_to_v5];
+
+/// v5 (RFC 0008 phase B): each instrument has a track with a pool of clips.
+/// An instrument's pattern or clip becomes clip 1 of its pool, selected.
+fn v4_to_v5(mut v: Value) -> Result<Value, String> {
+    let mut tracks = serde_json::Map::new();
+    let take = |v: &mut Value, k: &str| v.as_object_mut().and_then(|o| o.remove(k));
+    if let Some(Value::Object(patterns)) = take(&mut v, "patterns") {
+        for (id, p) in patterns {
+            tracks.insert(id, serde_json::json!({ "selected": 1, "clips": { "1": { "pattern": p } } }));
+        }
+    }
+    if let Some(Value::Object(clips)) = take(&mut v, "clips") {
+        for (id, c) in clips {
+            tracks.insert(id, serde_json::json!({ "selected": 1, "clips": { "1": c } }));
+        }
+    }
+    v["tracks"] = Value::Object(tracks);
+    v["format_version"] = 5.into();
+    Ok(v)
+}
 
 /// v4 (RFC 0007 phase 2): sequences are clips. Step patterns still load as
 /// they are; clips that do not fit them are saved under `clips`.
@@ -160,13 +197,14 @@ mod tests {
     #[test]
     fn v2_fixture_loads() {
         let p = parse_project(V2_FIXTURE).unwrap();
-        assert_eq!(p.format_version, 4);
-        assert!(p.clips.is_empty());
+        assert_eq!(p.format_version, 5);
         assert!(p.seats.is_empty());
         assert!(p.controller.follow);
-        let ProjectPattern::Drums(d) = &p.patterns["drums"] else { panic!("drums pattern") };
+        let drums = &p.tracks["drums"];
+        assert_eq!(drums.selected, 1);
+        let Some(ProjectPattern::Drums(d)) = &drums.clips[&1].pattern else { panic!("drums pattern") };
         assert_eq!(d[&Voice::Kick], "X---x---X---x---");
-        assert!(matches!(&p.patterns["bass"], ProjectPattern::Notes(n) if n.starts_with("C2")));
+        assert!(matches!(&p.tracks["bass"].clips[&1].pattern, Some(ProjectPattern::Notes(n)) if n.starts_with("C2")));
         assert_eq!(p.routes["bass"], 2);
         assert_eq!(p.params["transport.tempo"], 118.0);
     }

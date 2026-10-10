@@ -81,6 +81,10 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 - `4s render --input "0.5:C2 1.0:D#2" --record --quantize 1/16` plays notes
   into a render and shows the clip a recording would leave (RFC 0008);
   `4s record` / `4s record --off` record live into your focus.
+- `4s song` shows the arrangement; `4s song place drums --at 1 --bars 4`,
+  `4s song mode song`, `4s song loop 2 5`, `4s locate 3`, and
+  `4s render --from 3` work with it; `4s clip list|new|dup|select` manage
+  each instrument's clip pool (RFC 0008).
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history.

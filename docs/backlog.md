@@ -126,7 +126,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-09, #24/#25 follow-up) auto-connect of model ports and
   auto-reconnect of hand-connected ports have no e2e (the e2e daemons run
   with `--no-midi`).
-- (2026-10-09, #24 follow-up) `Command::ClearClip` is unused by the daemon.
 - (2026-10-09, #25 follow-up) the 303 note-stack unit test duplicates the
   e2e legato checks.
 - (2026-10-10, recording branch review) record UI: while someone else's take
@@ -150,6 +149,15 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, recording branch) SMF import/export (RFC 0007 phase 3) is not
   built; and live take progress (notes shown while recording) waits for the
   piano roll (RFC 0008 phase B).
+
+- (2026-10-10, song branch) `song.loop` is an integer parameter (0 off, 1
+  song, 2 bars); the registry has no enum kind, so `4s params` and generic
+  controls show a number. Add a choice kind with labels.
+- (2026-10-10, song branch) placing clips has no UI until the arrangement
+  view (RFC 0008 phase C); the CLI and RPC place them.
+- (2026-10-10, song branch) the transport row is crowded (record, song, and
+  tempo controls in one line); give it a layout pass with the arrangement
+  view.
 
 ## Mismatches
 

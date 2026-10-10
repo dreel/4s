@@ -5,4 +5,8 @@ export type ClipEventsParams = {
 /**
  * Default: the caller's seat focus.
  */
-instrument: string | null, events: Array<ClipEvent>, };
+instrument: string | null, 
+/**
+ * Clip in the instrument's pool; default: its selected clip.
+ */
+clip: number | null, events: Array<ClipEvent>, };

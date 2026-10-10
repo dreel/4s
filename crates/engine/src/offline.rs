@@ -1,7 +1,7 @@
 //! Offline (faster than real time) rendering and simple audio analysis, used
 //! for exports and for agent-driven validation of what the engine produces.
 
-use crate::engine::{Command, Engine, Feedback, ParamTarget};
+use crate::engine::{Command, Engine, Feedback, ParamTarget, Placement};
 use crate::instrument;
 use crate::params::{NUM_GLOBALS, TEMPO};
 use fours_protocol::{ClipEvent, InstrumentType, RenderTrigger, Voice};
@@ -15,9 +15,18 @@ pub struct RenderInstrument {
     pub params: Vec<f32>,
     /// Channel index (0-based) per output, main first.
     pub routes: Vec<Option<u8>>,
-    /// Its clip: length in ticks (`None` follows `sequencer.length`) and
-    /// events.
-    pub clip_length: Option<u32>,
+    /// The clip pattern mode plays (an index into `RenderSpec::clips`).
+    pub selected: Option<u16>,
+    /// Its arrangement, by start.
+    pub placements: Vec<Placement>,
+}
+
+/// A clip in the engine's clip table: length in ticks (`None` follows
+/// `sequencer.length`) and events.
+#[derive(Clone, Debug)]
+pub struct RenderClip {
+    pub index: u16,
+    pub length: Option<u32>,
     pub events: Vec<ClipEvent>,
 }
 
@@ -29,6 +38,9 @@ pub struct RenderSpec {
     /// Active channels: (0-based index, parameter values).
     pub channels: Vec<(u8, [f32; crate::params::CHANNEL_PARAMS])>,
     pub instruments: Vec<RenderInstrument>,
+    pub clips: Vec<RenderClip>,
+    /// Where song mode plays from.
+    pub start: u32,
 }
 
 impl RenderSpec {
@@ -57,11 +69,18 @@ impl RenderSpec {
             for (o, ch) in inst.routes.iter().enumerate() {
                 let _ = e.apply(Command::SetRoute { slot, output: o as u8, channel: *ch }, &mut fb);
             }
-            let _ = e.apply(Command::SetClipLength { slot, length: inst.clip_length }, &mut fb);
-            for event in &inst.events {
-                let _ = e.apply(Command::AddEvent { slot, event: *event }, &mut fb);
+            let _ = e.apply(Command::SelectClip { slot, clip: inst.selected }, &mut fb);
+            for placement in &inst.placements {
+                let _ = e.apply(Command::AddPlacement { slot, placement: *placement }, &mut fb);
             }
         }
+        for c in &self.clips {
+            let _ = e.apply(Command::SetClipLength { clip: c.index, length: c.length }, &mut fb);
+            for event in &c.events {
+                let _ = e.apply(Command::AddEvent { clip: c.index, event: *event }, &mut fb);
+            }
+        }
+        let _ = e.apply(Command::Locate { tick: self.start }, &mut fb);
         e.snap();
         e
     }
@@ -257,9 +276,11 @@ mod tests {
                 kind: InstrumentType::Tr808,
                 params,
                 routes,
-                clip_length: None,
-                events,
+                selected: Some(0),
+                placements: Vec::new(),
             }],
+            clips: vec![RenderClip { index: 0, length: None, events }],
+            start: 0,
         }
     }
 

@@ -329,6 +329,10 @@ pub struct TransportState {
     pub playing: bool,
     /// Current step while playing.
     pub step: Option<u32>,
+    /// Song tick playing (song mode), while playing.
+    pub tick: Option<u32>,
+    /// Song tick song mode plays from (`transport.locate`).
+    pub start: u32,
 }
 
 /// How a recording pass treats the notes already in the clip.
@@ -718,7 +722,9 @@ pub struct Snapshot {
     pub graph: Graph,
     /// One step view per instrument, in instrument order.
     pub patterns: Vec<InstrumentPattern>,
-    /// One clip per instrument, in instrument order (RFC 0007).
+    /// Each instrument's track (RFC 0008): pool, selection, arrangement.
+    pub tracks: Vec<crate::clip::TrackInfo>,
+    /// Every clip of every track.
     pub clips: Vec<crate::clip::Clip>,
     pub controller: ControllerState,
     pub midi: Vec<MidiConnection>,
@@ -799,17 +805,25 @@ pub enum Event {
     PatternChanged { instrument: String, voice: Voice, steps: Vec<u8> },
     /// A note pattern changed (all `MAX_STEPS` steps).
     NotesChanged { instrument: String, steps: Vec<NoteStep> },
-    /// An instrument's clip changed (any edit, including through a step
-    /// view, which also sends the view's events).
+    /// A clip's contents, name, or length changed (any edit, including
+    /// through a step view, which also sends the view's events).
     ClipChanged { clip: crate::clip::Clip },
+    /// A track's pool (clips added or removed), selection, or arrangement
+    /// changed.
+    Track { track: crate::clip::TrackInfo },
+    /// A clip was deleted (its track follows in a `track` event).
+    ClipDeleted { instrument: String, id: u32 },
     /// Instruments, channels, or routes changed. Parameters may have been
     /// added or removed: refetch `state.get` and `param.list`.
     Graph { graph: Graph },
     Transport { playing: bool },
     /// Recording started or ended, or its settings changed.
     Record { state: RecordState },
-    /// A step started. `time` is engine time in seconds.
-    Playhead { step: u32, time: f64 },
+    /// A step started. `time` is engine time in seconds; `tick` is the song
+    /// tick (in song mode, where the song plays; else from play).
+    Playhead { step: u32, tick: u32, time: f64 },
+    /// Song mode's start point moved (`transport.locate`).
+    Located { tick: u32 },
     /// An instrument played (from the sequencer, a pad, MIDI, or an
     /// audition). Drums set `voice`; note instruments set `note`.
     Trigger { instrument: String, voice: Option<Voice>, note: Option<u8>, velocity: f32, time: f64 },
@@ -842,6 +856,9 @@ impl Event {
             Event::PatternChanged { .. } => "pattern_changed",
             Event::NotesChanged { .. } => "notes_changed",
             Event::ClipChanged { .. } => "clip_changed",
+            Event::Track { .. } => "track",
+            Event::ClipDeleted { .. } => "clip_deleted",
+            Event::Located { .. } => "located",
             Event::Graph { .. } => "graph",
             Event::Transport { .. } => "transport",
             Event::Record { .. } => "record",

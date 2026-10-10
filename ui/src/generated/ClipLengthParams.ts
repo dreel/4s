@@ -2,6 +2,10 @@
 
 export type ClipLengthParams = { instrument: string | null, 
 /**
+ * Clip in the instrument's pool; default: its selected clip.
+ */
+clip: number | null, 
+/**
  * Ticks (1..`MAX_CLIP_TICKS`); omit to follow `sequencer.length`.
  */
 length: number | null, };

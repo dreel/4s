@@ -13,6 +13,11 @@
 //! when they played them (`Feedback::Live`), the metronome clicks on beats,
 //! and `Play` can run a count-in of clicks before tick 0.
 //!
+//! Song mode (RFC 0008 phase B): clips live in one preallocated table shared
+//! by every slot. Pattern mode plays each slot's selected clip; song mode
+//! plays each slot's placements on the song timeline from the locate point,
+//! looping the song or a range (`song.*` globals), or stopping at its end.
+//!
 //! Signal flow per block: each instrument renders its outputs; each routed
 //! output is summed into its channel with its own pan law (constant-power pan
 //! for mono, balance for stereo); each channel applies its fader and
@@ -22,8 +27,8 @@ use crate::dsp::{Smoother, soft_clip};
 use crate::instrument::{Instrument, MAX_BLOCK, MAX_OUTPUTS};
 use crate::params::*;
 use fours_protocol::{
-    ClipEvent, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_EVENTS, MAX_INSTRUMENTS, MAX_STEPS, OutputWidth, PPQ, TICKS_PER_BAR,
-    TICKS_PER_STEP,
+    ClipEvent, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_CLIPS, MAX_EVENTS, MAX_INSTRUMENTS, MAX_PLACEMENTS, MAX_STEPS,
+    OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
 };
 use std::f32::consts::TAU;
 
@@ -49,13 +54,21 @@ pub enum Command {
     RemoveInstrument { slot: u8 },
     SetRoute { slot: u8, output: u8, channel: Option<u8> },
     SetChannelActive { ch: u8, active: bool },
-    /// Remove every event from a slot's clip.
-    ClearClip { slot: u8 },
+    /// Remove every event from a clip (an index in the clip table).
+    ClearClip { clip: u16 },
     /// Add an event (replacing one at the same tick and note).
-    AddEvent { slot: u8, event: ClipEvent },
-    RemoveEvent { slot: u8, tick: u32, note: u8 },
+    AddEvent { clip: u16, event: ClipEvent },
+    RemoveEvent { clip: u16, tick: u32, note: u8 },
     /// Clip length in ticks; `None` follows `sequencer.length`.
-    SetClipLength { slot: u8, length: Option<u32> },
+    SetClipLength { clip: u16, length: Option<u32> },
+    /// The clip pattern mode plays on a slot.
+    SelectClip { slot: u8, clip: Option<u16> },
+    /// Add a placement to a slot's arrangement (replacing one with the same
+    /// start). The control side keeps them from overlapping.
+    AddPlacement { slot: u8, placement: Placement },
+    RemovePlacement { slot: u8, start: u32 },
+    /// Where song mode plays from; while playing in song mode, jump there.
+    Locate { tick: u32 },
     /// A note; with `gate` it releases after half a step at the current tempo.
     NoteOn { slot: u8, note: u8, velocity: f32, gate: bool },
     NoteOff { slot: u8, note: u8 },
@@ -73,10 +86,14 @@ impl std::fmt::Debug for Command {
             Command::RemoveInstrument { slot } => write!(f, "RemoveInstrument({slot})"),
             Command::SetRoute { slot, output, channel } => write!(f, "SetRoute({slot}, {output}, {channel:?})"),
             Command::SetChannelActive { ch, active } => write!(f, "SetChannelActive({ch}, {active})"),
-            Command::ClearClip { slot } => write!(f, "ClearClip({slot})"),
-            Command::AddEvent { slot, event } => write!(f, "AddEvent({slot}, {event:?})"),
-            Command::RemoveEvent { slot, tick, note } => write!(f, "RemoveEvent({slot}, {tick}, {note})"),
-            Command::SetClipLength { slot, length } => write!(f, "SetClipLength({slot}, {length:?})"),
+            Command::ClearClip { clip } => write!(f, "ClearClip({clip})"),
+            Command::AddEvent { clip, event } => write!(f, "AddEvent({clip}, {event:?})"),
+            Command::RemoveEvent { clip, tick, note } => write!(f, "RemoveEvent({clip}, {tick}, {note})"),
+            Command::SetClipLength { clip, length } => write!(f, "SetClipLength({clip}, {length:?})"),
+            Command::SelectClip { slot, clip } => write!(f, "SelectClip({slot}, {clip:?})"),
+            Command::AddPlacement { slot, placement } => write!(f, "AddPlacement({slot}, {placement:?})"),
+            Command::RemovePlacement { slot, start } => write!(f, "RemovePlacement({slot}, {start})"),
+            Command::Locate { tick } => write!(f, "Locate({tick})"),
             Command::NoteOn { slot, note, .. } => write!(f, "NoteOn({slot}, {note})"),
             Command::NoteOff { slot, note } => write!(f, "NoteOff({slot}, {note})"),
             Command::PitchBend { slot, semitones } => write!(f, "PitchBend({slot}, {semitones})"),
@@ -90,13 +107,17 @@ impl std::fmt::Debug for Command {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Feedback {
     /// A step started: `step` within `sequencer.length`, `tick` counted
-    /// from play (tick 0 is the first step after any count-in).
-    Step { step: u32, tick: u64, time: f64 },
+    /// from play (tick 0 is the first step after any count-in), `pos` the
+    /// song position in song mode (else `tick`).
+    Step { step: u32, tick: u64, pos: u64, time: f64 },
     /// A live note (not from a clip) was played or released. `tick` is the
-    /// song position the player heard at that moment (the output latency
-    /// taken off; negative during a count-in), or `None` when stopped.
-    /// `gate` notes release by themselves after half a step.
-    Live { slot: u8, note: u8, velocity: f32, on: bool, gate: bool, tick: Option<f64>, time: f64 },
+    /// tick from play the player heard at that moment (the output latency
+    /// taken off; negative during a count-in), and `pos` the song position
+    /// heard (in pattern mode, `tick`); `None` when stopped. `gate` notes
+    /// release by themselves after half a step.
+    Live { slot: u8, note: u8, velocity: f32, on: bool, gate: bool, tick: Option<f64>, pos: Option<f64>, time: f64 },
+    /// Song mode without a loop reached the song's end.
+    SongEnd { time: f64 },
     Trigger { slot: u8, voice: Option<u8>, note: Option<u8>, velocity: f32, time: f64, step: Option<u32> },
     /// `Play` took effect: feedback after this counts from the new start.
     Started { time: f64 },
@@ -110,30 +131,56 @@ struct Slot {
     routes: [Option<u8>; MAX_OUTPUTS],
 }
 
-/// A slot's clip and the notes it is playing. Preallocated: edits insert
-/// into spare capacity and never allocate.
-struct Track {
+/// A clip in the shared table. Preallocated: edits insert into spare
+/// capacity and never allocate.
+struct ClipStore {
     /// Sorted by (tick, note); at most `MAX_EVENTS`.
     events: Vec<ClipEvent>,
     length: Option<u32>,
-    /// (absolute tick it ends at, note), for notes the clip started.
+}
+
+impl ClipStore {
+    fn position(&self, e: &ClipEvent) -> Result<usize, usize> {
+        self.events.binary_search_by_key(&e.key(), ClipEvent::key)
+    }
+}
+
+/// A placement as the engine plays it: `clip` indexes the clip table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Placement {
+    pub start: u32,
+    pub length: u32,
+    pub offset: u32,
+    pub clip: u16,
+}
+
+/// A slot's sequencing: the clip pattern mode plays, its arrangement, and
+/// the notes its clips are playing. Preallocated.
+struct Track {
+    selected: Option<u16>,
+    /// Sorted by start, not overlapping; at most `MAX_PLACEMENTS`.
+    placements: Vec<Placement>,
+    /// (absolute tick it ends at, note), for notes the clips started.
     active: [(u64, u8); MAX_ACTIVE],
     num_active: usize,
 }
 
 impl Track {
     fn reset(&mut self) {
-        self.events.clear();
-        self.length = None;
+        self.selected = None;
+        self.placements.clear();
         self.num_active = 0;
     }
 
     fn new() -> Self {
-        Self { events: Vec::with_capacity(MAX_EVENTS), length: None, active: [(0, 0); MAX_ACTIVE], num_active: 0 }
+        Self { selected: None, placements: Vec::with_capacity(MAX_PLACEMENTS), active: [(0, 0); MAX_ACTIVE], num_active: 0 }
     }
 
-    fn position(&self, e: &ClipEvent) -> Result<usize, usize> {
-        self.events.binary_search_by_key(&e.key(), ClipEvent::key)
+    /// The placement playing at song tick `pos`.
+    fn placement_at(&self, pos: u64) -> Option<Placement> {
+        let i = self.placements.partition_point(|p| p.start as u64 <= pos);
+        let p = *self.placements.get(i.checked_sub(1)?)?;
+        (pos < p.start as u64 + p.length as u64).then_some(p)
     }
 }
 
@@ -227,6 +274,7 @@ pub struct Engine {
     globals: [f32; NUM_GLOBALS],
     slots: Vec<Option<Slot>>,
     tracks: Vec<Track>,
+    clips: Vec<ClipStore>,
     channels: Vec<Channel>,
     master: Smoother,
     master_bus: Vec<f32>,
@@ -240,6 +288,12 @@ pub struct Engine {
     /// to the start when it runs past the end, so shortening the loop
     /// while playing goes back to step 1 and lengthening it continues.
     loop_tick: u32,
+    /// Song mode: the song tick of the next tick to fire.
+    song_pos: u64,
+    /// Where song mode plays from (`Locate`).
+    start_pos: u64,
+    /// `SongEnd` was sent for this run.
+    ended: bool,
     /// Absolute sample position at which it fires.
     next_tick_at: f64,
     /// Samples between the last tick fired and the next.
@@ -263,6 +317,7 @@ impl Engine {
             globals,
             slots: (0..MAX_INSTRUMENTS).map(|_| None).collect(),
             tracks: (0..MAX_INSTRUMENTS).map(|_| Track::new()).collect(),
+            clips: (0..MAX_CLIPS).map(|_| ClipStore { events: Vec::with_capacity(MAX_EVENTS), length: None }).collect(),
             channels: (0..MAX_CHANNELS).map(|_| Channel::new(sr)).collect(),
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
@@ -271,6 +326,9 @@ impl Engine {
             tick: 0,
             count_in: 0,
             loop_tick: 0,
+            song_pos: 0,
+            start_pos: 0,
+            ended: false,
             next_tick_at: 0.0,
             tick_len: 1.0,
             output_latency: 0.0,
@@ -298,17 +356,55 @@ impl Engine {
         self.output_latency = secs.clamp(0.0, 1.0);
     }
 
-    /// The song tick (fractional, negative in a count-in) whose sound
-    /// reaches the listener now, or `None` when stopped.
-    fn heard_tick(&self) -> Option<f64> {
+    /// The tick from play (fractional, negative in a count-in) whose sound
+    /// reaches the listener now, and the song position it is (in pattern
+    /// mode, the same), or `None` when stopped.
+    fn heard_tick(&self) -> Option<(f64, f64)> {
         if !self.playing {
             return None;
         }
         let tick_len = self.tick_len.max(1.0);
         // The last tick fired is `tick - 1`, `tick_len` samples before the
         // next one is due.
-        let now = self.tick as f64 - (self.next_tick_at - self.pos as f64) / tick_len;
-        Some(now - self.count_in as f64 - self.output_latency * self.sr as f64 / tick_len)
+        let back = (self.next_tick_at - self.pos as f64) / tick_len + self.output_latency * self.sr as f64 / tick_len;
+        let tick = self.tick as f64 - self.count_in as f64 - back;
+        if !self.song_mode() {
+            return Some((tick, tick));
+        }
+        if tick < 0.0 {
+            return Some((tick, self.start_pos as f64 + tick));
+        }
+        let mut pos = self.song_pos as f64 - back;
+        // Just past a loop's wrap, what is heard is still before it.
+        if let Some((ls, le)) = self.song_loop()
+            && pos < ls as f64
+            && self.song_pos >= ls
+        {
+            pos += (le - ls) as f64;
+        }
+        Some((tick, pos))
+    }
+
+    fn song_mode(&self) -> bool {
+        self.globals[SONG_MODE] >= 0.5
+    }
+
+    /// The song's end: the end of the last placement on any slot.
+    fn song_end(&self) -> u64 {
+        self.tracks.iter().filter_map(|t| t.placements.last()).map(|p| p.start as u64 + p.length as u64).max().unwrap_or(0)
+    }
+
+    /// The span song mode loops, if any.
+    fn song_loop(&self) -> Option<(u64, u64)> {
+        let bar = TICKS_PER_BAR as u64;
+        match self.globals[LOOP].round() as i32 {
+            1 => Some((0, self.song_end())).filter(|(_, e)| *e > 0),
+            2 => {
+                let (s, e) = (self.globals[LOOP_START].max(0.0) as u64 * bar, self.globals[LOOP_END].max(0.0) as u64 * bar);
+                (e > s).then_some((s, e))
+            }
+            _ => None,
+        }
     }
 
     /// Jump every smoother to its target, so an offline render starts at the
@@ -384,51 +480,84 @@ impl Engine {
                     c.snap(any_solo);
                 }
             }
-            Command::ClearClip { slot } => {
-                if let Some(t) = self.tracks.get_mut(slot as usize) {
-                    t.events.clear();
+            Command::ClearClip { clip } => {
+                if let Some(c) = self.clips.get_mut(clip as usize) {
+                    c.events.clear();
+                    c.length = None;
                 }
             }
-            Command::AddEvent { slot, event } => {
-                if let Some(t) = self.tracks.get_mut(slot as usize)
+            Command::AddEvent { clip, event } => {
+                if let Some(c) = self.clips.get_mut(clip as usize)
                     && event.tick < MAX_CLIP_TICKS
                 {
-                    match t.position(&event) {
-                        Ok(i) => t.events[i] = event,
+                    match c.position(&event) {
+                        Ok(i) => c.events[i] = event,
                         // Within the preallocated capacity: no allocation.
-                        Err(i) if t.events.len() < MAX_EVENTS => t.events.insert(i, event),
+                        Err(i) if c.events.len() < MAX_EVENTS => c.events.insert(i, event),
                         Err(_) => {}
                     }
                 }
             }
-            Command::RemoveEvent { slot, tick, note } => {
-                if let Some(t) = self.tracks.get_mut(slot as usize)
-                    && let Ok(i) = t.position(&ClipEvent { tick, note, ..Default::default() })
+            Command::RemoveEvent { clip, tick, note } => {
+                if let Some(c) = self.clips.get_mut(clip as usize)
+                    && let Ok(i) = c.position(&ClipEvent { tick, note, ..Default::default() })
                 {
-                    t.events.remove(i);
+                    c.events.remove(i);
                 }
             }
-            Command::SetClipLength { slot, length } => {
+            Command::SetClipLength { clip, length } => {
+                if let Some(c) = self.clips.get_mut(clip as usize) {
+                    c.length = length.map(|l| l.clamp(1, MAX_CLIP_TICKS));
+                }
+            }
+            Command::SelectClip { slot, clip } => {
                 if let Some(t) = self.tracks.get_mut(slot as usize) {
-                    t.length = length.map(|l| l.clamp(1, MAX_CLIP_TICKS));
+                    t.selected = clip.filter(|c| (*c as usize) < MAX_CLIPS);
+                }
+            }
+            Command::AddPlacement { slot, placement } => {
+                if let Some(t) = self.tracks.get_mut(slot as usize)
+                    && (placement.clip as usize) < MAX_CLIPS
+                    && placement.length > 0
+                {
+                    match t.placements.binary_search_by_key(&placement.start, |p| p.start) {
+                        Ok(i) => t.placements[i] = placement,
+                        Err(i) if t.placements.len() < MAX_PLACEMENTS => t.placements.insert(i, placement),
+                        Err(_) => {}
+                    }
+                }
+            }
+            Command::RemovePlacement { slot, start } => {
+                if let Some(t) = self.tracks.get_mut(slot as usize)
+                    && let Ok(i) = t.placements.binary_search_by_key(&start, |p| p.start)
+                {
+                    t.placements.remove(i);
+                }
+            }
+            Command::Locate { tick } => {
+                self.start_pos = tick as u64;
+                if self.playing && self.song_mode() && self.tick >= self.count_in {
+                    self.release_clip_notes(None);
+                    self.song_pos = tick as u64;
+                    self.ended = false;
                 }
             }
             Command::NoteOn { slot, note, velocity, gate: gated } => {
                 let time = self.time();
-                let tick = self.heard_tick();
+                let (tick, pos) = self.heard_tick().unzip();
                 let gate = gated.then(|| self.sixteenth() * 0.5);
                 if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
                     if let Some(h) = s.instrument.note_on(note, velocity, gate) {
                         emit(Feedback::Trigger { slot, voice: h.voice, note: h.note, velocity: h.velocity, time, step: None });
                     }
-                    emit(Feedback::Live { slot, note, velocity, on: true, gate: gated, tick, time });
+                    emit(Feedback::Live { slot, note, velocity, on: true, gate: gated, tick, pos, time });
                 }
             }
             Command::NoteOff { slot, note } => {
-                let (time, tick) = (self.time(), self.heard_tick());
+                let (time, (tick, pos)) = (self.time(), self.heard_tick().unzip());
                 if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
                     s.instrument.note_off(note);
-                    emit(Feedback::Live { slot, note, velocity: 0.0, on: false, gate: false, tick, time });
+                    emit(Feedback::Live { slot, note, velocity: 0.0, on: false, gate: false, tick, pos, time });
                 }
             }
             Command::PitchBend { slot, semitones } => {
@@ -443,6 +572,8 @@ impl Engine {
                 // Whole bars, so swing pairs and beats line up with the song.
                 self.count_in = (count_in as u64).div_ceil(TICKS_PER_BAR as u64) * TICKS_PER_BAR as u64;
                 self.loop_tick = 0;
+                self.song_pos = self.start_pos;
+                self.ended = false;
                 self.next_tick_at = self.pos as f64;
                 self.tick_len = self.step_samples(0) / TICKS_PER_STEP as f64;
                 emit(Feedback::Started { time: self.time() });
@@ -519,21 +650,54 @@ impl Engine {
             self.loop_tick = 0;
         }
         let loop_tick = self.loop_tick;
-        let step = loop_tick / TICKS_PER_STEP;
-        if loop_tick % TICKS_PER_STEP == 0 {
-            emit(Feedback::Step { step, tick: song, time });
+        let song_mode = self.song_mode();
+        if song_mode {
+            match self.song_loop() {
+                // A range loops when the song reaches its end (playing from
+                // past it goes on); the whole song, from anywhere past it.
+                Some((ls, le)) if self.song_pos == le || (self.globals[LOOP].round() as i32 == 1 && self.song_pos >= le) => {
+                    self.release_clip_notes(None);
+                    self.song_pos = ls;
+                }
+                None if !self.ended && self.song_pos >= self.song_end() => {
+                    self.ended = true;
+                    emit(Feedback::SongEnd { time });
+                }
+                _ => {}
+            }
+        }
+        let song_pos = self.song_pos;
+        let (step, on_step) = if song_mode {
+            ((song_pos / TICKS_PER_STEP as u64) as u32 % steps, song_pos % TICKS_PER_STEP as u64 == 0)
+        } else {
+            (loop_tick / TICKS_PER_STEP, loop_tick % TICKS_PER_STEP == 0)
+        };
+        if on_step {
+            emit(Feedback::Step { step, tick: song, pos: if song_mode { song_pos } else { song }, time });
         }
         self.release_clip_notes(Some(tick));
         for (slot, t) in self.tracks.iter_mut().enumerate() {
             let Some(Some(s)) = self.slots.get_mut(slot) else { continue };
-            // A clip with its own length loops from the song's start; the
-            // others follow the global loop.
-            let pos = match t.length {
-                Some(length) => (song % length as u64) as u32,
-                None => loop_tick,
+            // What plays here: in song mode the placement under the song
+            // position (notes end with it); in pattern mode the selected
+            // clip, which loops from the song's start at its own length, or
+            // follows the global loop.
+            let (clip, pos, until) = if song_mode {
+                let Some(p) = t.placement_at(song_pos) else { continue };
+                let c = &self.clips[p.clip as usize];
+                let length = c.length.unwrap_or(steps * TICKS_PER_STEP).max(1) as u64;
+                let into = song_pos - p.start as u64;
+                (c, ((into + p.offset as u64) % length) as u32, Some(p.length as u64 - into))
+            } else {
+                let Some(c) = t.selected.map(|c| &self.clips[c as usize]) else { continue };
+                let pos = match c.length {
+                    Some(length) => (song % length as u64) as u32,
+                    None => loop_tick,
+                };
+                (c, pos, None)
             };
-            let first = t.events.partition_point(|e| e.tick < pos);
-            for e in t.events[first..].iter().take_while(|e| e.tick == pos) {
+            let first = clip.events.partition_point(|e| e.tick < pos);
+            for e in clip.events[first..].iter().take_while(|e| e.tick == pos) {
                 let velocity = e.velocity as f32 / 127.0;
                 if let Some(h) = s.instrument.note_on(e.note, velocity, None) {
                     emit(Feedback::Trigger {
@@ -546,7 +710,8 @@ impl Engine {
                     });
                 }
                 if t.num_active < MAX_ACTIVE {
-                    t.active[t.num_active] = (tick + e.len.max(1) as u64, e.note);
+                    let len = until.map_or(e.len.max(1) as u64, |u| (e.len.max(1) as u64).min(u));
+                    t.active[t.num_active] = (tick + len, e.note);
                     t.num_active += 1;
                 } else {
                     // Too many sounding: end this one at once rather than
@@ -560,6 +725,7 @@ impl Engine {
         self.next_tick_at += self.tick_len;
         self.tick = tick + 1;
         self.loop_tick = loop_tick + 1;
+        self.song_pos = song_pos + 1;
     }
 
     /// Render interleaved audio into `out` (`channels` >= 1; channels beyond
@@ -687,10 +853,11 @@ pub(crate) mod tests {
     use crate::instrument;
     use fours_protocol::{InstrumentType, NoteStep, STEP_ON, Voice, drum_event, note_event};
 
-    /// Load a clip into slot 0.
+    /// Load clip 0 and select it on slot 0.
     fn add_events(e: &mut Engine, events: impl IntoIterator<Item = ClipEvent>) {
+        let _ = e.apply(Command::SelectClip { slot: 0, clip: Some(0) }, &mut |_| {});
         for event in events {
-            let _ = e.apply(Command::AddEvent { slot: 0, event }, &mut |_| {});
+            let _ = e.apply(Command::AddEvent { clip: 0, event }, &mut |_| {});
         }
     }
 
@@ -953,5 +1120,43 @@ pub(crate) mod tests {
         assert!((first.unwrap().1 - 2.0).abs() < 1e-3, "tick 0 starts after the count-in: {first:?}");
         let t = live(&mut e);
         assert!((t - (96.0 - 9.6)).abs() < 1.0, "half a second into the song: {t}");
+    }
+
+    /// Song mode plays placements from the locate point: a kick clip in bar
+    /// 1 and a snare clip in bar 3 (120 bpm: a bar is 2 s), the selected
+    /// clip aside. Without a loop it ends after bar 3; looping bars 2-3 it
+    /// comes back to bar 2 at 6 s, so the snare plays again at 8 s.
+    #[test]
+    fn song_mode_plays_the_arrangement() {
+        let hits = |looping: f32| {
+            let mut e = drum_engine();
+            add_events(&mut e, [0].into_iter().filter_map(|s| drum_event(Voice::Kick, s, STEP_ON)));
+            let snare = drum_event(Voice::Snare, 0, STEP_ON).unwrap();
+            let mut fb = vec![];
+            let mut apply = |c| {
+                let _ = e.apply(c, &mut |_| {});
+            };
+            apply(Command::AddEvent { clip: 1, event: snare });
+            apply(Command::AddPlacement { slot: 0, placement: Placement { start: 0, length: 384, offset: 0, clip: 0 } });
+            apply(Command::AddPlacement { slot: 0, placement: Placement { start: 768, length: 384, offset: 0, clip: 1 } });
+            for (g, v) in [(SONG_MODE, 1.0), (LOOP, looping), (LOOP_START, 1.0), (LOOP_END, 3.0)] {
+                apply(Command::SetParam { target: ParamTarget::Global(g), value: v });
+            }
+            apply(Command::Play { count_in: 0 });
+            render_secs(&mut e, 9.0, &mut fb);
+            let triggers: Vec<(u8, f64)> = fb
+                .iter()
+                .filter_map(|f| if let Feedback::Trigger { voice: Some(v), time, .. } = f { Some((*v, *time)) } else { None })
+                .collect();
+            let end = fb.iter().find_map(|f| if let Feedback::SongEnd { time } = f { Some(*time) } else { None });
+            (triggers, end)
+        };
+        let close = |a: &[(u8, f64)], b: &[(u8, f64)]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0 && (x.1 - y.1).abs() < 1e-3);
+        let (once, end) = hits(0.0);
+        assert!(close(&once, &[(0, 0.0), (1, 4.0)]), "{once:?}");
+        assert!(end.is_some_and(|t| (t - 6.0).abs() < 1e-3), "{end:?}");
+        let (looped, end) = hits(2.0);
+        assert!(close(&looped, &[(0, 0.0), (1, 4.0), (1, 8.0)]), "{looped:?}");
+        assert_eq!(end, None);
     }
 }

@@ -13,7 +13,7 @@ import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
 import { RpcClient, type ConnectionState } from "./rpc";
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 export type AppState = {
   connection: ConnectionState;
@@ -128,6 +128,9 @@ const UI_EVENTS: EventEnvelope["event"]["type"][] = [
   "pattern_changed",
   "notes_changed",
   "clip_changed",
+  "clip_deleted",
+  "track",
+  "located",
   "graph",
   "transport",
   "record",
@@ -259,19 +262,41 @@ function apply(env: EventEnvelope) {
         p.kind !== "drums" ? p : { ...p, tracks: p.tracks.map((t) => (t.voice === ev.voice ? { ...t, steps: ev.steps } : t)) },
       );
       break;
-    case "clip_changed":
+    case "clip_changed": {
+      const same = (c: { instrument: string; id: number }) => c.instrument === ev.clip.instrument && c.id === ev.clip.id;
+      const clips = s.clips.some(same) ? s.clips.map((c) => (same(c) ? ev.clip : c)) : [...s.clips, ev.clip];
+      app.set({ snapshot: { ...s, clips } });
+      break;
+    }
+    case "clip_deleted":
+      app.set({ snapshot: { ...s, clips: s.clips.filter((c) => !(c.instrument === ev.instrument && c.id === ev.id)) } });
+      break;
+    case "track":
       app.set({
-        snapshot: { ...s, clips: s.clips.map((c) => (c.instrument === ev.clip.instrument ? ev.clip : c)) },
+        snapshot: { ...s, tracks: s.tracks.map((t) => (t.instrument === ev.track.instrument ? ev.track : t)) },
       });
+      break;
+    case "located":
+      app.set({ snapshot: { ...s, transport: { ...s.transport, start: ev.tick } } });
       break;
     case "notes_changed":
       patch(ev.instrument, (p) => (p.kind !== "notes" ? p : { ...p, steps: ev.steps }));
       break;
     case "transport":
-      app.set({ snapshot: { ...s, transport: { playing: ev.playing, step: ev.playing ? s.transport.step : null } } });
+      app.set({
+        snapshot: {
+          ...s,
+          transport: {
+            ...s.transport,
+            playing: ev.playing,
+            step: ev.playing ? s.transport.step : null,
+            tick: ev.playing ? s.transport.tick : null,
+          },
+        },
+      });
       break;
     case "playhead":
-      app.set({ snapshot: { ...s, transport: { ...s.transport, step: ev.step } } });
+      app.set({ snapshot: { ...s, transport: { ...s.transport, step: ev.step, tick: ev.tick } } });
       break;
     case "record":
       app.set({ snapshot: { ...s, record: ev.state } });

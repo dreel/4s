@@ -267,4 +267,11 @@ the journal this means:
   key per event, `event:<inst>.<tick>.<note>` -> `{len, velocity}`, and
   `clip:<inst>` for a clip's own length. Two people editing different notes
   still never conflict; a step edit changes one event key.
+- **Tracks (RFC 0008 phase B)** add the clip id to the keys:
+  `clip:<inst>.<n>` -> `{name, length}` for each clip in a pool,
+  `event:<inst>.<n>.<tick>.<note>`, `selected:<inst>` -> the selected clip,
+  and `place:<inst>.<start>` -> `{clip, length, offset}`. All belong to the
+  instrument (undoing its add is blocked by another user's edit of them).
+  A **`batch`** request is one entry and one undo step: a UI action or a
+  recorded take that takes several requests undoes in one go.
 

@@ -4,4 +4,12 @@ export type TransportState = { playing: boolean,
 /**
  * Current step while playing.
  */
-step: number | null, };
+step: number | null, 
+/**
+ * Song tick playing (song mode), while playing.
+ */
+tick: number | null, 
+/**
+ * Song tick song mode plays from (`transport.locate`).
+ */
+start: number, };

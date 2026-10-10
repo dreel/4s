@@ -1,5 +1,7 @@
 import type { RecordParams } from "../generated/RecordParams";
-import { act, client, setParam, useApp } from "../store";
+import { act, app, client, setParam, useApp } from "../store";
+
+type AppSnapshot = typeof app.state;
 import { ParamKnob } from "./ParamKnob";
 
 /** Record quantize grids in ticks (96 per quarter), as the protocol's `GRIDS`. */
@@ -114,9 +116,88 @@ function RecordControls() {
   );
 }
 
+/** Ticks as bar.beat, from 1 (96 ticks a beat, 4 beats a bar). */
+export function barBeat(tick: number) {
+  return `${Math.floor(tick / 384) + 1}.${Math.floor((tick % 384) / 96) + 1}`;
+}
+
+/** Song mode (RFC 0008): pattern or song, what song mode loops, and where it
+ * plays from. */
+function SongControls() {
+  const p = (k: string) => (s: AppSnapshot) => s.snapshot?.params[k] ?? 0;
+  const song = useApp(p("song.mode")) >= 0.5;
+  const loop = useApp(p("song.loop"));
+  const loopStart = useApp(p("song.loop_start"));
+  const loopEnd = useApp(p("song.loop_end"));
+  const start = useApp((s) => s.snapshot?.transport.start ?? 0);
+  const num = "w-12 mt-0.5 px-1 py-1 rounded bg-zinc-900 border border-zinc-700 text-xs text-zinc-200";
+  return (
+    <div className="flex items-end gap-2" data-testid="song-controls">
+      <button
+        data-testid="mode-toggle"
+        data-song={song}
+        title="pattern mode loops each instrument's selected clip; song mode plays the arrangement"
+        onClick={() => void setParam("song.mode", song ? 0 : 1)}
+        className={`h-10 px-3 rounded text-xs border ${
+          song ? "bg-violet-500 text-zinc-950 border-violet-400" : "bg-zinc-900 border-zinc-700 hover:border-zinc-500"
+        }`}
+      >
+        {song ? "song" : "pattern"}
+      </button>
+      <label className="flex flex-col text-[10px] text-zinc-500">
+        loop
+        <select className={selectCls} value={loop} data-testid="song-loop" onChange={(e) => void setParam("song.loop", Number(e.target.value))}>
+          <option value={0}>off</option>
+          <option value={1}>song</option>
+          <option value={2}>bars</option>
+        </select>
+      </label>
+      {loop === 2 && (
+        <>
+          <label className="flex flex-col text-[10px] text-zinc-500">
+            from bar
+            <input
+              type="number"
+              min={1}
+              className={num}
+              value={loopStart + 1}
+              data-testid="loop-start"
+              onChange={(e) => Number(e.target.value) >= 1 && void setParam("song.loop_start", Number(e.target.value) - 1)}
+            />
+          </label>
+          <label className="flex flex-col text-[10px] text-zinc-500">
+            to bar
+            <input
+              type="number"
+              min={1}
+              className={num}
+              value={loopEnd}
+              data-testid="loop-end"
+              onChange={(e) => Number(e.target.value) >= 1 && void setParam("song.loop_end", Number(e.target.value))}
+            />
+          </label>
+        </>
+      )}
+      <label className="flex flex-col text-[10px] text-zinc-500" title="where song mode plays from">
+        start bar
+        <input
+          type="number"
+          min={1}
+          className={num}
+          value={Math.floor(start / 384) + 1}
+          data-testid="locate"
+          onChange={(e) => Number(e.target.value) >= 1 && void act(client.call("transport.locate", { tick: (Number(e.target.value) - 1) * 384 }))}
+        />
+      </label>
+    </div>
+  );
+}
+
 export function Transport() {
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
   const step = useApp((s) => s.snapshot?.transport.step ?? null);
+  const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
+  const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
   const tempo = useApp((s) => s.snapshot?.params["transport.tempo"] ?? 120);
   const length = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   return (
@@ -132,10 +213,11 @@ export function Transport() {
         {playing ? "Stop" : "Play"}
       </button>
       <RecordControls />
+      <SongControls />
       <div className="w-16 text-center">
-        <div className="text-[10px] text-zinc-500">step</div>
-        <div className="text-lg tabular-nums" data-testid="playhead">
-          {playing && step !== null ? step + 1 : "-"}
+        <div className="text-[10px] text-zinc-500">{song ? "bar" : "step"}</div>
+        <div className="text-lg tabular-nums" data-testid="playhead" data-tick={tick ?? ""}>
+          {!playing || step === null ? "-" : song && tick !== null ? barBeat(tick) : step + 1}
         </div>
       </div>
       <label className="flex flex-col text-[10px] text-zinc-500">

@@ -118,7 +118,7 @@
         "type": "object"
       },
       "Clip": {
-        "description": "An instrument's clip.",
+        "description": "A clip in an instrument's pool.",
         "properties": {
           "events": {
             "description": "Sorted by (tick, note).",
@@ -126,6 +126,12 @@
               "$ref": "#/$defs/ClipEvent"
             },
             "type": "array"
+          },
+          "id": {
+            "description": "Its id in the instrument's pool (1, 2, ...).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
           },
           "instrument": {
             "type": "string"
@@ -138,10 +144,15 @@
               "integer",
               "null"
             ]
+          },
+          "name": {
+            "type": "string"
           }
         },
         "required": [
           "instrument",
+          "id",
+          "name",
           "events"
         ],
         "type": "object"
@@ -181,6 +192,32 @@
           "len",
           "note",
           "velocity"
+        ],
+        "type": "object"
+      },
+      "ClipHeader": {
+        "description": "A clip without its events.",
+        "properties": {
+          "id": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
         ],
         "type": "object"
       },
@@ -385,7 +422,7 @@
             "type": "object"
           },
           {
-            "description": "An instrument's clip changed (any edit, including through a step\nview, which also sends the view's events).",
+            "description": "A clip's contents, name, or length changed (any edit, including\nthrough a step view, which also sends the view's events).",
             "properties": {
               "clip": {
                 "$ref": "#/$defs/Clip"
@@ -398,6 +435,46 @@
             "required": [
               "type",
               "clip"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A track's pool (clips added or removed), selection, or arrangement\nchanged.",
+            "properties": {
+              "track": {
+                "$ref": "#/$defs/TrackInfo"
+              },
+              "type": {
+                "const": "track",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "track"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A clip was deleted (its track follows in a `track` event).",
+            "properties": {
+              "id": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "instrument": {
+                "type": "string"
+              },
+              "type": {
+                "const": "clip_deleted",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "instrument",
+              "id"
             ],
             "type": "object"
           },
@@ -452,9 +529,14 @@
             "type": "object"
           },
           {
-            "description": "A step started. `time` is engine time in seconds.",
+            "description": "A step started. `time` is engine time in seconds; `tick` is the song\ntick (in song mode, where the song plays; else from play).",
             "properties": {
               "step": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "tick": {
                 "format": "uint32",
                 "minimum": 0,
                 "type": "integer"
@@ -471,7 +553,27 @@
             "required": [
               "type",
               "step",
+              "tick",
               "time"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Song mode's start point moved (`transport.locate`).",
+            "properties": {
+              "tick": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "located",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "tick"
             ],
             "type": "object"
           },
@@ -1116,6 +1218,39 @@
         ],
         "type": "string"
       },
+      "Placement": {
+        "description": "A clip placed on the song timeline. It plays from `offset` ticks into\nthe clip, looping at the clip's length, for `length` ticks.",
+        "properties": {
+          "clip": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Song tick it starts at.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip",
+          "start",
+          "length"
+        ],
+        "type": "object"
+      },
       "ProjectInfo": {
         "properties": {
           "dirty": {
@@ -1319,6 +1454,38 @@
         "required": [
           "seats",
           "host"
+        ],
+        "type": "object"
+      },
+      "TrackInfo": {
+        "description": "An instrument's track: its clip pool, the selected clip, and its\narrangement (placements sorted by start, not overlapping).",
+        "properties": {
+          "arrangement": {
+            "items": {
+              "$ref": "#/$defs/Placement"
+            },
+            "type": "array"
+          },
+          "clips": {
+            "items": {
+              "$ref": "#/$defs/ClipHeader"
+            },
+            "type": "array"
+          },
+          "instrument": {
+            "type": "string"
+          },
+          "selected": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "instrument",
+          "selected",
+          "clips",
+          "arrangement"
         ],
         "type": "object"
       },
@@ -1565,24 +1732,75 @@
         ],
         "type": "object"
       },
-      "ProjectClip": {
-        "description": "A clip in a project file: events in text form (`tick:note:len:vel`, see\n`format_events`) and an optional length in ticks.",
+      "Placement": {
+        "description": "A clip placed on the song timeline. It plays from `offset` ticks into\nthe clip, looping at the clip's length, for `length` ticks.",
         "properties": {
-          "events": {
-            "type": "string"
+          "clip": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
           },
           "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Song tick it starts at.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip",
+          "start",
+          "length"
+        ],
+        "type": "object"
+      },
+      "ProjectClip": {
+        "description": "A clip in a project file: a step pattern when one says exactly the same\nthing (drum step strings per voice, `{\"kick\": \"x---x---\"}`, or a note\nstring, `\"C2 C2! D#2~ -\"`), else events in text form (`tick:note:len:vel`,\nsee `format_events`); both absent for an empty clip.",
+        "properties": {
+          "events": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "length": {
+            "description": "Ticks; absent follows `sequencer.length`.",
             "format": "uint32",
             "minimum": 0,
             "type": [
               "integer",
               "null"
             ]
+          },
+          "name": {
+            "description": "Default: the clip's id.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pattern": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProjectPattern"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
-        "required": [
-          "events"
-        ],
         "type": "object"
       },
       "ProjectController": {
@@ -1653,6 +1871,39 @@
           }
         ]
       },
+      "ProjectTrack": {
+        "description": "An instrument's track in a project file.",
+        "properties": {
+          "arrangement": {
+            "description": "Placements on the song timeline, by start.",
+            "items": {
+              "$ref": "#/$defs/Placement"
+            },
+            "type": "array"
+          },
+          "clips": {
+            "additionalProperties": false,
+            "description": "The pool by clip id.",
+            "patternProperties": {
+              "^\\d+$": {
+                "$ref": "#/$defs/ProjectClip"
+              }
+            },
+            "type": "object"
+          },
+          "selected": {
+            "description": "The selected clip's id.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected",
+          "clips"
+        ],
+        "type": "object"
+      },
       "SeatConfig": {
         "description": "One performer's setup: saved in the project.",
         "properties": {
@@ -1714,14 +1965,6 @@
         },
         "type": "array"
       },
-      "clips": {
-        "additionalProperties": {
-          "$ref": "#/$defs/ProjectClip"
-        },
-        "default": {},
-        "description": "Per instrument id (RFC 0007): clips that do not fit a step pattern\n(off-grid events, other lengths or velocities) or have their own\nlength. An instrument is in `patterns` or here, not both.",
-        "type": "object"
-      },
       "controller": {
         "$ref": "#/$defs/ProjectController"
       },
@@ -1745,13 +1988,6 @@
         "description": "Parameter values by path. Unknown paths are ignored on load; missing\npaths take their defaults.",
         "type": "object"
       },
-      "patterns": {
-        "additionalProperties": {
-          "$ref": "#/$defs/ProjectPattern"
-        },
-        "description": "Per instrument id: drum step strings per voice\n(`{\"kick\": \"x---x---x---x---\"}`) or a note string (`\"C2 C2! D#2~ -\"`).\nInstruments with an empty pattern are omitted.",
-        "type": "object"
-      },
       "routes": {
         "additionalProperties": {
           "format": "uint32",
@@ -1768,6 +2004,14 @@
         "default": {},
         "description": "Performer setups by seat name (RFC 0007): focus, knob page, note\nbindings, CC maps.",
         "type": "object"
+      },
+      "tracks": {
+        "additionalProperties": {
+          "$ref": "#/$defs/ProjectTrack"
+        },
+        "default": {},
+        "description": "Per instrument id (RFC 0008): its clip pool, selected clip, and\narrangement. An instrument left out has one empty clip.",
+        "type": "object"
       }
     },
     "required": [
@@ -1776,16 +2020,29 @@
       "channels",
       "routes",
       "params",
-      "patterns",
       "controller"
     ],
     "title": "ProjectFile",
     "type": "object"
   },
-  "project_format_version": 4,
-  "protocol_version": 6,
+  "project_format_version": 5,
+  "protocol_version": 7,
   "request": {
     "$defs": {
+      "BatchParams": {
+        "description": "Several requests as one: applied in order, journaled as one entry, and\nundone as one step. Not atomic: it stops at the first error, and what\nthe requests before it changed stays.",
+        "properties": {
+          "requests": {
+            "description": "Each `{\"method\": ..., \"params\": ...}`. Not `batch` itself, nor\nconnection-level methods (hello, subscribe, render, daemon), undo,\nor the journal.",
+            "items": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "requests"
+        ],
+        "type": "object"
+      },
       "CcMap": {
         "description": "Bind one CC to one parameter, scaled over its range.",
         "properties": {
@@ -1964,6 +2221,16 @@
       },
       "ClipEventsParams": {
         "properties": {
+          "clip": {
+            "default": null,
+            "description": "Clip in the instrument's pool; default: its selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "events": {
             "items": {
               "$ref": "#/$defs/ClipEvent"
@@ -1986,6 +2253,16 @@
       },
       "ClipGetParams": {
         "properties": {
+          "clip": {
+            "default": null,
+            "description": "Clip in the instrument's pool; default: its selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "instrument": {
             "default": null,
             "description": "Default: the caller's seat focus.",
@@ -1999,6 +2276,16 @@
       },
       "ClipLengthParams": {
         "properties": {
+          "clip": {
+            "default": null,
+            "description": "Clip in the instrument's pool; default: its selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "instrument": {
             "default": null,
             "type": [
@@ -2019,8 +2306,57 @@
         },
         "type": "object"
       },
+      "ClipNewParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "length": {
+            "default": null,
+            "description": "Ticks; default: follow `sequencer.length`.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "default": null,
+            "description": "Default: its id.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "select": {
+            "default": null,
+            "description": "Make it the selected clip (default true).",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ClipQuantizeParams": {
         "properties": {
+          "clip": {
+            "default": null,
+            "description": "Clip in the instrument's pool; default: its selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "grid": {
             "description": "Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).",
             "format": "uint32",
@@ -2049,8 +2385,42 @@
         ],
         "type": "object"
       },
+      "ClipRefParams": {
+        "description": "A clip in a pool (`clip.duplicate`, `clip.delete`, `clip.select`).",
+        "properties": {
+          "clip": {
+            "default": null,
+            "description": "Default: the selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ClipRemoveParams": {
         "properties": {
+          "clip": {
+            "default": null,
+            "description": "Clip in the instrument's pool; default: its selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "events": {
             "items": {
               "$ref": "#/$defs/EventKey"
@@ -2070,6 +2440,33 @@
         ],
         "type": "object"
       },
+      "ClipRenameParams": {
+        "properties": {
+          "clip": {
+            "default": null,
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
       "ClipUpdateParams": {
         "description": "Remove and add events in one edit (one undo step).",
         "properties": {
@@ -2080,6 +2477,16 @@
               "$ref": "#/$defs/ClipEvent"
             },
             "type": "array"
+          },
+          "clip": {
+            "default": null,
+            "description": "Clip in the instrument's pool; default: its selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "instrument": {
             "default": null,
@@ -2395,6 +2802,20 @@
         "required": [
           "device",
           "role"
+        ],
+        "type": "object"
+      },
+      "LocateParams": {
+        "properties": {
+          "tick": {
+            "description": "Song tick that song mode plays from.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tick"
         ],
         "type": "object"
       },
@@ -2873,24 +3294,75 @@
         ],
         "type": "object"
       },
-      "ProjectClip": {
-        "description": "A clip in a project file: events in text form (`tick:note:len:vel`, see\n`format_events`) and an optional length in ticks.",
+      "Placement": {
+        "description": "A clip placed on the song timeline. It plays from `offset` ticks into\nthe clip, looping at the clip's length, for `length` ticks.",
         "properties": {
-          "events": {
-            "type": "string"
+          "clip": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
           },
           "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Song tick it starts at.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip",
+          "start",
+          "length"
+        ],
+        "type": "object"
+      },
+      "ProjectClip": {
+        "description": "A clip in a project file: a step pattern when one says exactly the same\nthing (drum step strings per voice, `{\"kick\": \"x---x---\"}`, or a note\nstring, `\"C2 C2! D#2~ -\"`), else events in text form (`tick:note:len:vel`,\nsee `format_events`); both absent for an empty clip.",
+        "properties": {
+          "events": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "length": {
+            "description": "Ticks; absent follows `sequencer.length`.",
             "format": "uint32",
             "minimum": 0,
             "type": [
               "integer",
               "null"
             ]
+          },
+          "name": {
+            "description": "Default: the clip's id.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pattern": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProjectPattern"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
-        "required": [
-          "events"
-        ],
         "type": "object"
       },
       "ProjectController": {
@@ -2913,14 +3385,6 @@
               "$ref": "#/$defs/ChannelInfo"
             },
             "type": "array"
-          },
-          "clips": {
-            "additionalProperties": {
-              "$ref": "#/$defs/ProjectClip"
-            },
-            "default": {},
-            "description": "Per instrument id (RFC 0007): clips that do not fit a step pattern\n(off-grid events, other lengths or velocities) or have their own\nlength. An instrument is in `patterns` or here, not both.",
-            "type": "object"
           },
           "controller": {
             "$ref": "#/$defs/ProjectController"
@@ -2945,13 +3409,6 @@
             "description": "Parameter values by path. Unknown paths are ignored on load; missing\npaths take their defaults.",
             "type": "object"
           },
-          "patterns": {
-            "additionalProperties": {
-              "$ref": "#/$defs/ProjectPattern"
-            },
-            "description": "Per instrument id: drum step strings per voice\n(`{\"kick\": \"x---x---x---x---\"}`) or a note string (`\"C2 C2! D#2~ -\"`).\nInstruments with an empty pattern are omitted.",
-            "type": "object"
-          },
           "routes": {
             "additionalProperties": {
               "format": "uint32",
@@ -2968,6 +3425,14 @@
             "default": {},
             "description": "Performer setups by seat name (RFC 0007): focus, knob page, note\nbindings, CC maps.",
             "type": "object"
+          },
+          "tracks": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ProjectTrack"
+            },
+            "default": {},
+            "description": "Per instrument id (RFC 0008): its clip pool, selected clip, and\narrangement. An instrument left out has one empty clip.",
+            "type": "object"
           }
         },
         "required": [
@@ -2976,7 +3441,6 @@
           "channels",
           "routes",
           "params",
-          "patterns",
           "controller"
         ],
         "type": "object"
@@ -3071,6 +3535,39 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "ProjectTrack": {
+        "description": "An instrument's track in a project file.",
+        "properties": {
+          "arrangement": {
+            "description": "Placements on the song timeline, by start.",
+            "items": {
+              "$ref": "#/$defs/Placement"
+            },
+            "type": "array"
+          },
+          "clips": {
+            "additionalProperties": false,
+            "description": "The pool by clip id.",
+            "patternProperties": {
+              "^\\d+$": {
+                "$ref": "#/$defs/ProjectClip"
+              }
+            },
+            "type": "object"
+          },
+          "selected": {
+            "description": "The selected clip's id.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected",
+          "clips"
+        ],
         "type": "object"
       },
       "RecordMode": {
@@ -3208,6 +3705,16 @@
             "format": "double",
             "type": [
               "number",
+              "null"
+            ]
+          },
+          "from": {
+            "default": null,
+            "description": "Song tick to start from, in song mode (default: the locate point).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -3618,6 +4125,108 @@
         ],
         "type": "object"
       },
+      "SongMoveParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start": {
+            "description": "Start tick of the placement.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "to": {
+            "description": "Its new start tick.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "to"
+        ],
+        "type": "object"
+      },
+      "SongPlaceParams": {
+        "description": "Place a clip on the song timeline; it cuts what it overlaps on the track.",
+        "properties": {
+          "clip": {
+            "default": null,
+            "description": "Default: the selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "length": {
+            "default": null,
+            "description": "Ticks; default: the clip's length.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "default": null,
+            "description": "Ticks into the clip it starts at (default 0).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "start": {
+            "description": "Song tick (`TICKS_PER_BAR` per bar).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start"
+        ],
+        "type": "object"
+      },
+      "SongRemoveParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start": {
+            "description": "Start tick of the placement.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start"
+        ],
+        "type": "object"
+      },
       "SubscribeParams": {
         "properties": {
           "types": {
@@ -3884,6 +4493,23 @@
           },
           "params": {
             "$ref": "#/$defs/RecordParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Set where song mode plays from (and jump there while playing).",
+        "properties": {
+          "method": {
+            "const": "transport.locate",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/LocateParams"
           }
         },
         "required": [
@@ -4394,6 +5020,175 @@
           },
           "params": {
             "$ref": "#/$defs/ClipQuantizeParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "A new empty clip in an instrument's pool.",
+        "properties": {
+          "method": {
+            "const": "clip.new",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipNewParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Copy a clip into a new one in the same pool.",
+        "properties": {
+          "method": {
+            "const": "clip.duplicate",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipRefParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "properties": {
+          "method": {
+            "const": "clip.rename",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipRenameParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Delete a clip and its placements (a track keeps at least one clip).",
+        "properties": {
+          "method": {
+            "const": "clip.delete",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipRefParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Select the clip pattern mode plays and the step editors edit.",
+        "properties": {
+          "method": {
+            "const": "clip.select",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipRefParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Several requests as one journal entry and undo step.",
+        "properties": {
+          "method": {
+            "const": "batch",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/BatchParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Every track's arrangement.",
+        "properties": {
+          "method": {
+            "const": "song.get",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Place a clip on a track's arrangement.",
+        "properties": {
+          "method": {
+            "const": "song.place",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SongPlaceParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove a placement.",
+        "properties": {
+          "method": {
+            "const": "song.remove",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SongRemoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Move a placement to another start.",
+        "properties": {
+          "method": {
+            "const": "song.move",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SongMoveParams"
           }
         },
         "required": [
@@ -5153,7 +5948,7 @@
         "type": "object"
       },
       "Clip": {
-        "description": "An instrument's clip.",
+        "description": "A clip in an instrument's pool.",
         "properties": {
           "events": {
             "description": "Sorted by (tick, note).",
@@ -5161,6 +5956,12 @@
               "$ref": "#/$defs/ClipEvent"
             },
             "type": "array"
+          },
+          "id": {
+            "description": "Its id in the instrument's pool (1, 2, ...).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
           },
           "instrument": {
             "type": "string"
@@ -5173,10 +5974,15 @@
               "integer",
               "null"
             ]
+          },
+          "name": {
+            "type": "string"
           }
         },
         "required": [
           "instrument",
+          "id",
+          "name",
           "events"
         ],
         "type": "object"
@@ -5216,6 +6022,32 @@
           "len",
           "note",
           "velocity"
+        ],
+        "type": "object"
+      },
+      "ClipHeader": {
+        "description": "A clip without its events.",
+        "properties": {
+          "id": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
         ],
         "type": "object"
       },
@@ -5650,6 +6482,39 @@
           }
         ]
       },
+      "Placement": {
+        "description": "A clip placed on the song timeline. It plays from `offset` ticks into\nthe clip, looping at the clip's length, for `length` ticks.",
+        "properties": {
+          "clip": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "length": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Song tick it starts at.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip",
+          "start",
+          "length"
+        ],
+        "type": "object"
+      },
       "ProjectInfo": {
         "properties": {
           "dirty": {
@@ -5856,6 +6721,38 @@
         ],
         "type": "object"
       },
+      "TrackInfo": {
+        "description": "An instrument's track: its clip pool, the selected clip, and its\narrangement (placements sorted by start, not overlapping).",
+        "properties": {
+          "arrangement": {
+            "items": {
+              "$ref": "#/$defs/Placement"
+            },
+            "type": "array"
+          },
+          "clips": {
+            "items": {
+              "$ref": "#/$defs/ClipHeader"
+            },
+            "type": "array"
+          },
+          "instrument": {
+            "type": "string"
+          },
+          "selected": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "instrument",
+          "selected",
+          "clips",
+          "arrangement"
+        ],
+        "type": "object"
+      },
       "TrackPattern": {
         "description": "Steps for one track. Each entry is 0 (off), 1 (on), or 2 (accent).\nAlways `MAX_STEPS` long; `sequencer.length` sets how many are played.",
         "properties": {
@@ -5883,8 +6780,23 @@
           "playing": {
             "type": "boolean"
           },
+          "start": {
+            "description": "Song tick song mode plays from (`transport.locate`).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "step": {
             "description": "Current step while playing.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tick": {
+            "description": "Song tick playing (song mode), while playing.",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -5894,7 +6806,8 @@
           }
         },
         "required": [
-          "playing"
+          "playing",
+          "start"
         ],
         "type": "object"
       },
@@ -5920,7 +6833,7 @@
         "$ref": "#/$defs/AudioStatus"
       },
       "clips": {
-        "description": "One clip per instrument, in instrument order (RFC 0007).",
+        "description": "Every clip of every track.",
         "items": {
           "$ref": "#/$defs/Clip"
         },
@@ -5966,6 +6879,13 @@
         "minimum": 0,
         "type": "integer"
       },
+      "tracks": {
+        "description": "Each instrument's track (RFC 0008): pool, selection, arrangement.",
+        "items": {
+          "$ref": "#/$defs/TrackInfo"
+        },
+        "type": "array"
+      },
       "transport": {
         "$ref": "#/$defs/TransportState"
       }
@@ -5977,6 +6897,7 @@
       "params",
       "graph",
       "patterns",
+      "tracks",
       "clips",
       "controller",
       "midi",

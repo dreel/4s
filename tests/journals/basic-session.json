@@ -76,8 +76,7 @@
       "transport.swing": 0.0,
       "transport.tempo": 120.0
     },
-    "patterns": {},
-    "clips": {},
+    "tracks": {},
     "controller": {
       "follow": true
     },
@@ -86,7 +85,7 @@
   "entries": [
     {
       "seq": 2,
-      "time": 1791578712.395774,
+      "time": 1791649485.55596,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -112,7 +111,7 @@
     },
     {
       "seq": 3,
-      "time": 1791578712.395989,
+      "time": 1791649485.556211,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
@@ -146,7 +145,7 @@
       },
       "changes": [
         {
-          "key": "event:drums.0.36",
+          "key": "event:drums.1.0.36",
           "before": null,
           "after": {
             "len": 24,
@@ -154,7 +153,7 @@
           }
         },
         {
-          "key": "event:drums.192.36",
+          "key": "event:drums.1.192.36",
           "before": null,
           "after": {
             "len": 24,
@@ -162,7 +161,7 @@
           }
         },
         {
-          "key": "event:drums.288.36",
+          "key": "event:drums.1.288.36",
           "before": null,
           "after": {
             "len": 24,
@@ -170,7 +169,7 @@
           }
         },
         {
-          "key": "event:drums.336.36",
+          "key": "event:drums.1.336.36",
           "before": null,
           "after": {
             "len": 24,
@@ -178,7 +177,7 @@
           }
         },
         {
-          "key": "event:drums.96.36",
+          "key": "event:drums.1.96.36",
           "before": null,
           "after": {
             "len": 24,
@@ -191,7 +190,7 @@
     },
     {
       "seq": 4,
-      "time": 1791578712.396213,
+      "time": 1791649485.556471,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
@@ -225,7 +224,7 @@
       },
       "changes": [
         {
-          "key": "event:drums.144.42",
+          "key": "event:drums.1.144.42",
           "before": null,
           "after": {
             "len": 24,
@@ -233,7 +232,7 @@
           }
         },
         {
-          "key": "event:drums.240.42",
+          "key": "event:drums.1.240.42",
           "before": null,
           "after": {
             "len": 24,
@@ -241,7 +240,7 @@
           }
         },
         {
-          "key": "event:drums.336.42",
+          "key": "event:drums.1.336.42",
           "before": null,
           "after": {
             "len": 24,
@@ -249,7 +248,7 @@
           }
         },
         {
-          "key": "event:drums.48.42",
+          "key": "event:drums.1.48.42",
           "before": null,
           "after": {
             "len": 24,
@@ -262,7 +261,7 @@
     },
     {
       "seq": 5,
-      "time": 1791578712.396431,
+      "time": 1791649485.556719,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_step",
@@ -280,7 +279,7 @@
       },
       "changes": [
         {
-          "key": "event:drums.96.38",
+          "key": "event:drums.1.96.38",
           "before": null,
           "after": {
             "len": 24,
@@ -293,7 +292,7 @@
     },
     {
       "seq": 6,
-      "time": 1791578712.39673,
+      "time": 1791649485.557021,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
@@ -327,6 +326,14 @@
           ]
         },
         {
+          "key": "clip:bass.1",
+          "before": null,
+          "after": {
+            "length": null,
+            "name": "1"
+          }
+        },
+        {
           "key": "instrument:bass",
           "before": null,
           "after": {
@@ -338,6 +345,11 @@
           "key": "route:bass",
           "before": null,
           "after": 2
+        },
+        {
+          "key": "selected:bass",
+          "before": null,
+          "after": 1
         }
       ],
       "reverts": null,
@@ -345,7 +357,7 @@
     },
     {
       "seq": 7,
-      "time": 1791578712.397361,
+      "time": 1791649485.557651,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
@@ -682,7 +694,7 @@
       },
       "changes": [
         {
-          "key": "event:bass.0.36",
+          "key": "event:bass.1.0.36",
           "before": null,
           "after": {
             "len": 12,
@@ -690,7 +702,7 @@
           }
         },
         {
-          "key": "event:bass.144.48",
+          "key": "event:bass.1.144.48",
           "before": null,
           "after": {
             "len": 12,
@@ -698,7 +710,7 @@
           }
         },
         {
-          "key": "event:bass.24.36",
+          "key": "event:bass.1.24.36",
           "before": null,
           "after": {
             "len": 12,
@@ -706,7 +718,7 @@
           }
         },
         {
-          "key": "event:bass.48.39",
+          "key": "event:bass.1.48.39",
           "before": null,
           "after": {
             "len": 25,
@@ -714,7 +726,7 @@
           }
         },
         {
-          "key": "event:bass.96.31",
+          "key": "event:bass.1.96.31",
           "before": null,
           "after": {
             "len": 12,
@@ -727,7 +739,7 @@
     },
     {
       "seq": 8,
-      "time": 1791578712.397984,
+      "time": 1791649485.558236,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_note",
@@ -748,7 +760,7 @@
       },
       "changes": [
         {
-          "key": "event:bass.360.43",
+          "key": "event:bass.1.360.43",
           "before": null,
           "after": {
             "len": 25,
@@ -761,7 +773,7 @@
     },
     {
       "seq": 9,
-      "time": 1791578712.398386,
+      "time": 1791649485.558616,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -787,7 +799,7 @@
     },
     {
       "seq": 10,
-      "time": 1791578712.398587,
+      "time": 1791649485.558808,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -813,7 +825,7 @@
     },
     {
       "seq": 11,
-      "time": 1791578712.399016,
+      "time": 1791649485.559217,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
@@ -830,7 +842,7 @@
       },
       "changes": [
         {
-          "key": "event:drums.144.38",
+          "key": "event:drums.1.144.38",
           "before": null,
           "after": {
             "len": 24,
@@ -843,7 +855,7 @@
     },
     {
       "seq": 12,
-      "time": 1791578712.399387,
+      "time": 1791649485.559568,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
@@ -864,7 +876,7 @@
     },
     {
       "seq": 13,
-      "time": 1791578712.399615,
+      "time": 1791649485.559822,
       "user": "e2e",
       "origin": "cli",
       "method": "seat.page",
@@ -897,7 +909,7 @@
     },
     {
       "seq": 14,
-      "time": 1791578712.399998,
+      "time": 1791649485.560239,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.knob",
@@ -923,7 +935,7 @@
     },
     {
       "seq": 15,
-      "time": 1791578712.400299,
+      "time": 1791649485.560568,
       "user": "e2e",
       "origin": "cli",
       "method": "channel.add",
@@ -960,7 +972,7 @@
     },
     {
       "seq": 16,
-      "time": 1791578712.40057,
+      "time": 1791649485.560843,
       "user": "e2e",
       "origin": "cli",
       "method": "route.set",
@@ -987,7 +999,7 @@
     },
     {
       "seq": 17,
-      "time": 1791578712.400906,
+      "time": 1791649485.561196,
       "user": "e2e",
       "origin": "cli",
       "method": "route.set",
@@ -1019,7 +1031,7 @@
     },
     {
       "seq": 18,
-      "time": 1791578712.401257,
+      "time": 1791649485.561544,
       "user": "e2e",
       "origin": "cli",
       "method": "channel.move",
@@ -1053,7 +1065,7 @@
     },
     {
       "seq": 19,
-      "time": 1791578712.40185,
+      "time": 1791649485.562193,
       "user": "alice",
       "origin": "cli",
       "method": "param.set",
@@ -1079,7 +1091,7 @@
     },
     {
       "seq": 20,
-      "time": 1791578712.402395,
+      "time": 1791649485.562762,
       "user": "bob",
       "origin": "cli",
       "method": "param.set",
@@ -1105,7 +1117,7 @@
     },
     {
       "seq": 21,
-      "time": 1791578712.40259,
+      "time": 1791649485.562961,
       "user": "alice",
       "origin": "cli",
       "method": "history.undo",
@@ -1122,7 +1134,7 @@
     },
     {
       "seq": 22,
-      "time": 1791578712.402787,
+      "time": 1791649485.563176,
       "user": "bob",
       "origin": "cli",
       "method": "history.undo",
@@ -1145,7 +1157,7 @@
     },
     {
       "seq": 23,
-      "time": 1791578712.402982,
+      "time": 1791649485.563404,
       "user": "bob",
       "origin": "cli",
       "method": "history.redo",
@@ -1168,7 +1180,7 @@
     },
     {
       "seq": 24,
-      "time": 1791578712.403282,
+      "time": 1791649485.563747,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
@@ -1187,12 +1199,25 @@
       },
       "changes": [
         {
+          "key": "clip:lead.1",
+          "before": null,
+          "after": {
+            "length": null,
+            "name": "1"
+          }
+        },
+        {
           "key": "instrument:lead",
           "before": null,
           "after": {
             "name": "Bass",
             "type": "tb303"
           }
+        },
+        {
+          "key": "selected:lead",
+          "before": null,
+          "after": 1
         }
       ],
       "reverts": null,
@@ -1200,7 +1225,7 @@
     },
     {
       "seq": 25,
-      "time": 1791578712.403859,
+      "time": 1791649485.56436,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
@@ -1537,7 +1562,7 @@
       },
       "changes": [
         {
-          "key": "event:lead.0.48",
+          "key": "event:lead.1.0.48",
           "before": null,
           "after": {
             "len": 12,
@@ -1545,7 +1570,7 @@
           }
         },
         {
-          "key": "event:lead.24.52",
+          "key": "event:lead.1.24.52",
           "before": null,
           "after": {
             "len": 12,
@@ -1553,7 +1578,7 @@
           }
         },
         {
-          "key": "event:lead.48.55",
+          "key": "event:lead.1.48.55",
           "before": null,
           "after": {
             "len": 12,
@@ -1566,7 +1591,7 @@
     },
     {
       "seq": 26,
-      "time": 1791578712.404432,
+      "time": 1791649485.564964,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.remove",
@@ -1582,7 +1607,15 @@
       },
       "changes": [
         {
-          "key": "event:lead.0.48",
+          "key": "clip:lead.1",
+          "before": {
+            "length": null,
+            "name": "1"
+          },
+          "after": null
+        },
+        {
+          "key": "event:lead.1.0.48",
           "before": {
             "len": 12,
             "velocity": 89
@@ -1590,7 +1623,7 @@
           "after": null
         },
         {
-          "key": "event:lead.24.52",
+          "key": "event:lead.1.24.52",
           "before": {
             "len": 12,
             "velocity": 89
@@ -1598,7 +1631,7 @@
           "after": null
         },
         {
-          "key": "event:lead.48.55",
+          "key": "event:lead.1.48.55",
           "before": {
             "len": 12,
             "velocity": 89
@@ -1612,6 +1645,11 @@
             "type": "tb303"
           },
           "after": null
+        },
+        {
+          "key": "selected:lead",
+          "before": 1,
+          "after": null
         }
       ],
       "reverts": null,
@@ -1619,7 +1657,7 @@
     },
     {
       "seq": 27,
-      "time": 1791578712.404845,
+      "time": 1791649485.56541,
       "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
@@ -1632,7 +1670,15 @@
       },
       "changes": [
         {
-          "key": "event:lead.0.48",
+          "key": "clip:lead.1",
+          "before": null,
+          "after": {
+            "length": null,
+            "name": "1"
+          }
+        },
+        {
+          "key": "event:lead.1.0.48",
           "before": null,
           "after": {
             "len": 12,
@@ -1640,7 +1686,7 @@
           }
         },
         {
-          "key": "event:lead.24.52",
+          "key": "event:lead.1.24.52",
           "before": null,
           "after": {
             "len": 12,
@@ -1648,7 +1694,7 @@
           }
         },
         {
-          "key": "event:lead.48.55",
+          "key": "event:lead.1.48.55",
           "before": null,
           "after": {
             "len": 12,
@@ -1662,6 +1708,11 @@
             "name": "Bass",
             "type": "tb303"
           }
+        },
+        {
+          "key": "selected:lead",
+          "before": null,
+          "after": 1
         }
       ],
       "reverts": 26,
@@ -1669,7 +1720,7 @@
     },
     {
       "seq": 28,
-      "time": 1791578712.40504,
+      "time": 1791649485.56564,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -1689,7 +1740,7 @@
     },
     {
       "seq": 29,
-      "time": 1791578712.405261,
+      "time": 1791649485.5659,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.clear",
@@ -1705,7 +1756,7 @@
       },
       "changes": [
         {
-          "key": "event:drums.144.38",
+          "key": "event:drums.1.144.38",
           "before": {
             "len": 24,
             "velocity": 89
@@ -1713,7 +1764,7 @@
           "after": null
         },
         {
-          "key": "event:drums.96.38",
+          "key": "event:drums.1.96.38",
           "before": {
             "len": 24,
             "velocity": 127
@@ -1726,7 +1777,7 @@
     },
     {
       "seq": 30,
-      "time": 1791578712.405489,
+      "time": 1791649485.566147,
       "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
@@ -1739,7 +1790,7 @@
       },
       "changes": [
         {
-          "key": "event:drums.144.38",
+          "key": "event:drums.1.144.38",
           "before": null,
           "after": {
             "len": 24,
@@ -1747,7 +1798,7 @@
           }
         },
         {
-          "key": "event:drums.96.38",
+          "key": "event:drums.1.96.38",
           "before": null,
           "after": {
             "len": 24,
@@ -1759,5 +1810,5 @@
       "error": null
     }
   ],
-  "digest": "a995dcb57bf68f6b"
+  "digest": "73318b3130d7b0db"
 }

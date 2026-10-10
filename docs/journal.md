@@ -249,7 +249,8 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
   included).
 - **Recording isn't re-armed.** Replay sends `transport.record` without
   `arm`, so replayed notes are not recorded again; each recorded pass is
-  its own `clip.update` entry (`recorded: true`, RFC 0008), replayed like
+  its own entry (a `clip.update` with `recorded: true`, or in song mode a
+  `batch` that can also make and place a clip, RFC 0008), replayed like
   any edit.
 - **Replay into a daemon with the recording's host user.** Each entry
   records its caller's seat, and replay joins it, but `controller.*` and a
@@ -259,8 +260,9 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
 - **Export covers the current segment only.** If it is longer than the
   in-memory journal (100k entries), export fails; replay the `.jsonl` file
   instead.
-- **Several RPCs are several steps.** A UI action that sends several RPCs
-  (e.g. a strip's `(none)`) undoes one RPC at a time.
+- **Several RPCs are several steps,** unless sent as one `batch` (one
+  entry, one undo step). A UI action that sends several RPCs (e.g. a
+  strip's `(none)`) undoes one RPC at a time.
 - **An undo or redo with nothing to do is not journaled.** It changes
   nothing.
 - **MIDI input that can do nothing is not journaled.** That is clock,

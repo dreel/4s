@@ -1,6 +1,6 @@
 # RFC 0008: Recording and the arrangement
 
-- Status: accepted (phase A implemented; see "Implementation notes")
+- Status: accepted (phases A and B1 implemented; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-09
 - Discussion: the PR that introduces this RFC.
@@ -139,3 +139,51 @@ moved, resized, and duplicated through phase B's RPCs.
   (see docs/backlog.md).
 - Live take progress (notes drawn while recording) waits for the piano roll
   (phase B).
+
+## Implementation notes (phase B1: the song model)
+
+Phase B is two PRs: B1 (this) is the model, engine, RPC/CLI, and a
+minimal UI; B2 is the piano roll. Where these differ from the sections
+above, these win:
+
+- **Song settings are parameters**: `song.mode` (pattern/song),
+  `song.loop` (0 off, 1 the song, 2 bars), `song.loop_start` and
+  `song.loop_end` (bars, end exclusive). They save, undo, and show in
+  `param.list` like any other; the engine reads them directly. Only the
+  start point is a request (`transport.locate`), session state like the
+  transport.
+- **Clip pools**: clip ids are 1, 2, ... per instrument (a new clip takes
+  one past the highest); names default to the id. A track always keeps one
+  clip; deleting a clip deletes its placements. `clip.*` requests take an
+  optional `clip` (default: the selected one), so the step editors, the
+  Block grid, and existing scripts edit the selected clip.
+- **Placements** don't overlap: `song.place` and `song.move` cut what the
+  new placement lands on (the right part keeps playing from where it was,
+  by its offset). A placement longer than its clip loops it.
+- **Loops**: a bar range loops when the playhead reaches its end, so
+  playing from past it goes on; the whole song loops from anywhere past its
+  end. Without a loop, playback stops at the song's end, except while
+  recording.
+- **Recording in song mode** writes each note into the clip of the
+  placement under it (at its local tick, quantized at that clip's length).
+  Notes with nothing under them go into a clip the take makes: whole bars
+  around them, kept inside the gap between placements, growing as the take
+  goes on past it. With a loop, each pass is written a step before the
+  loop's end; without one, when the take ends. A write is journaled as the
+  requests that make it, in one `batch` (`clip.new`, `clip.update`,
+  `song.place`, ...), so it replays and undoes in one step.
+- **`batch`** is a general request: several requests as one journal entry
+  and one undo step (stops at the first error; not atomic). It is also
+  how the UI can make multi-request actions undo in one go.
+- **Engine**: one preallocated clip table (`MAX_CLIPS` = 256) shared by
+  all slots, `MAX_PLACEMENTS` = 256 per slot, edited by small commands;
+  the command ring holds a full project load (about 270k commands).
+  `Feedback::Step` and `Live` carry the song position.
+- **Journal keys** add the clip id (`clip:`, `event:`, `selected:`,
+  `place:`; see the RFC 0006 amendment). The basic-session fixture was
+  re-accepted for the new keys.
+- **Project format v5** (`tracks`), protocol 7.
+- **UI (B1)**: a clip bar in the editor (select, new, duplicate, delete,
+  rename), and pattern/song mode, loop, and start bar in the transport.
+  Placing clips in the UI comes with the arrangement view (phase C).
+
