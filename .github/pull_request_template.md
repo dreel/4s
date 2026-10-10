@@ -33,6 +33,10 @@ the reproduction before and after.
 
 <!-- G5: docs/AGENTS.md/README updated, or "no behavior or design change". -->
 
+## Follow-ups
+
+<!-- Anything noticed but not done here goes in docs/backlog.md (in this PR); list or link those entries, or "none". -->
+
 ## Gate report
 
 <!-- Paste .gates/report.md from scripts/gates.sh here (G2 checks + G4 independent review). -->

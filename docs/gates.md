@@ -83,8 +83,11 @@ into.
 
 `scripts/review.sh` runs it:
 
-- It computes the diff against the merge-base with `origin/main` and its
-  SHA-256.
+- It computes the diff against the merge-base with the base branch and its
+  SHA-256. The base is `REVIEW_BASE` if set, else the base branch of the
+  current branch's open PR (via `gh`), else `origin/main`. A stacked change
+  is reviewed against its parent, as CI does; before its PR exists, run
+  with `REVIEW_BASE=origin/<parent>`.
 - It starts a new headless agent process with read-only tools and the
   instructions in [docs/review/reviewer.md](review/reviewer.md).
 - It saves the review to `.gates/review-<sha>.md`.
@@ -110,6 +113,9 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
   `REVIEW_CMD` to a command that reads the prompt on stdin and prints the
   review, e.g. `REVIEW_CMD="my-agent --read-only --prompt-stdin"`. It must
   start with no prior context.
+- The agent is stopped after `REVIEW_TIMEOUT` seconds (default 1800; a
+  review normally takes a few minutes), so a hung agent fails the gate
+  instead of stalling it.
 - Enforced by: the `pr-gates` CI check verifies the evidence is **present
   and current**: a `VERDICT: pass` block whose `REVIEWED_SHA` is the PR head
   or whose `DIFF_SHA256` still matches the PR's diff (so a clean rebase does
