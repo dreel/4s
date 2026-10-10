@@ -122,6 +122,15 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-09, #24 follow-up) `Command::ClearClip` is unused by the daemon.
 - (2026-10-09, #25 follow-up) the 303 note-stack unit test duplicates the
   e2e legato checks.
+- (2026-10-10, recording branch review) render input: a note with
+  `duration` 0 sends its note-off on the same frame as its note-on (a
+  silent, 1-tick recorded note); require a positive duration.
+- (2026-10-10, recording branch review) recording: when the connection that
+  armed a take closes, the take keeps running and later passes are
+  journaled with that gone client's context (no seat); end the take, or
+  keep the seat on the take.
+- (2026-10-10, recording branch review) `4s render --replace/--quantize/...`
+  without `--record` or `--to` ignores those flags silently; require one.
 - (2026-10-10, recording branch review) `4s render --to` alone turns on
   recording; there is no way to play `--input` into a non-focus instrument
   without recording.
