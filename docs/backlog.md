@@ -182,6 +182,15 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   `edit_clip`, which can still fail (full queue), leaving the name changed;
   `new_clip` with `select` sends `track` twice; `ADD_COMMANDS` (96) should
   be re-checked against the largest instrument plus the track's commands.
+- (2026-10-10, song branch review) recording, smaller cases: the offline
+  recorder skips the live `offset_ms` loop-wrap correction
+  (`record_feedback`); `settle_take` writes a take before a
+  `transport.locate` is validated; a song loop of 2 steps or less is due at
+  its end tick, after it wrapped; if the clip a take made is deleted or
+  moved during the take, later grow writes fail as invalid and drop that
+  pass.
+- (2026-10-10, song branch review) `delete_clip` selects another clip
+  before `set_arrangement`, which can still fail (full queue).
 - (2026-10-10, song branch) `song.loop` is an integer parameter (0 off, 1
   song, 2 bars); the registry has no enum kind, so `4s params` and generic
   controls show a number. Add a choice kind with labels.
