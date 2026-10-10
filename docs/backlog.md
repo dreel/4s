@@ -227,5 +227,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-09, #25 review) the daemon's fallback host user is now `local`
   (was `me`); check `docs/journal.md` and the seats docs, which talk about
   the host user.
+- (2026-10-10, arrangement branch) with `USER` unset (a CI container), the
+  daemon's host seat is `local` but Electron's user is
+  `os.userInfo().username` (`root`): no seat matches, the seat chooser
+  covers the app, and nearly every Electron e2e times out. Have both use
+  the same fallback, or set `FOURS_USER` in the harness.
 
 ## Process

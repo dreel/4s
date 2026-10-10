@@ -1,6 +1,6 @@
 # RFC 0008: Recording and the arrangement
 
-- Status: accepted (phases A, B1, and B2 implemented; see "Implementation notes")
+- Status: accepted (phases A, B1, and B2 implemented, C in progress; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-09
 - Discussion: the PR that introduces this RFC.
@@ -11,8 +11,8 @@ An Ableton-style workflow in three phases: **record** live notes into clips
 (record quantize with strength, overdub/replace, a metronome, and a
 count-in); a **song**: a clip pool per instrument and an arrangement
 timeline that plays through or loops the song or a section; and the UI for
-both, a **piano roll** for any clip and an **arrangement view** with one
-column per mixer channel, grouped by instrument. This takes over RFC 0007's
+both, a **piano roll** for any clip and an **arrangement view** with time
+left to right and one lane per track (instrument). This takes over RFC 0007's
 phase 3 (recording). SMF import/export follows in a separate change.
 
 ## Motivation
@@ -232,3 +232,17 @@ above, these win:
 - The playhead follows the clip where it plays: the selected clip in
   pattern mode, the placement under the song position in song mode.
 
+## Implementation notes (phase C, step 1: drawing the song)
+
+- `Arrangement.tsx` sits between the console and the editor and draws the
+  snapshot's tracks; it sends only `transport.locate` (ruler click,
+  snapped to bar, beat, or off) and `seat.focus` (arm). Editing
+  placements, the loop brace, and the piano roll panel come next.
+- Placements show the clip's name and its notes, repeated where the
+  placement loops the clip (`(r + offset) % clip length`), with each
+  repeat's start dashed. The placement under the playhead is ringed.
+- The ruler shows bars, the loop range (`song.loop` = 2), the song's end
+  (the end of the last placement, as `song.get`'s `length`), and the start
+  point; the playhead shows in song mode while playing.
+- Zoom is pixels per bar (50% to 400%); the view is 16 bars, or 4 past the
+  furthest of the song's end, the start point, and the loop end.
