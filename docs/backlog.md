@@ -175,8 +175,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   `Locate` and per-instrument select commands only by slack.
 - (2026-10-10, song branch review) a project load resets the song start to
   bar 1 without a `located` event (clients catch up through `reset`).
-- (2026-10-10, song branch review) `batch` allows `project.save` and
-  `midi.input`; `BatchParams` docs don't say so.
+- (2026-10-10, song branch review) `batch` allows `project.save`,
+  `midi.input`, `seat.claim/leave`, and `voice.*`; `BatchParams` docs don't
+  say so.
+- (2026-10-10, song branch review) `apply_clip_sets` renames a clip before
+  `edit_clip`, which can still fail (full queue), leaving the name changed;
+  `new_clip` with `select` sends `track` twice; `ADD_COMMANDS` (96) should
+  be re-checked against the largest instrument plus the track's commands.
 - (2026-10-10, song branch) `song.loop` is an integer parameter (0 off, 1
   song, 2 bars); the registry has no enum kind, so `4s params` and generic
   controls show a number. Add a choice kind with labels.

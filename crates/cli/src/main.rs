@@ -884,8 +884,8 @@ fn pos_arg(s: &str) -> Result<u32> {
         Some((b, t)) => (b.parse::<u32>().map_err(|_| bad())?, t.parse::<u32>().map_err(|_| bad())?),
         None => (s.parse::<u32>().map_err(|_| bad())?, 1),
     };
-    if bar == 0 || !(1..=4).contains(&beat) {
-        return Err(bad());
+    if bar == 0 || bar > 999 || !(1..=4).contains(&beat) {
+        return Err(anyhow!("invalid position '{s}' (bars 1..999, beats 1..4: `3`, `3.2`)"));
     }
     Ok((bar - 1) * TICKS_PER_BAR + (beat - 1) * PPQ)
 }
