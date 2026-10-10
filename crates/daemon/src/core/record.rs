@@ -343,7 +343,8 @@ impl Core {
         match p.arm {
             Some(true) => {
                 let id = target.expect("resolved above");
-                // (`settle_take` already ended a take into another one.)
+                // `settle_take` ends a take into another instrument before
+                // the request; this covers a caller that skipped it.
                 if self.take.as_ref().is_some_and(|t| t.instrument != id) {
                     self.end_take();
                 }

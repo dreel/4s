@@ -784,13 +784,17 @@ fn note_arg(s: &str) -> Result<u8> {
 /// A grid in ticks: `1/16`, `1/8t` (triplets), `off` (`None`), `16` (1/16),
 /// or `<n>t` ticks.
 fn grid_arg(s: &str) -> Result<Option<u32>> {
-    if s.contains('/') || s.eq_ignore_ascii_case("off") {
-        return parse_grid(s).map_err(|e| anyhow!(e));
+    if let Ok(g) = parse_grid(s) {
+        return Ok(g);
     }
-    if let Some(t) = s.strip_suffix('t') {
+    if let Some(t) = s.strip_suffix('t').filter(|t| !t.contains('/')) {
         return t.parse().map(Some).map_err(|_| anyhow!("invalid grid '{s}'"));
     }
-    let d: u32 = s.parse().map_err(|_| anyhow!("grid is 1/4, 1/8, 1/8t, 1/16, 1/16t, 1/32, <n>t, or off"))?;
+    // Any other `1/<n>` (or bare `<n>`) that divides a bar evenly.
+    let d: u32 = s
+        .trim_start_matches("1/")
+        .parse()
+        .map_err(|_| anyhow!("grid is 1/4, 1/8, 1/8t, 1/16, 1/16t, 1/32, 1/<n>, <n>t, or off"))?;
     if d == 0 || TICKS_PER_BAR % d != 0 {
         bail!("grid 1/{d} is not a whole number of ticks");
     }

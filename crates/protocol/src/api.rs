@@ -362,7 +362,7 @@ pub struct ClipEventsParams {
 }
 
 /// An event's identity in a clip.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct EventKey {
     pub tick: u32,
     pub note: u8,

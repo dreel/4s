@@ -77,6 +77,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   not reached (during a count-in, the first step); bound the cleared span
   by the heard tick (`crates/daemon/src/core/record.rs`,
   `end_take`/`restart_take`).
+- (2026-10-10, recording branch review) quantize: `snap_tick`'s wrap at the
+  loop's end can still leave a tick past the loop when the loop is shorter
+  than the grid (a 10-tick clip, 1/16 grid); wrap with `%`
+  (`crates/protocol/src/clip.rs`).
 - (2026-10-10, recording branch review) recording: `settle_take` runs after
   only the settings are checked, so `transport.record {arm: false,
   instrument: "nope"}` ends the take and then fails on the instrument.
