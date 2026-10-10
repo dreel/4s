@@ -114,8 +114,10 @@ If you disagree with a finding, say so in the PR. The human reviewer decides.
   review, e.g. `REVIEW_CMD="my-agent --read-only --prompt-stdin"`. It must
   start with no prior context.
 - The agent is stopped after `REVIEW_TIMEOUT` seconds (default 1800; a
-  review normally takes a few minutes), so a hung agent fails the gate
-  instead of stalling it.
+  review normally takes a few minutes; exit 124), so a hung agent fails the
+  gate instead of stalling it. Ctrl-C stops the agent too.
+- Finding the PR's base needs an authenticated `gh`; without it, the review
+  warns and falls back to `origin/main`. Set `REVIEW_BASE` in that case.
 - Enforced by: the `pr-gates` CI check verifies the evidence is **present
   and current**: a `VERDICT: pass` block whose `REVIEWED_SHA` is the PR head
   or whose `DIFF_SHA256` still matches the PR's diff (so a clean rebase does

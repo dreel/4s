@@ -201,7 +201,7 @@ jobs:
           } | perl -pe 's/\Q$ENV{META_API_KEY}\E/[redacted]/g' > ../review.md
           # Trust review.sh's integrity check (reviewed SHA and diff hash), not
           # just the text: 0 pass, 1 another valid verdict, 3 invalid output,
-          # 124 timeout.
+          # 4 agent failed, 124 timeout (REVIEW_TIMEOUT or the outer timeout).
           RAW=$(grep -E '^VERDICT:' ../review.md | tail -1 | sed -E 's/^VERDICT:[[:space:]]*//' | tr -d '[:space:]' || true)
           # Only known verdicts pass through; the model's text never does.
           case $STATUS in

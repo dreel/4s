@@ -139,7 +139,8 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 3. **Commit, then run `scripts/gates.sh`.** Fix what it reports and re-run
    until it passes. Do not edit the review output. For a stacked change
    without a PR yet, run `REVIEW_BASE=origin/<parent> scripts/gates.sh`;
-   once its PR exists, the review uses the PR's base.
+   once its PR exists, the review uses the PR's base (found with `gh`;
+   without it, set `REVIEW_BASE`).
 4. **Open the PR with the template** (`--base <parent>` when stacked),
    pasting `.gates/report.md` and your validation evidence. Put follow-ups
    in [docs/backlog.md](docs/backlog.md), not only in the PR body.

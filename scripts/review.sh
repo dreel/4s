@@ -23,8 +23,8 @@
 # Writes .gates/review-<sha>.md.
 # Exit: 0 VERDICT: pass; 1 any other verdict; 3 invalid review output (wrong or
 # missing REVIEWED_SHA / DIFF_SHA256 / VERDICT); 2 usage or setup error;
-# 4 the agent process itself failed (e.g. auth error, --max-turns reached,
-# REVIEW_TIMEOUT hit).
+# 4 the agent process itself failed (e.g. auth error, --max-turns reached);
+# 124 REVIEW_TIMEOUT hit.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -35,10 +35,15 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 
 # A stacked PR is reviewed against its parent branch, as CI does.
-if [[ -z ${REVIEW_BASE:-} ]] && command -v gh >/dev/null; then
-  PR_BASE=$(gh pr list --head "$(git branch --show-current)" --state open --json baseRefName \
-    -q '.[0].baseRefName // empty' 2>/dev/null || true)
-  [[ -n $PR_BASE ]] && REVIEW_BASE=origin/$PR_BASE
+BRANCH=$(git branch --show-current)
+if [[ -z ${REVIEW_BASE:-} && -n $BRANCH ]]; then
+  if ! command -v gh >/dev/null; then
+    echo "review.sh: gh not found, so this branch's PR base is unknown; using origin/main (set REVIEW_BASE for a stacked change)" >&2
+  elif ! PR_BASE=$(gh pr list --head "$BRANCH" --state open --json baseRefName -q '.[0].baseRefName // empty' 2>/dev/null); then
+    echo "review.sh: gh could not look up this branch's PR (logged in?); using origin/main (set REVIEW_BASE for a stacked change)" >&2
+  elif [[ -n $PR_BASE ]]; then
+    REVIEW_BASE=origin/$PR_BASE
+  fi
 fi
 BASE_REF=${REVIEW_BASE:-origin/main}
 if [[ $BASE_REF == origin/* ]]; then git fetch -q origin "${BASE_REF#origin/}" 2>/dev/null || true; fi
@@ -94,7 +99,8 @@ echo "==> independent review of $HEAD against $BASE_REF (diff $HASH)" >&2
 # Run the agent with a time limit (macOS has no `timeout`): a watchdog stops
 # it, and everything it started, after REVIEW_TIMEOUT seconds. The agent runs
 # in its own process group (job control), so the watchdog signals the group:
-# TERM, then KILL after a grace period.
+# TERM, then KILL after a grace period. That group is not the terminal's
+# foreground group, so an interrupt of this script is passed on to it.
 TIMEOUT=${REVIEW_TIMEOUT:-1800}
 run_agent() {
   rm -f "$OUT.timedout"
@@ -116,14 +122,16 @@ run_agent() {
     kill -KILL -- "-$pid" 2>/dev/null || true
   ) &
   local watchdog=$!
+  trap "kill -TERM -- -$pid $watchdog 2>/dev/null; exit 130" INT TERM
   wait "$pid" || rc=$?
+  trap - INT TERM
   kill -TERM "$watchdog" 2>/dev/null || true
   wait "$watchdog" 2>/dev/null || true
   if [[ -e $OUT.timedout ]]; then
     kill -KILL -- "-$pid" 2>/dev/null || true # whatever outlived its leader
     rm -f "$OUT.timedout"
     echo "review.sh: agent timed out after ${TIMEOUT}s" >&2
-    exit 4
+    exit 124
   fi
   return "$rc"
 }
