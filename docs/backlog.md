@@ -233,7 +233,8 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   the view grows.
 - (2026-10-11, arrangement-roll branch) the arrangement's piano roll panel
   and the editor's piano roll view can show the same clip at once, with
-  the same `data-testid`s (e2e locators must scope to `arr-roll`).
+  the same `data-testid`s (e2e locators must scope to `arr-roll`), and
+  each keeps its own note selection.
 - (2026-10-11, #32 CI) the Electron e2e mouse drags use page coordinates
   and fail when the window is small: at 800x600 the arrangement editing
   test (#31) misses (the loop brace test was hardened for #32's CI). A

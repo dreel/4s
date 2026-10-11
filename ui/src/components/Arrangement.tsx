@@ -7,8 +7,9 @@
 // placement to move it, its right edge to resize it (longer loops the clip),
 // alt-drag to copy; click selects and Delete removes; drag a clip from a
 // header's pool into its lane to place it; double-click a placement to open
-// its clip in the piano roll below (which selects it). Drags show where they go and send
-// on release, one undo step each; the daemon decides, the view only draws.
+// its clip in the piano roll below (which selects it). The ruler's top strip
+// holds the loop brace. Drags show where they go and send on release, one
+// undo step each; the daemon decides, the view only draws.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Clip } from "../generated/Clip";

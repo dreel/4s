@@ -757,6 +757,23 @@ test("arrangement piano roll: double-click a placement opens its clip below; edi
   await expect.poll(() => events(2)).toEqual([]);
   expect(await arrangement()).toEqual(before);
 
+  // With the editor's roll open on the same clip too, Delete goes only to
+  // the roll last clicked.
+  await rpc("clip.add", {
+    instrument: "drums",
+    clip: 2,
+    events: [{ tick: 0, len: 24, note: 36, velocity: 100 }, { tick: 192, len: 24, note: 36, velocity: 100 }],
+  });
+  await page.getByTestId("view-roll").click();
+  const editorRoll = page.getByTestId("editor").getByTestId("pianoroll-drums");
+  await editorRoll.getByTestId("note-0-36").click();
+  await expect(editorRoll.getByTestId("note-0-36")).toHaveAttribute("data-selected", "true");
+  await panel.getByTestId("note-192-36").click();
+  await expect(panel.getByTestId("note-192-36")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Delete");
+  await expect.poll(() => events(2)).toEqual([{ tick: 0, len: 24, note: 36, velocity: 100 }]);
+  await page.getByTestId("view-steps").click();
+
   // The other placement opens its own clip.
   await page.getByTestId("arrangement").scrollIntoViewIfNeeded();
   await page.getByTestId("placement-drums-0").dblclick();

@@ -40,6 +40,9 @@ const key = (e: { tick: number; note: number }) => `${e.tick}:${e.note}`;
 /** One empty list, so store selectors return the same value when nothing
  * is recording (a new array each time would re-render forever). */
 const NO_TAKE: TakeNote[] = [];
+/** The roll last pointed at: only it takes Delete and Escape, when two are
+ * open (the editor's and the arrangement's panel). */
+let lastRoll: object | null = null;
 
 type Drag =
   | { kind: "move"; x: number; y: number; notes: ClipEvent[]; dt: number; dn: number }
@@ -62,6 +65,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drag, setDrag] = useState<Drag | null>(null);
   const grid = useRef<HTMLDivElement>(null);
+  const me = useRef({});
 
   const events = clip?.events ?? [];
   const length = clip?.length ?? stepsLength * STEP;
@@ -102,6 +106,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (["INPUT", "SELECT", "TEXTAREA"].includes(t.tagName) || t.isContentEditable)) return;
+      if (lastRoll !== me.current) return;
       if ((e.key === "Delete" || e.key === "Backspace") && selected.size) {
         e.preventDefault();
         void update(events.filter((x) => selected.has(key(x))).map((x) => ({ tick: x.tick, note: x.note })), []);
@@ -222,7 +227,11 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
   const btn = "px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:opacity-30";
 
   return (
-    <section className="flex flex-col gap-2 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800" data-testid={`pianoroll-${id}`}>
+    <section
+      className="flex flex-col gap-2 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800"
+      data-testid={`pianoroll-${id}`}
+      onPointerDownCapture={() => (lastRoll = me.current)}
+    >
       <div className="flex items-center gap-3 text-xs text-zinc-400">
         <span className="text-zinc-300">
           {clip.name} <span className="text-zinc-500">({events.length} notes)</span>
