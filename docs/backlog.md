@@ -227,6 +227,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   (`song.loop_start`/`song.loop_end` are integer bar parameters), so the
   brace ignores a beat or off snap. Clicking the brace off sets
   `song.loop` to 0 even if it was 1 (the whole song) before.
+- (2026-10-11, #32 CI) the Electron e2e mouse drags use page coordinates
+  and fail when the window is small: at 800x600 the arrangement editing
+  test (#31) misses (the loop brace test was hardened for #32's CI). A
+  harness option to run the suite at a small size would catch these.
 - (2026-10-11, arrangement-loop branch) `ui/package-lock.json` lacks the
   `"license": "MIT"` that `ui/package.json` has, so any `npm install`
   adds it and leaves the tree dirty; commit the regenerated lockfile.
