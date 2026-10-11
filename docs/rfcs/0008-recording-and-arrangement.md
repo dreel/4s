@@ -288,6 +288,7 @@ above, these win:
   its clip (`clip.select`, only if another clip was selected), and opens
   `PianoRoll.tsx` for it in a panel below the arrangement, with a close
   button. The panel shows the track's selected clip, so it follows
-  `clip.select` from anywhere.
+  `clip.select` from anywhere.  Selecting is a real edit: in pattern mode the track then plays that
+  clip (one undo step).
 - A click in the panel clears the placement selection, so Delete there
   removes the roll's notes, not the placement.

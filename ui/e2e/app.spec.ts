@@ -722,6 +722,7 @@ test("arrangement loop brace: draw, move, resize, and toggle by dragging the rul
 
 test("arrangement piano roll: double-click a placement opens its clip below; edits land in that clip; close", async () => {
   const { page, rpc } = h;
+  await rpc("clip.rename", { instrument: "drums", clip: 1, name: "Verse" });
   await rpc("clip.new", { instrument: "drums", name: "Fill", length: 384, select: false });
   await rpc("song.place", { instrument: "drums", clip: 1, start: 0, length: 384, offset: null });
   await rpc("song.place", { instrument: "drums", clip: 2, start: 768, length: 384, offset: null });
@@ -757,7 +758,7 @@ test("arrangement piano roll: double-click a placement opens its clip below; edi
   await page.getByTestId("arrangement").scrollIntoViewIfNeeded();
   await page.getByTestId("placement-drums-0").dblclick();
   await expect.poll(selected).toBe(1);
-  await expect(panel.getByTestId("pianoroll-drums")).toContainText("1");
+  await expect(panel.getByTestId("pianoroll-drums")).toContainText("Verse");
   await page.getByTestId("arr-roll-close").click();
   await expect(panel).toHaveCount(0);
 });

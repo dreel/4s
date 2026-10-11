@@ -6,10 +6,11 @@
 // clip's name and a note preview, with looped repeats marked. Drag a
 // placement to move it, its right edge to resize it (longer loops the clip),
 // alt-drag to copy; click selects and Delete removes; drag a clip from a
-// header's pool into its lane to place it. Drags show where they go and send
+// header's pool into its lane to place it; double-click a placement to open
+// its clip in the piano roll below (which selects it). Drags show where they go and send
 // on release, one undo step each; the daemon decides, the view only draws.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Clip } from "../generated/Clip";
 import type { Placement } from "../generated/Placement";
 import { act, client, mySeat, select, useApp, useSelected } from "../store";
@@ -350,6 +351,10 @@ export function Arrangement() {
   // The instrument whose selected clip the piano roll panel shows.
   const [roll, setRoll] = useState<string | null>(null);
   const rolled = instruments.find((i) => i.id === roll);
+  // A removed instrument closes it (one added later with its id stays shut).
+  useEffect(() => {
+    if (roll && !rolled) setRoll(null);
+  }, [roll, rolled]);
   const root = useRef<HTMLElement>(null);
   const lanes = useRef<HTMLDivElement>(null);
   const px = zoom / BAR;
