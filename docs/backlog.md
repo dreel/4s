@@ -223,6 +223,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   bindings. The arrangement's hint line crowds its header at narrow widths
   (join the transport layout pass). Its e2e's negative checks (a drop on
   another lane, Delete with nothing selected) wait a fixed 100 ms.
+- (2026-10-11, arrangement-loop branch) song loops are whole bars
+  (`song.loop_start`/`song.loop_end` are integer bar parameters), so the
+  brace ignores a beat or off snap. Clicking the brace off sets
+  `song.loop` to 0 even if it was 1 (the whole song) before.
+- (2026-10-11, arrangement-loop branch) `ui/package-lock.json` lacks the
+  `"license": "MIT"` that `ui/package.json` has, so any `npm install`
+  adds it and leaves the tree dirty; commit the regenerated lockfile.
 - (2026-10-10, arrangement-edit branch) moving a placement to another
   track (copying its clip into that pool) is not built (RFC 0008 phase C).
 

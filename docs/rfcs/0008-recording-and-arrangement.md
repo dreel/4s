@@ -269,3 +269,15 @@ above, these win:
   selection, and Delete in its selects or buttons does nothing.
 - No daemon changes. Moving a placement to another track, the loop brace,
   and the piano roll panel come next.
+
+## Implementation notes (phase C, step 3: the loop brace)
+
+- The ruler's top strip holds the loop brace: `song.loop_start` to
+  `song.loop_end`, drawn amber while `song.loop` = 2 and grey otherwise
+  (the bars it would loop). Drag its ends to resize it, its body to move
+  it, or empty strip to draw a new one; any of these turns the loop on.
+  Each is one `batch` of the `param.set`s that changed (one undo step).
+- A click on the brace turns the loop on (2) or off (0); a click on empty
+  strip locates, as the ruler below it does.
+- The brace snaps to whole bars whatever the snap select says: the loop's
+  parameters are integer bars (beat-resolution loops are a backlog item).

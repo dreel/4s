@@ -645,6 +645,81 @@ test("arrangement editing: place from the pool, move, resize, copy, and delete b
   expect(await song()).toEqual(copied);
 });
 
+test("arrangement loop brace: draw, move, resize, and toggle by dragging the ruler, one undo step each; clicks still locate", async () => {
+  const { page, rpc } = h;
+  type L = { on: number; start: number; end: number };
+  const loop = async (): Promise<L> => {
+    const p = (await rpc("state.get", {})).params;
+    return { on: p["song.loop"], start: p["song.loop_start"], end: p["song.loop_end"] };
+  };
+  await page.getByTestId("arr-zoom").selectOption("96");
+  await page.getByTestId("arr-snap").selectOption("384");
+  const bar = 96;
+  const strip = async () => {
+    await page.getByTestId("arrangement").scrollIntoViewIfNeeded();
+    return (await page.getByTestId("arr-loop-strip").boundingBox())!;
+  };
+  const drag = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move((from.x + to.x) / 2, from.y);
+    await page.mouse.move(to.x, to.y);
+    await page.mouse.up();
+  };
+  const handle = async (testid: string) => {
+    await strip();
+    const b = (await page.getByTestId(testid).boundingBox())!;
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  const oneStep = async (before: L, after: L) => {
+    await expect.poll(loop).toEqual(after);
+    await page.getByTestId("undo").click();
+    await expect.poll(loop).toEqual(before);
+    await page.getByTestId("redo").click();
+    await expect.poll(loop).toEqual(after);
+  };
+  const off = { on: 1, start: 0, end: 4 }; // the default: the whole song loops
+  await expect.poll(loop).toEqual(off);
+  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-on", "false");
+
+  // Draw a new brace from bar 9 to bar 11 (past the old one): loop on.
+  let b = await strip();
+  const y = b.y + b.height / 2;
+  await drag({ x: b.x + 8 * bar + 40, y }, { x: b.x + 10 * bar + 40, y });
+  const drawn = { on: 2, start: 8, end: 11 };
+  await oneStep(off, drawn);
+  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-on", "true");
+  // Move it a bar earlier by its body.
+  let p = await handle("arr-loop");
+  await drag(p, { x: p.x - bar, y: p.y });
+  const moved = { on: 2, start: 7, end: 10 };
+  await oneStep(drawn, moved);
+  // Its end two bars later, its start a bar earlier.
+  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-start", "7");
+  p = await handle("arr-loop-end");
+  await drag(p, { x: p.x + 2 * bar, y: p.y });
+  const longer = { on: 2, start: 7, end: 12 };
+  await oneStep(moved, longer);
+  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-end", "12");
+  p = await handle("arr-loop-start");
+  await drag(p, { x: p.x - bar, y: p.y });
+  const earlier = { on: 2, start: 6, end: 12 };
+  await oneStep(longer, earlier);
+  // A click on the brace turns the loop off (and on again).
+  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-start", "6");
+  p = await handle("arr-loop");
+  await page.mouse.click(p.x, p.y);
+  await oneStep(earlier, { ...earlier, on: 0 });
+  // A click on empty strip, or the ruler, locates and leaves the loop.
+  b = await strip();
+  await page.mouse.click(b.x + 2 * bar + 30, y);
+  await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(2 * 384);
+  await page.getByTestId("arr-ruler").click({ position: { x: 3 * bar + 30, y: 24 } });
+  await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(3 * 384);
+  expect(await loop()).toEqual({ ...earlier, on: 0 });
+  await page.getByTestId("arrangement").screenshot({ path: "test-results/arrangement-loop.png" });
+});
+
 test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, and take notes", async () => {
   const { page, rpc } = h;
   const clip = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).events;
