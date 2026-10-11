@@ -466,7 +466,9 @@ export function Arrangement() {
       const { id } = d;
       if (d.kind === "move" || d.kind === "copy") {
         const dt = groupDt(d);
-        if (dt === 0) return; // a click: selected
+        // A click selects only the clicked one (grabbing it kept the rest
+        // in case of a drag).
+        if (dt === 0) return setPicked(new Set([pickKey(d.id, d.p.start)]));
         // Moves go furthest along first, so none lands on (and cuts) a
         // selected one that has not moved yet. Copies lay over whatever is
         // there, the selection's originals included, as any place does.

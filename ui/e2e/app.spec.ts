@@ -698,6 +698,12 @@ test("arrangement multi-select: shift-click across tracks; drag moves and alt-dr
   await expect(sel("placement-drums-0")).toHaveAttribute("data-selected", "true");
   await expect(sel("placement-drums-384")).toHaveAttribute("data-selected", "true");
   await expect(sel("placement-bass-0")).toHaveAttribute("data-selected", "false");
+  // A click on a selected one (no drag) selects it alone; select both again.
+  p = await at("placement-drums-384");
+  await page.mouse.click(p.x, p.y);
+  await expect(sel("placement-drums-0")).toHaveAttribute("data-selected", "false");
+  await shiftClick("placement-drums-0");
+  await expect(sel("placement-drums-0")).toHaveAttribute("data-selected", "true");
   await drag(await at("placement-drums-0"), bar);
   const moved = { drums: [one(384), one(768)], bass: [one(0)] };
   await oneStep(start, moved);

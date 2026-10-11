@@ -300,8 +300,9 @@ above, these win:
 - Shift-click adds a placement to the selection or takes it out, on any
   track. Grabbing a selected placement drags the whole selection (move,
   or alt-drag to copy) by the same snapped distance, kept inside the song
-  for all of them; grabbing another one selects it alone. Delete removes
-  every selected placement.
+  for all of them; grabbing another one selects it alone, as does
+  clicking a selected one without dragging. Delete removes every selected
+  placement.
 - Several requests go as one `batch` (one undo step); one goes alone.
   Moves go furthest along first, so one landing where another selected
   placement was does not cut it before it moves. Copies cut what they
