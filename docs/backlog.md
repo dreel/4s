@@ -217,6 +217,11 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   select or keyboard nudging; resizing acts on the grabbed placement only
   (not the selection); the header's clip pool is cut off when a track has
   more clips than fit in 128 px.
+- (2026-10-11, arrangement-multi review) a group move or copy is captured
+  at pointer-down; if another client moves or removes one of them during
+  the drag, the `batch` stops at that request (it does not roll back), so
+  some move and some do not. An atomic `batch` (or a `song.move` taking
+  several placements) would fix it.
 - (2026-10-11, #33 review) a piano roll that is mounted but draws nothing
   (its clip briefly missing) can still hold Delete and Escape; Delete
   right after double-clicking a placement removes the placement (the

@@ -723,6 +723,13 @@ test("arrangement multi-select: shift-click across tracks; drag moves and alt-dr
   await page.keyboard.press("Delete");
   const deleted = { drums: [one(768), one(1152), one(1536)], bass: [] };
   await oneStep(copied, deleted);
+  // Dragged left past the song's start, the pair stops together at bar 1,
+  // a bar apart as before.
+  p = await at("placement-drums-768");
+  await page.mouse.click(p.x, p.y);
+  await shiftClick("placement-drums-1152");
+  await drag(await at("placement-drums-768"), -4 * bar);
+  await oneStep(deleted, { drums: [one(0), one(384), one(1536)], bass: [] });
 });
 
 test("arrangement loop brace: draw, move, resize, and toggle by dragging the ruler, one undo step each; clicks still locate", async () => {

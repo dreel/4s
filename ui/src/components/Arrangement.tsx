@@ -363,7 +363,6 @@ export function Arrangement() {
   const [zoom, setZoom] = useState(96);
   const [snap, setSnap] = useState(BAR);
   const [drag, setDrag] = useState<Drag | null>(null);
-  // The selected placement: its track and start.
   // The selected placements (`pickKey`s).
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const none = () => setPicked(new Set());
