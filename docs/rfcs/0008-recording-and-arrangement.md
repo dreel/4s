@@ -303,8 +303,10 @@ above, these win:
   for all of them; grabbing another one selects it alone. Delete removes
   every selected placement.
 - Several requests go as one `batch` (one undo step); one goes alone.
-  Moves and copies go furthest along first, so one landing where another
-  selected placement was does not cut it before it moves.
+  Moves go furthest along first, so one landing where another selected
+  placement was does not cut it before it moves. Copies cut what they
+  land on, like any `song.place`, including the selection's originals
+  when copied a shorter distance than the selection spans.
 - The selection clears with Escape, a click on an empty lane, a click in
   the piano roll panel, or the focus leaving the arrangement (for
   example the undo button).

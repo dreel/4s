@@ -467,8 +467,9 @@ export function Arrangement() {
       if (d.kind === "move" || d.kind === "copy") {
         const dt = groupDt(d);
         if (dt === 0) return; // a click: selected
-        // Furthest along first, so none lands on (and cuts) a selected one
-        // that has not moved yet.
+        // Moves go furthest along first, so none lands on (and cuts) a
+        // selected one that has not moved yet. Copies lay over whatever is
+        // there, the selection's originals included, as any place does.
         const group = [...d.group].sort((a, b) => (dt > 0 ? b.p.start - a.p.start : a.p.start - b.p.start));
         const requests = group.map(({ id, p }) =>
           d.kind === "move"
