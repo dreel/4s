@@ -271,15 +271,14 @@ function LoopBrace({ px, bars, loop, loopStart, loopEnd, locate }: { px: number;
     if (!drag) return;
     setDrag(null);
     const d = follow(drag, e);
-    // A drag that ends where the brace was is a click (a jiggle neither
-    // moves the brace nor turns it on).
-    const same = d.mode !== "new" && d.s === d.s0 && d.e === d.e0;
-    if (!d.moved || same) {
+    if (!d.moved) {
       // A click: the body turns the loop on or off; empty strip locates.
       if (d.mode === "new") locate(d.x);
       else if (d.mode === "move") void act(client.call("param.set", { path: "song.loop", value: on ? 0 : 2 }));
       return;
     }
+    // A drag that ends where the brace was does nothing.
+    if (d.mode !== "new" && d.s === d.s0 && d.e === d.e0) return;
     const set = (path: string, value: number) => ({ method: "param.set", params: { path, value } });
     const range = [...(d.s !== d.s0 ? [set("song.loop_start", d.s)] : []), ...(d.e !== d.e0 ? [set("song.loop_end", d.e)] : [])];
     // The two are independent parameters (any order succeeds); the end

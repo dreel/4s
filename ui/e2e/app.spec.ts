@@ -709,7 +709,7 @@ test("arrangement loop brace: draw, move, resize, and toggle by dragging the rul
   await drag(p, { x: p.x - bar, y: p.y });
   const earlier = { on: 2, start: 2, end: 7 };
   await oneStep(longer, earlier);
-  // A click on the brace turns the loop off (and on again).
+  // A click on the brace turns the loop off (undo turns it on again).
   await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-start", "2");
   p = await handle("arr-loop");
   await page.mouse.click(p.x, p.y);
