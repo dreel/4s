@@ -218,17 +218,24 @@ function TrackHeader({ id, name, type, armed, selected, seated, h }: { id: strin
 
 /** How a brace drag changes the loop: an end, the whole brace, or a new
  * one drawn from where it started. */
-type BraceDrag = { mode: "start" | "end" | "move" | "new"; x: number; bar: number; s: number; e: number; moved: boolean };
+type BraceDrag = {
+  mode: "start" | "end" | "move" | "new";
+  x: number;
+  bar: number;
+  /** The loop when the drag started (another client may change it). */
+  s0: number;
+  e0: number;
+  s: number;
+  e: number;
+  moved: boolean;
+};
 
 /** The loop brace (`song.loop` = 2 over bars `song.loop_start` to
  * `song.loop_end`, end exclusive): drag its ends to resize it, its body to
  * move it, or empty strip to draw a new one; click its body to turn the
  * loop on or off, or empty strip to locate. Bars only: the loop's
  * parameters are whole bars. Each change is one `batch` (one undo step). */
-function LoopBrace({ px, bars, locate }: { px: number; bars: number; locate: (x: number) => void }) {
-  const loop = useApp((s) => s.snapshot?.params["song.loop"] ?? 0);
-  const loopStart = useApp((s) => s.snapshot?.params["song.loop_start"] ?? 0);
-  const loopEnd = useApp((s) => s.snapshot?.params["song.loop_end"] ?? 4);
+function LoopBrace({ px, bars, loop, loopStart, loopEnd, locate }: { px: number; bars: number; loop: number; loopStart: number; loopEnd: number; locate: (x: number) => void }) {
   const [drag, setDrag] = useState<BraceDrag | null>(null);
   const strip = useRef<HTMLDivElement>(null);
   const barPx = BAR * px;
@@ -244,10 +251,10 @@ function LoopBrace({ px, bars, locate }: { px: number; bars: number; locate: (x:
       return { ...d, moved, s: Math.min(d.bar, b), e: Math.max(d.bar, b) + 1 };
     }
     const dx = Math.round((x - d.x) / barPx);
-    if (d.mode === "start") return { ...d, moved, s: clamp(loopStart + dx, 0, loopEnd - 1) };
-    if (d.mode === "end") return { ...d, moved, e: clamp(loopEnd + dx, loopStart + 1, 999) };
-    const shift = clamp(dx, -loopStart, 999 - loopEnd);
-    return { ...d, moved, s: loopStart + shift, e: loopEnd + shift };
+    if (d.mode === "start") return { ...d, moved, s: clamp(d.s0 + dx, 0, d.e0 - 1) };
+    if (d.mode === "end") return { ...d, moved, e: clamp(d.e0 + dx, d.s0 + 1, 999) };
+    const shift = clamp(dx, -d.s0, 999 - d.e0);
+    return { ...d, moved, s: d.s0 + shift, e: d.e0 + shift };
   };
 
   const down = (e: React.PointerEvent, mode: BraceDrag["mode"]) => {
@@ -256,7 +263,8 @@ function LoopBrace({ px, bars, locate }: { px: number; bars: number; locate: (x:
     strip.current!.setPointerCapture(e.pointerId);
     const x = xOf(e);
     const bar = clamp(Math.floor(x / barPx), 0, 998);
-    setDrag(mode === "new" ? { mode, x, bar, s: bar, e: bar + 1, moved: false } : { mode, x, bar, s: loopStart, e: loopEnd, moved: false });
+    const [s, end] = mode === "new" ? [bar, bar + 1] : [loopStart, loopEnd];
+    setDrag({ mode, x, bar, s0: loopStart, e0: loopEnd, s, e: end, moved: false });
   };
 
   const up = (e: React.PointerEvent) => {
@@ -271,12 +279,14 @@ function LoopBrace({ px, bars, locate }: { px: number; bars: number; locate: (x:
     }
     const set = (path: string, value: number) => ({ method: "param.set", params: { path, value } });
     const requests = [
-      ...(d.s !== loopStart ? [set("song.loop_start", d.s)] : []),
-      ...(d.e !== loopEnd ? [set("song.loop_end", d.e)] : []),
+      ...(d.s !== d.s0 ? [set("song.loop_start", d.s)] : []),
+      ...(d.e !== d.e0 ? [set("song.loop_end", d.e)] : []),
       ...(!on ? [set("song.loop", 2)] : []),
     ];
-    // The start before the end, unless the brace moved right past its old end.
-    if (d.s >= loopEnd) requests.reverse();
+    // The two are independent parameters (any order succeeds); the end
+    // goes first when the brace moved right past its old end, so the range
+    // is never inverted between the two.
+    if (d.s >= d.e0) requests.reverse();
     if (requests.length) void act(client.call("batch", { requests }));
   };
 
@@ -324,7 +334,7 @@ export function Arrangement() {
   const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
   const loop = useApp((s) => s.snapshot?.params["song.loop"] ?? 0);
   const loopStart = useApp((s) => s.snapshot?.params["song.loop_start"] ?? 0);
-  const loopEnd = useApp((s) => s.snapshot?.params["song.loop_end"] ?? 0);
+  const loopEnd = useApp((s) => s.snapshot?.params["song.loop_end"] ?? 4);
   const start = useApp((s) => s.snapshot?.transport.start ?? 0);
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
   const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
@@ -339,7 +349,7 @@ export function Arrangement() {
 
   // The end of the last placement (`song.get`'s `length`).
   const end = useMemo(() => Math.max(0, ...(tracks ?? []).flatMap((t) => t.arrangement.map((p) => p.start + p.length))), [tracks]);
-  const bars = Math.max(MIN_BARS, Math.ceil(Math.max(end, start, loop === 2 ? loopEnd * BAR : 0) / BAR) + TAIL);
+  const bars = Math.max(MIN_BARS, Math.ceil(Math.max(end, start, loopEnd * BAR) / BAR) + TAIL);
   const width = bars * BAR * px;
   const focus = seat ? (seat.config.focus ?? instruments[0]?.id ?? null) : null;
   const head = playing && song && tick !== null ? tick : null;
@@ -498,7 +508,7 @@ export function Arrangement() {
             data-testid="arr-ruler"
             onClick={locate}
           >
-            <LoopBrace px={px} bars={bars} locate={locateAt} />
+            <LoopBrace px={px} bars={bars} loop={loop} loopStart={loopStart} loopEnd={loopEnd} locate={locateAt} />
             {Array.from({ length: bars }, (_, b) => (
               <span key={b} className="absolute pl-1 border-l border-zinc-700 bottom-0" style={{ left: b * BAR * px, top: BRACE + 2 }}>
                 {b + 1}

@@ -678,8 +678,8 @@ test("arrangement loop brace: draw, move, resize, and toggle by dragging the rul
     await page.getByTestId("redo").click();
     await expect.poll(loop).toEqual(after);
   };
-  const off = { on: 1, start: 0, end: 4 }; // the default: the whole song loops
-  await expect.poll(loop).toEqual(off);
+  const whole = { on: 1, start: 0, end: 4 }; // the default: the whole song loops
+  await expect.poll(loop).toEqual(whole);
   await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-on", "false");
 
   // Draw a new brace from bar 9 to bar 11 (past the old one): loop on.
@@ -687,7 +687,7 @@ test("arrangement loop brace: draw, move, resize, and toggle by dragging the rul
   const y = b.y + b.height / 2;
   await drag({ x: b.x + 8 * bar + 40, y }, { x: b.x + 10 * bar + 40, y });
   const drawn = { on: 2, start: 8, end: 11 };
-  await oneStep(off, drawn);
+  await oneStep(whole, drawn);
   await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-on", "true");
   // Move it a bar earlier by its body.
   let p = await handle("arr-loop");
