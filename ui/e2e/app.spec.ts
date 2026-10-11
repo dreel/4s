@@ -806,6 +806,10 @@ test("arrangement: drag a placement to another track (its clip is copied into th
   const drumsPool = await pool("drums");
   expect(drumsPool.map((c: { id: number; name: string }) => [c.id, c.name])).toEqual([[1, "1"], [2, "Fill"], [3, "Fill"]]);
   expect(drumsPool[2].events).toEqual(notes);
+  // Straight down (no distance in time) still goes to the other track.
+  await expect(page.getByTestId("placement-drums-1920")).toBeVisible();
+  await drag("placement-drums-1920", 0, "lane-bass");
+  await oneStep(copied, { ...copied, drums: [], bass: [fill(768, 2), fill(1920, 3)], bassPool: [bassClip1, fillIn(2), fillIn(3)] });
 });
 
 test("arrangement loop brace: draw, move, resize, and toggle by dragging the ruler, one undo step each; clicks still locate", async () => {

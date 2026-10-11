@@ -223,7 +223,8 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   some move and some do not. An atomic `batch` (or a `song.move` taking
   several placements) would fix it. The same holds for a move to another
   track: if its `song.place` fails (a full track), the new clip stays in
-  that pool and the placement where it was.
+  that pool, selected (the batch stops before `clip.select`), and the
+  placement where it was.
 - (2026-10-11, #33 review) a piano roll that is mounted but draws nothing
   (its clip briefly missing) can still hold Delete and Escape; Delete
   right after double-clicking a placement removes the placement (the

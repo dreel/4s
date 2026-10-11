@@ -323,5 +323,6 @@ above, these win:
   undo step, no daemon changes; the selected-clip defaults mean no
   request needs the new clip's id.
 - A selection of several placements moves along its own tracks only.
-  Released over its own lane, or outside every lane, a drag is a move or
-  copy along its own track.
+  The target is the lane at the pointer's height (even to the side of
+  the timeline); at its own lane's height, or above or below every lane,
+  a drag is a move or copy along its own track.
