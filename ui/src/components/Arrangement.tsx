@@ -271,22 +271,22 @@ function LoopBrace({ px, bars, loop, loopStart, loopEnd, locate }: { px: number;
     if (!drag) return;
     setDrag(null);
     const d = follow(drag, e);
-    if (!d.moved) {
+    // A drag that ends where the brace was is a click (a jiggle neither
+    // moves the brace nor turns it on).
+    const same = d.mode !== "new" && d.s === d.s0 && d.e === d.e0;
+    if (!d.moved || same) {
       // A click: the body turns the loop on or off; empty strip locates.
       if (d.mode === "new") locate(d.x);
       else if (d.mode === "move") void act(client.call("param.set", { path: "song.loop", value: on ? 0 : 2 }));
       return;
     }
     const set = (path: string, value: number) => ({ method: "param.set", params: { path, value } });
-    const requests = [
-      ...(d.s !== d.s0 ? [set("song.loop_start", d.s)] : []),
-      ...(d.e !== d.e0 ? [set("song.loop_end", d.e)] : []),
-      ...(!on ? [set("song.loop", 2)] : []),
-    ];
+    const range = [...(d.s !== d.s0 ? [set("song.loop_start", d.s)] : []), ...(d.e !== d.e0 ? [set("song.loop_end", d.e)] : [])];
     // The two are independent parameters (any order succeeds); the end
     // goes first when the brace moved right past its old end, so the range
-    // is never inverted between the two.
-    if (d.s >= d.e0) requests.reverse();
+    // is never inverted between the two. The loop turns on last.
+    if (d.s >= d.e0) range.reverse();
+    const requests = [...range, ...(!on ? [set("song.loop", 2)] : [])];
     if (requests.length) void act(client.call("batch", { requests }));
   };
 
@@ -480,7 +480,7 @@ export function Arrangement() {
             ))}
           </select>
         </label>
-        <span className="ml-auto text-zinc-500">ruler: play from there - drag: move - edge: length - alt-drag: copy - Delete: remove - drag a clip from the pool into its lane</span>
+        <span className="ml-auto text-zinc-500">ruler: play from there - top strip: drag a loop, click it on/off - drag: move - edge: length - alt-drag: copy - Delete: remove - drag a clip from the pool into its lane</span>
       </div>
       <div className="flex overflow-x-auto rounded border border-zinc-800 bg-zinc-950" data-testid="arr-scroll">
         {/* Track headers, sticky on the left. */}
