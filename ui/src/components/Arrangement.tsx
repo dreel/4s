@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Clip } from "../generated/Clip";
 import type { Placement } from "../generated/Placement";
+import type { MethodName } from "../generated/methods";
 import { act, client, mySeat, select, useApp, useSelected } from "../store";
 import { PianoRoll } from "./PianoRoll";
 
@@ -41,9 +42,18 @@ const ZOOMS = [48, 96, 192, 384];
 /** The song's last tick (bar 999, `MAX_SONG_TICKS`). */
 const MAX_TICKS = 999 * BAR;
 
+/** A selected placement: its track and the placement. */
+type Pick = { id: string; p: Placement };
+const pickKey = (id: string, start: number) => `${id}:${start}`;
+const unpick = (key: string) => {
+  const i = key.lastIndexOf(":");
+  return { id: key.slice(0, i), start: Number(key.slice(i + 1)) };
+};
+
 type Drag =
-  | { kind: "move"; id: string; p: Placement; x: number; dt: number }
-  | { kind: "copy"; id: string; p: Placement; x: number; dt: number }
+  // The grabbed placement and every selected one that moves with it.
+  | { kind: "move"; id: string; p: Placement; x: number; dt: number; group: Pick[] }
+  | { kind: "copy"; id: string; p: Placement; x: number; dt: number; group: Pick[] }
   | { kind: "resize"; id: string; p: Placement; x: number; dl: number }
   // A clip from a header's pool; `start` is where it would land (null: off
   // its lane).
@@ -96,7 +106,7 @@ function NotePreview({ placement, clip, clipLength, px }: { placement: Placement
   );
 }
 
-function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars: number; drag: Drag | null; picked: number | null; h: Handlers }) {
+function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars: number; drag: Drag | null; picked: Set<string>; h: Handlers }) {
   const track = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id));
   const clips = useApp((s) => s.snapshot?.clips);
   const stepsLength = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
@@ -107,24 +117,26 @@ function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars:
   const clipOf = (n: number) => clips?.find((c) => c.instrument === id && c.id === n);
   const lengthOf = (n: number) => clipOf(n)?.length ?? stepsLength * STEP;
   const mine = drag?.id === id ? drag : null;
+  // A move or copy carries this lane's selected placements too.
+  const group = drag?.kind === "move" || drag?.kind === "copy" ? drag.group.filter((g) => g.id === id) : [];
+  const dt = drag?.kind === "move" || drag?.kind === "copy" ? groupDt(drag) : 0;
 
-  // Where the dragged placement is drawn (the daemon gets it on release).
+  // Where the dragged placements are drawn (the daemon gets them on release).
   const shown = (p: Placement): Placement => {
-    if (mine?.kind === "move" && mine.p.start === p.start) return { ...p, start: dragStart(mine) };
+    if (drag?.kind === "move" && group.some((g) => g.p.start === p.start)) return { ...p, start: p.start + dt };
     if (mine?.kind === "resize" && mine.p.start === p.start) return { ...p, length: resized(mine) };
     return p;
   };
-  let ghost: Placement | null = null;
-  if (mine?.kind === "copy") ghost = { ...mine.p, start: dragStart(mine) };
-  if (mine?.kind === "pool" && mine.start !== null) ghost = { clip: mine.clip, start: mine.start, length: lengthOf(mine.clip), offset: 0 };
+  const ghosts: Placement[] = drag?.kind === "copy" ? group.map((g) => ({ ...g.p, start: g.p.start + dt })) : [];
+  if (mine?.kind === "pool" && mine.start !== null) ghosts.push({ clip: mine.clip, start: mine.start, length: lengthOf(mine.clip), offset: 0 });
 
   const block = (p: Placement, at: number | null) => {
     const clip = clipOf(p.clip);
     const live = at !== null && playing && song && tick !== null && p.start <= tick && tick < p.start + p.length;
-    const sel = at !== null && at === picked;
+    const sel = at !== null && picked.has(pickKey(id, at));
     return (
       <div
-        key={at ?? "ghost"}
+        key={at ?? `ghost-${p.start}`}
         className={`absolute top-1 bottom-1 rounded border overflow-hidden text-violet-200 ${
           at === null
             ? "border-dashed border-violet-200 bg-violet-500/25 pointer-events-none"
@@ -137,7 +149,7 @@ function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars:
         data-length={p.length}
         data-start={p.start}
         data-selected={sel}
-        onPointerDown={at === null ? undefined : (e) => h.down(e, { kind: e.altKey ? "copy" : "move", id, p: track.arrangement.find((q) => q.start === at)!, x: e.clientX, dt: 0 })}
+        onPointerDown={at === null ? undefined : (e) => h.down(e, { kind: e.altKey ? "copy" : "move", id, p: track.arrangement.find((q) => q.start === at)!, x: e.clientX, dt: 0, group: [] })}
         onPointerMove={h.move}
         onPointerUp={h.up}
         onPointerCancel={h.cancel}
@@ -159,13 +171,18 @@ function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars:
   return (
     <div className="relative border-b border-zinc-800" style={{ height: LANE, width: bars * BAR * px }} data-testid={`lane-${id}`}>
       {track.arrangement.map((p) => block(shown(p), p.start))}
-      {ghost && block(ghost, null)}
+      {ghosts.map((g) => block(g, null))}
     </div>
   );
 }
 
-/** A move or copy's new start. */
-const dragStart = (d: { p: Placement; dt: number }) => Math.min(MAX_TICKS - d.p.length, Math.max(0, d.p.start + d.dt));
+/** How far a move or copy goes: its distance, kept inside the song for
+ * every placement in the group. */
+const groupDt = (d: { dt: number; group: Pick[] }) => {
+  const lo = -Math.min(...d.group.map((g) => g.p.start));
+  const hi = Math.min(...d.group.map((g) => MAX_TICKS - g.p.start - g.p.length));
+  return Math.min(hi, Math.max(lo, d.dt));
+};
 /** A resize's new length (the drag keeps it at least a snap long). */
 const resized = (d: { p: Placement; dl: number }) => Math.min(MAX_TICKS - d.p.start, d.p.length + d.dl);
 
@@ -347,7 +364,9 @@ export function Arrangement() {
   const [snap, setSnap] = useState(BAR);
   const [drag, setDrag] = useState<Drag | null>(null);
   // The selected placement: its track and start.
-  const [picked, setPicked] = useState<{ id: string; start: number } | null>(null);
+  // The selected placements (`pickKey`s).
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const none = () => setPicked(new Set());
   // The instrument whose selected clip the piano roll panel shows.
   const [roll, setRoll] = useState<string | null>(null);
   const rolled = instruments.find((i) => i.id === roll);
@@ -394,14 +413,41 @@ export function Arrangement() {
     return { ...drag, start: on ? Math.min(Math.floor((MAX_TICKS - length) / snap) * snap, Math.floor(x / px / snap) * snap) : null };
   };
 
+  /** One request alone, or several as one `batch` (one undo step). */
+  const send = (requests: { method: string; params: unknown }[]) =>
+    requests.length === 1
+      ? act(client.call(requests[0].method as MethodName, requests[0].params as never))
+      : act(client.call("batch", { requests }));
+
   const h: Handlers = {
     down: (e, d) => {
       e.stopPropagation();
       e.preventDefault();
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
       root.current?.focus();
-      if (d.kind !== "pool") setPicked({ id: d.id, start: d.p.start });
-      setDrag(d);
+      if (d.kind === "pool") return setDrag(d);
+      const k = pickKey(d.id, d.p.start);
+      if (d.kind === "resize") {
+        setPicked(new Set([k]));
+        return setDrag(d);
+      }
+      // Shift-click adds to the selection or takes one out (no drag).
+      if (e.shiftKey) {
+        const next = new Set(picked);
+        if (next.has(k)) next.delete(k);
+        else next.add(k);
+        return setPicked(next);
+      }
+      // Grabbing a selected placement drags the whole selection; another
+      // one is selected alone.
+      const keys = picked.has(k) ? picked : new Set([k]);
+      setPicked(keys);
+      const group = [...keys].flatMap((key) => {
+        const { id, start } = unpick(key);
+        const p = placementAt(id, start);
+        return p ? [{ id, p }] : [];
+      });
+      setDrag({ ...d, group: group.length ? group : [{ id: d.id, p: d.p }] });
     },
     move: (e) => {
       const d = drag && follow(drag, e);
@@ -420,12 +466,18 @@ export function Arrangement() {
       const d = follow(drag, e);
       const { id } = d;
       if (d.kind === "move" || d.kind === "copy") {
-        const to = dragStart(d);
-        if (to === d.p.start) return; // a click: selected
-        const { clip, length, offset } = d.p;
-        setPicked({ id, start: to });
-        if (d.kind === "move") void act(client.call("song.move", { instrument: id, start: d.p.start, to }));
-        else void act(client.call("song.place", { instrument: id, clip, start: to, length, offset }));
+        const dt = groupDt(d);
+        if (dt === 0) return; // a click: selected
+        // Furthest along first, so none lands on (and cuts) a selected one
+        // that has not moved yet.
+        const group = [...d.group].sort((a, b) => (dt > 0 ? b.p.start - a.p.start : a.p.start - b.p.start));
+        const requests = group.map(({ id, p }) =>
+          d.kind === "move"
+            ? { method: "song.move", params: { instrument: id, start: p.start, to: p.start + dt } }
+            : place(id, { clip: p.clip, start: p.start + dt, length: p.length, offset: p.offset }),
+        );
+        setPicked(new Set(group.map(({ id, p }) => pickKey(id, p.start + dt))));
+        void send(requests);
       } else if (d.kind === "resize") {
         const length = resized(d);
         if (length === d.p.length) return;
@@ -437,25 +489,30 @@ export function Arrangement() {
         if (length > d.p.length) void act(client.call("song.place", p.params));
         else void act(client.call("batch", { requests: [{ method: "song.remove", params: { instrument: id, start: d.p.start } }, p] }));
       } else if (d.start !== null) {
-        setPicked({ id, start: d.start });
+        setPicked(new Set([pickKey(id, d.start)]));
         void act(client.call("song.place", place(id, { clip: d.clip, start: d.start, length: null, offset: null }).params));
       }
     },
   };
 
-  // Delete removes the selected placement; Escape clears the selection.
+  // Delete removes the selected placements (one undo step); Escape clears
+  // the selection.
   const key = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
     // Only for the section itself (focused by a placement), not its buttons
     // and fields.
-    if (!picked || t !== root.current) return;
+    if (!picked.size || t !== root.current) return;
     if (e.key === "Delete" || e.key === "Backspace") {
       // Not also the piano roll's selected notes.
       e.preventDefault();
       e.stopPropagation();
-      if (placementAt(picked.id, picked.start)) void act(client.call("song.remove", { instrument: picked.id, start: picked.start }));
-      setPicked(null);
-    } else if (e.key === "Escape") setPicked(null);
+      const requests = [...picked].flatMap((k) => {
+        const { id, start } = unpick(k);
+        return placementAt(id, start) ? [{ method: "song.remove", params: { instrument: id, start } }] : [];
+      });
+      if (requests.length) void send(requests);
+      none();
+    } else if (e.key === "Escape") none();
   };
 
   const line = (every: number, color: string) => `repeating-linear-gradient(to right, ${color} 0 1px, transparent 1px ${every * px}px)`;
@@ -472,7 +529,7 @@ export function Arrangement() {
       onKeyDown={key}
       // The selection goes with the focus, so Delete elsewhere never
       // removes a placement picked long ago.
-      onBlur={(e) => !root.current?.contains(e.relatedTarget as Node | null) && setPicked(null)}
+      onBlur={(e) => !root.current?.contains(e.relatedTarget as Node | null) && none()}
     >
       <div className="flex items-center gap-3 text-xs text-zinc-400">
         <span className="text-zinc-300">arrangement</span>
@@ -539,9 +596,9 @@ export function Arrangement() {
               data-tick={start}
             />
           </div>
-          <div className="relative touch-none select-none" ref={lanes} style={{ backgroundImage: grid }} onPointerDown={() => setPicked(null)}>
+          <div className="relative touch-none select-none" ref={lanes} style={{ backgroundImage: grid }} onPointerDown={none}>
             {instruments.map((i) => (
-              <Lane key={i.id} id={i.id} px={px} bars={bars} drag={drag} picked={picked?.id === i.id ? picked.start : null} h={h} />
+              <Lane key={i.id} id={i.id} px={px} bars={bars} drag={drag} picked={picked} h={h} />
             ))}
             {loop === 2 && loopEnd > loopStart && (
               <div
@@ -561,7 +618,7 @@ export function Arrangement() {
       {rolled && (
         // A click in the roll leaves the placement selection (its Delete
         // is for notes there).
-        <div className="flex flex-col gap-1" data-testid="arr-roll" data-instrument={rolled.id} onPointerDownCapture={() => setPicked(null)}>
+        <div className="flex flex-col gap-1" data-testid="arr-roll" data-instrument={rolled.id} onPointerDownCapture={none}>
           <div className="flex items-center gap-2 text-xs text-zinc-400">
             <span>
               piano roll: <span className="text-zinc-200">{rolled.name}</span>
