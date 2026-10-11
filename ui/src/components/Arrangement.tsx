@@ -4,8 +4,9 @@
 // record target). The ruler shows bars, the loop range, the song's end, and
 // where song mode plays from; click it to locate. Placements show their
 // clip's name and a note preview, with looped repeats marked. Drag a
-// placement to move it, its right edge to resize it (longer loops the clip),
-// alt-drag to copy; click selects and Delete removes; drag a clip from a
+// placement to move it (alone, onto another track's lane too: its clip is
+// copied into that pool), its right edge to resize it (longer loops the
+// clip), alt-drag to copy; click selects and Delete removes; drag a clip from a
 // header's pool into its lane to place it; double-click a placement to open
 // its clip in the piano roll below (which selects it). The ruler's top strip
 // holds the loop brace. Drags show where they go and send on release, one
@@ -595,7 +596,7 @@ export function Arrangement() {
             ))}
           </select>
         </label>
-        <span className="ml-auto text-zinc-500">ruler: play from there - top strip: drag a loop, click it on/off - drag: move - edge: length - alt-drag: copy - Delete: remove - double-click: piano roll - drag a clip from the pool into its lane</span>
+        <span className="ml-auto text-zinc-500">ruler: play from there - top strip: drag a loop, click it on/off - drag: move (to another lane too) - edge: length - alt-drag: copy - Delete: remove - double-click: piano roll - drag a clip from the pool into its lane</span>
       </div>
       <div className="flex overflow-x-auto rounded border border-zinc-800 bg-zinc-950" data-testid="arr-scroll">
         {/* Track headers, sticky on the left. */}
