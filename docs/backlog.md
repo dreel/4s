@@ -227,6 +227,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   (`song.loop_start`/`song.loop_end` are integer bar parameters), so the
   brace ignores a beat or off snap. Clicking the brace off sets
   `song.loop` to 0 even if it was 1 (the whole song) before.
+- (2026-10-11, #32 review) loop brace polish: the lanes' loop tint shows
+  the committed range, not the drag preview (and only while `song.loop` =
+  2); a brace dragged past the visible bars draws outside the grid until
+  the view grows; the arrangement's hint line does not mention the brace.
+- (2026-10-11, arrangement-roll branch) the arrangement's piano roll panel
+  and the editor's piano roll view can show the same clip at once, with
+  the same `data-testid`s (e2e locators must scope to `arr-roll`).
 - (2026-10-11, arrangement-loop branch) `ui/package-lock.json` lacks the
   `"license": "MIT"` that `ui/package.json` has, so any `npm install`
   adds it and leaves the tree dirty; commit the regenerated lockfile.

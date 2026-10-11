@@ -281,3 +281,13 @@ above, these win:
   strip locates, as the ruler below it does.
 - The brace snaps to whole bars whatever the snap select says: the loop's
   parameters are integer bars (beat-resolution loops are a backlog item).
+
+## Implementation notes (phase C, step 4: the piano roll panel)
+
+- Double-clicking a placement opens the editor on its instrument, selects
+  its clip (`clip.select`, only if another clip was selected), and opens
+  `PianoRoll.tsx` for it in a panel below the arrangement, with a close
+  button. The panel shows the track's selected clip, so it follows
+  `clip.select` from anywhere.
+- A click in the panel clears the placement selection, so Delete there
+  removes the roll's notes, not the placement.
