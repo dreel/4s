@@ -666,8 +666,11 @@ test("arrangement loop brace: draw, move, resize, and toggle by dragging the rul
     await page.mouse.move(to.x, to.y);
     await page.mouse.up();
   };
+  // A small window (CI's) shows only part of the ruler: scroll the handle
+  // itself into view before measuring it.
   const handle = async (testid: string) => {
     await strip();
+    await page.getByTestId(testid).scrollIntoViewIfNeeded();
     const b = (await page.getByTestId(testid).boundingBox())!;
     return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
   };
@@ -682,38 +685,38 @@ test("arrangement loop brace: draw, move, resize, and toggle by dragging the rul
   await expect.poll(loop).toEqual(whole);
   await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-on", "false");
 
-  // Draw a new brace from bar 9 to bar 11 (past the old one): loop on.
+  // Draw a new brace over bars 5 and 6 (past the old one, near the start so
+  // a small window shows it): loop on.
   let b = await strip();
   const y = b.y + b.height / 2;
-  await drag({ x: b.x + 8 * bar + 40, y }, { x: b.x + 10 * bar + 40, y });
-  const drawn = { on: 2, start: 8, end: 11 };
+  await drag({ x: b.x + 4 * bar + 40, y }, { x: b.x + 5 * bar + 40, y });
+  const drawn = { on: 2, start: 4, end: 6 };
   await oneStep(whole, drawn);
   await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-on", "true");
   // Move it a bar earlier by its body.
   let p = await handle("arr-loop");
   await drag(p, { x: p.x - bar, y: p.y });
-  const moved = { on: 2, start: 7, end: 10 };
+  const moved = { on: 2, start: 3, end: 5 };
   await oneStep(drawn, moved);
   // Its end two bars later, its start a bar earlier.
-  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-start", "7");
+  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-start", "3");
   p = await handle("arr-loop-end");
   await drag(p, { x: p.x + 2 * bar, y: p.y });
-  const longer = { on: 2, start: 7, end: 12 };
+  const longer = { on: 2, start: 3, end: 7 };
   await oneStep(moved, longer);
-  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-end", "12");
+  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-end", "7");
   p = await handle("arr-loop-start");
   await drag(p, { x: p.x - bar, y: p.y });
-  const earlier = { on: 2, start: 6, end: 12 };
+  const earlier = { on: 2, start: 2, end: 7 };
   await oneStep(longer, earlier);
-  // A click on the brace turns the loop off (and on again).
-  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-start", "6");
+  // A click on the brace turns the loop off (undo turns it on again).
+  await expect(page.getByTestId("arr-loop")).toHaveAttribute("data-start", "2");
   p = await handle("arr-loop");
   await page.mouse.click(p.x, p.y);
   await oneStep(earlier, { ...earlier, on: 0 });
   // A click on empty strip, or the ruler, locates and leaves the loop.
-  b = await strip();
-  await page.mouse.click(b.x + 2 * bar + 30, y);
-  await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(2 * 384);
+  await page.getByTestId("arr-loop-strip").click({ position: { x: 7 * bar + 30, y: 5 } });
+  await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(7 * 384);
   await page.getByTestId("arr-ruler").click({ position: { x: 3 * bar + 30, y: 24 } });
   await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(3 * 384);
   expect(await loop()).toEqual({ ...earlier, on: 0 });
