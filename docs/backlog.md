@@ -259,6 +259,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   start or end gets no distance, so the drag counts as a click and the
   selection shrinks to the grabbed placement; the multi-select e2e drags
   placements on one track only.
+- (2026-10-11, arrangement-cross review) moving a placement to another
+  track is five requests the UI composes (agents reach it only as a raw
+  `4s batch`), and the batch makes the new clip the target's selected clip
+  for a moment (a playing pattern-mode track can switch to it). A daemon
+  `clip.copy { from, clip, instrument, select }` returning the new id,
+  with a CLI command, would make it one request. A drop whose clip or
+  track has just gone does nothing.
 - (2026-10-11, arrangement-cross branch) only a placement dragged alone
   goes to another track (a selection stays on its tracks), and each move
   or copy there adds a clip to that pool, even if it already has the same
