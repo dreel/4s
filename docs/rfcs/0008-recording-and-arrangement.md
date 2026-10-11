@@ -311,3 +311,15 @@ above, these win:
 - The selection clears with Escape, a click on an empty lane, a click in
   the piano roll panel, or the focus leaving the arrangement (for
   example the undo button).
+
+## Implementation notes (phase C: placements to another track)
+
+- A placement dragged alone onto another track's lane goes there (alt:
+  a copy). Its clip is copied into that track's pool: one `batch` of
+  `clip.new` (named as the clip, its length, selected), `clip.add` (its
+  notes), `song.place` (the selected clip, at the new start, with the
+  placement's length and offset), `clip.select` (back to the track's
+  selected clip), and, for a move, `song.remove` on the old track. One
+  undo step, no daemon changes; the selected-clip defaults mean no
+  request needs the new clip's id.
+- A selection of several placements moves along its own tracks only.
