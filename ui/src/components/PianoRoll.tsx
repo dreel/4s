@@ -41,7 +41,8 @@ const key = (e: { tick: number; note: number }) => `${e.tick}:${e.note}`;
  * is recording (a new array each time would re-render forever). */
 const NO_TAKE: TakeNote[] = [];
 /** The roll last pointed at: only it takes Delete and Escape, when two are
- * open (the editor's and the arrangement's panel). */
+ * open (the editor's and the arrangement's panel). None (never pointed at,
+ * or closed): every roll does. */
 let lastRoll: object | null = null;
 
 type Drag =
@@ -66,6 +67,12 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const me = useRef({});
+  useEffect(() => {
+    const mine = me.current;
+    return () => {
+      if (lastRoll === mine) lastRoll = null;
+    };
+  }, []);
 
   const events = clip?.events ?? [];
   const length = clip?.length ?? stepsLength * STEP;
@@ -106,7 +113,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (["INPUT", "SELECT", "TEXTAREA"].includes(t.tagName) || t.isContentEditable)) return;
-      if (lastRoll !== me.current) return;
+      if (lastRoll && lastRoll !== me.current) return;
       if ((e.key === "Delete" || e.key === "Backspace") && selected.size) {
         e.preventDefault();
         void update(events.filter((x) => selected.has(key(x))).map((x) => ({ tick: x.tick, note: x.note })), []);

@@ -772,6 +772,12 @@ test("arrangement piano roll: double-click a placement opens its clip below; edi
   await expect(panel.getByTestId("note-192-36")).toHaveAttribute("data-selected", "true");
   await page.keyboard.press("Delete");
   await expect.poll(() => events(2)).toEqual([{ tick: 0, len: 24, note: 36, velocity: 100 }]);
+  // Closed, the panel hands the keys back: the editor's roll deletes its
+  // selected note.
+  await page.getByTestId("arr-roll-close").click();
+  await expect(editorRoll.getByTestId("note-0-36")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Delete");
+  await expect.poll(() => events(2)).toEqual([]);
   await page.getByTestId("view-steps").click();
 
   // The other placement opens its own clip.
