@@ -36,7 +36,7 @@ function has(x: NoteExpression, e: ClipEvent, res: number) {
   return x.kind === "velocity" ? e.velocity >= x.min : e.len > res;
 }
 
-/** The events on a step's first tick that the layout shows. */
+/** Whether the layout shows a note (a named row, or within its range). */
 function shows(layout: NoteLayout, note: number) {
   return layout.rows.length ? layout.rows.some((r) => r.note === note) : note >= layout.low && note <= layout.high;
 }

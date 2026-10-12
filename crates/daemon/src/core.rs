@@ -111,6 +111,8 @@ pub struct Core {
     /// its entry (see `journaled`).
     in_request: bool,
     controller: Controller,
+    /// The controller state last sent to clients.
+    controller_sent: Option<ControllerState>,
     block_map: BlockMap,
     midi: Midi,
     midi_tx: Sender<MidiMessage>,
@@ -179,6 +181,7 @@ impl Core {
             take: None,
             in_request: false,
             controller: Controller::default(),
+            controller_sent: None,
             block_map,
             midi: Midi::default(),
             midi_tx,
@@ -684,8 +687,11 @@ impl Core {
             let msg = self.block_map.led_message(*r, *c, *v);
             self.midi.send_block(&msg);
         }
-        if force_event || !diff.is_empty() {
-            let state = self.controller_state();
+        // Anything clients show (the clip the grid edits, its rows, its
+        // length), not only the LEDs.
+        let state = self.controller_state();
+        if force_event || self.controller_sent.as_ref() != Some(&state) {
+            self.controller_sent = Some(state.clone());
             self.emit(origin, Event::Controller { state });
         }
     }

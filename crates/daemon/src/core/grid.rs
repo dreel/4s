@@ -114,11 +114,16 @@ impl Core {
         }
     }
 
+    /// A clip's length in the grid's 16ths (rounded up).
+    fn grid_steps(&self, id: &str, n: u32) -> u32 {
+        self.clip_len(id, n).div_ceil(RESOLUTION).min(MAX_STEPS as u32)
+    }
+
     /// Steps the host seat's grid pages over: its target clip's length in
-    /// 16ths (rounded up), or one page in launch mode.
+    /// 16ths, or one page in launch mode.
     pub(super) fn grid_length(&self) -> u32 {
         match (self.controller.grid, self.grid_target(&self.host_seat)) {
-            (GridMode::Steps, Some((id, n))) => self.clip_len(&id, n).div_ceil(RESOLUTION).min(MAX_STEPS as u32),
+            (GridMode::Steps, Some((id, n))) => self.grid_steps(&id, n),
             _ => GRID as u32,
         }
     }
@@ -185,10 +190,12 @@ impl Core {
         let Some((id, n)) = self.grid_target(seat) else { return Ok(()) };
         let Some(note) = self.grid_notes(seat).get(row as usize).copied() else { return Ok(()) };
         let step = self.controller.pad_step(col);
-        if step >= self.clip_len(&id, n).div_ceil(RESOLUTION) {
+        let layout = self.find_instrument(&id)?.kind.layout();
+        // Past the clip's end, or a row moved past the instrument's range:
+        // a dark pad that does nothing.
+        if step >= self.grid_steps(&id, n) || !layout.shows(note) {
             return Ok(());
         }
-        let layout = self.find_instrument(&id)?.kind.layout();
         let lit = step_cells(&layout, &self.track(&id).clips[&n].events, RESOLUTION)
             .iter()
             .any(|x| x.step == step && x.note == note);

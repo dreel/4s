@@ -180,6 +180,9 @@ pub fn set_step(
     if let Some(n) = note.filter(|n| !layout.shows(*n)) {
         return Err(format!("note {n} is not on this instrument's grid"));
     }
+    if !on && !expressions.is_empty() {
+        return Err("expressions are set on a note being turned on, not off".into());
+    }
     if let Some(id) = expressions.keys().find(|id| layout.expression(id).is_none()) {
         let ids: Vec<&str> = layout.expressions.iter().map(|x| x.id.as_str()).collect();
         return Err(format!("no expression '{id}' (this instrument has: {})", if ids.is_empty() { "none".into() } else { ids.join(", ") }));

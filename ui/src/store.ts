@@ -8,7 +8,6 @@ import type { EventEnvelope } from "./generated/EventEnvelope";
 import type { HistoryStepResult } from "./generated/HistoryStepResult";
 import type { ParamInfo } from "./generated/ParamInfo";
 import type { InstrumentPattern } from "./generated/InstrumentPattern";
-import type { NoteStep } from "./generated/NoteStep";
 import type { TakeNote } from "./generated/TakeNote";
 import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
@@ -361,34 +360,11 @@ export function useSelectedClipTick(id: string): number | null {
   });
 }
 
-/** The selected clip's length in whole steps (rounded up): what the step
- * editors show. */
-export function useSelectedClipSteps(id: string): number {
-  return useApp((s) => {
-    const selected = s.snapshot?.tracks.find((t) => t.instrument === id)?.selected;
-    const clip = s.snapshot?.clips.find((c) => c.instrument === id && c.id === selected);
-    return Math.min(64, Math.ceil((clip?.length ?? 384) / 24));
-  });
-}
 
 export function param(path: string): number {
   return app.state.snapshot?.params[path] ?? 0;
 }
 
-/** Optimistically set one note step locally, then send it. The daemon's
- * `notes_changed` event confirms. */
-export function setNote(instrument: string, step: number, note: NoteStep) {
-  const s = app.state.snapshot;
-  if (s) {
-    const patterns = s.patterns.map((p) =>
-      p.instrument === instrument && p.pattern.kind === "notes"
-        ? { ...p, pattern: { ...p.pattern, steps: p.pattern.steps.map((x, i) => (i === step ? note : x)) } }
-        : p,
-    );
-    app.set({ snapshot: { ...s, patterns } });
-  }
-  return act(client.call("pattern.set_note", { instrument, step, note }));
-}
 
 /** Optimistically set a param locally, then send it. The daemon's event confirms. */
 export function setParam(path: string, value: number) {

@@ -1122,6 +1122,15 @@ test("step view: one component for both instruments; resolution; the Block's lau
   await page.getByTestId("step-kick-1").click({ modifiers: ["Shift"] });
   await expect(page.getByTestId("step-kick-1")).toHaveAttribute("data-level", "2");
 
+  // The mirror follows the clip the armed track plays, even when the LEDs
+  // do not change (two empty clips).
+  await rpc("clip.clear", { instrument: "drums", clip: null });
+  await rpc("clip.new", { instrument: "drums", name: null, length: null, select: false });
+  await expect(page.getByTestId("block-clip")).toContainText("clip 1");
+  await rpc("clip.launch", { instrument: "drums", clip: 2, now: null });
+  await expect(page.getByTestId("block-clip")).toContainText("clip 2");
+  await rpc("clip.launch", { instrument: "drums", clip: 1, now: null });
+
   // The Block's launch mode: drums are launched (lit), the last pad goes back.
   await page.getByTestId("block-grid-launch").click();
   await expect.poll(async () => (await rpc("controller.get", {})).grid).toBe("launch");
