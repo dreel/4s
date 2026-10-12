@@ -345,6 +345,18 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   commands did not fit the queue is marked unsent and resent only at the
   next edit or graph change (`sync_lanes`); until then it may play stale
   points. Resend unsent lanes when the queue drains.
+- (2026-10-12, automation lanes review) lanes: a point dragged in the UI
+  is remembered by index (`AutomationLanes.tsx`, `onPointerUp`); a
+  concurrent edit can make the release move another point. Remember its
+  tick and look it up on release.
+- (2026-10-12, automation lanes review) lanes, engine cost: every
+  `SetParam` scans all clips' lanes to update bases, and `automate`'s
+  let-go loop is quadratic in `MAX_AUTOMATED` and routes. Bounded and
+  real-time safe, but worth a per-target "automated" count or bitset
+  before dense CC input or more instruments.
+- (2026-10-12, automation lanes review) lanes: `clip.dup` makes the copy
+  before setting its lanes, so a failure there leaves a lane-less copy;
+  check the lanes first. Undoing a duplicate with lanes has no e2e check.
 - (2026-10-12, automation lanes) lanes: the step views (drum grid, 303
   editor, sampler) show no lanes; only the piano roll edits them. Points
   are linear only (no curves or steps), and there is no way to record a
