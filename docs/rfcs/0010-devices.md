@@ -377,3 +377,35 @@ instruments.
   load (a file picker, uploaded), and clear beside its row; the selected
   pad's knobs.
 
+
+## Implementation notes (phase 6: automation lanes)
+
+- `Clip.lanes` (`{path, points: [{tick, value}]}`), at most 8 lanes of 64
+  points; `clip.lane.set` replaces one lane (adds it if new), sorting its
+  points and clamping their values to the parameter's range;
+  `clip.lane.remove` drops it. Continuous and whole-number parameters
+  only; not toggles, not `transport.*`. Point ticks are checked against
+  the longest clip, not the clip's length, so undo can restore a lane
+  before the clip's length; points past the loop never play.
+- Engine: each clip-table entry holds its lanes (`Command::SetLane`,
+  `SetLanePoint`; a retargeted lane keeps its points). Every block, each
+  playing track's clip writes its lanes' values at its playhead, after
+  modulation, so **automation overrides modulation** on the same target;
+  the first lane for a target wins when two playing clips automate it.
+  What no playing lane covers goes back to its value set by hand, which
+  `param.set` keeps up to date. Parameter smoothing applies, so a jump at
+  play start ramps in over a few milliseconds.
+- The daemon keeps each lane's engine target (`ClipState::sent`) and
+  re-sends targets after a graph change; a lane whose parameter goes (an
+  instrument or effect removed) goes with it, as modulation routes do, in
+  the same undo step. Duplicating a clip copies its lanes; renders and
+  `4s render --record` include them; projects save them in the clip.
+- Not built yet: `state.get` does not show live automated values (the
+  `automated` field above); the UI shows the lane, and the knob shows the
+  value set by hand (backlog).
+- CLI: `4s clip lane <instrument> <path> "tick:value ..."` (`--rm`), and
+  `4s clip show` lists lanes.
+- UI: `AutomationLanes.tsx`: a lane strip per lane under the piano roll's
+  velocity lane (click: add a point on the snap grid, drag: move,
+  alt-click: remove; a dashed line is the value set by hand), and a
+  parameter field to add one.

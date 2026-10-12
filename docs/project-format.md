@@ -47,7 +47,9 @@ It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010)
   most readable form that says exactly the same thing: a `pattern` (drum
   step strings per voice, or a note string; only for clips of whole
   steps) or `events` (`tick:note:len:vel` tokens, see `format_events`),
-  with a `name` when it is not its id. An instrument with one empty
+  with a `name` when it is not its id, and its automation `lanes`
+  (`{path, points: [{tick, value}]}`, RFC 0010) when it has any. An
+  instrument with one empty
   one-bar clip, nothing placed, and nothing launched is left out.
 - The controller: whether the grid page follows the playhead.
 - Seats (RFC 0007), by name: `focus`, `knob_page`, note `bindings`, `cc`

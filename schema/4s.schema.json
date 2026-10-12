@@ -155,6 +155,14 @@
           "instrument": {
             "type": "string"
           },
+          "lanes": {
+            "default": [],
+            "description": "Automation lanes (RFC 0010), at most `MAX_LANES`.",
+            "items": {
+              "$ref": "#/$defs/Lane"
+            },
+            "type": "array"
+          },
           "length": {
             "description": "Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.",
             "format": "uint32",
@@ -1274,6 +1282,46 @@
         ],
         "type": "object"
       },
+      "Lane": {
+        "description": "An automation lane (RFC 0010): a parameter's value over the clip, linear\nbetween points (before the first and after the last, the nearest\npoint's value).",
+        "properties": {
+          "path": {
+            "description": "A parameter path.",
+            "type": "string"
+          },
+          "points": {
+            "description": "Sorted by tick, unique ticks.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
+      "LanePoint": {
+        "properties": {
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "In the parameter's own units.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "value"
+        ],
+        "type": "object"
+      },
       "MidiConnection": {
         "properties": {
           "device": {
@@ -2214,6 +2262,46 @@
         ],
         "type": "object"
       },
+      "Lane": {
+        "description": "An automation lane (RFC 0010): a parameter's value over the clip, linear\nbetween points (before the first and after the last, the nearest\npoint's value).",
+        "properties": {
+          "path": {
+            "description": "A parameter path.",
+            "type": "string"
+          },
+          "points": {
+            "description": "Sorted by tick, unique ticks.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
+      "LanePoint": {
+        "properties": {
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "In the parameter's own units.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "value"
+        ],
+        "type": "object"
+      },
       "ModRoute": {
         "description": "A modulation route (RFC 0010): a modulator output moving a continuous\nparameter by `depth` of its range around the value it is set to.",
         "properties": {
@@ -2351,6 +2439,13 @@
               "string",
               "null"
             ]
+          },
+          "lanes": {
+            "description": "Automation lanes (RFC 0010).",
+            "items": {
+              "$ref": "#/$defs/Lane"
+            },
+            "type": "array"
           },
           "length": {
             "default": 384,
@@ -3661,6 +3756,110 @@
         ],
         "type": "object"
       },
+      "Lane": {
+        "description": "An automation lane (RFC 0010): a parameter's value over the clip, linear\nbetween points (before the first and after the last, the nearest\npoint's value).",
+        "properties": {
+          "path": {
+            "description": "A parameter path.",
+            "type": "string"
+          },
+          "points": {
+            "description": "Sorted by tick, unique ticks.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
+      "LanePoint": {
+        "properties": {
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "In the parameter's own units.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "value"
+        ],
+        "type": "object"
+      },
+      "LaneRemoveParams": {
+        "properties": {
+          "clip": {
+            "default": null,
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "LaneSetParams": {
+        "description": "Set (add or replace) a clip's automation lane for a parameter.",
+        "properties": {
+          "clip": {
+            "default": null,
+            "description": "Default: the selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "points": {
+            "description": "1..`MAX_LANE_POINTS`, ticks below `MAX_CLIP_TICKS` (points past the\nclip's loop never play); sorted and made unique by tick (the last of\na tick wins), values clamped to the parameter's range.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
       "LayoutPort": {
         "description": "A device and the role its port plays in its model.",
         "properties": {
@@ -4268,6 +4467,13 @@
               "string",
               "null"
             ]
+          },
+          "lanes": {
+            "description": "Automation lanes (RFC 0010).",
+            "items": {
+              "$ref": "#/$defs/Lane"
+            },
+            "type": "array"
           },
           "length": {
             "default": 384,
@@ -6527,6 +6733,40 @@
         "type": "object"
       },
       {
+        "description": "Set a clip's automation lane for a parameter (RFC 0010): while the\nclip plays, the parameter follows it.",
+        "properties": {
+          "method": {
+            "const": "clip.lane.set",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/LaneSetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove a clip's automation lane.",
+        "properties": {
+          "method": {
+            "const": "clip.lane.remove",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/LaneRemoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Select the clip editors edit (the step views, the Block, and the\n`clip.*` defaults). It does not change what plays.",
         "properties": {
           "method": {
@@ -7450,6 +7690,14 @@
           "instrument": {
             "type": "string"
           },
+          "lanes": {
+            "default": [],
+            "description": "Automation lanes (RFC 0010), at most `MAX_LANES`.",
+            "items": {
+              "$ref": "#/$defs/Lane"
+            },
+            "type": "array"
+          },
           "length": {
             "description": "Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.",
             "format": "uint32",
@@ -7908,6 +8156,46 @@
         "required": [
           "device",
           "ccs"
+        ],
+        "type": "object"
+      },
+      "Lane": {
+        "description": "An automation lane (RFC 0010): a parameter's value over the clip, linear\nbetween points (before the first and after the last, the nearest\npoint's value).",
+        "properties": {
+          "path": {
+            "description": "A parameter path.",
+            "type": "string"
+          },
+          "points": {
+            "description": "Sorted by tick, unique ticks.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
+      "LanePoint": {
+        "properties": {
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "In the parameter's own units.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "value"
         ],
         "type": "object"
       },

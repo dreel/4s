@@ -20,6 +20,10 @@ pub(super) struct ClipState {
     pub events: Vec<ClipEvent>,
     /// Index in the engine's clip table.
     pub engine: u16,
+    /// Automation lanes (`lanes.rs`), each a known parameter's path.
+    pub lanes: Vec<Lane>,
+    /// What the engine has for each lane: its target and point count.
+    pub sent: [Option<(ParamTarget, u8)>; MAX_LANES],
 }
 
 pub(super) struct TrackState {
@@ -72,6 +76,7 @@ pub(super) fn project_entry(kind: InstrumentType, n: u32, c: &ClipState) -> Proj
     let mut out = ProjectClip {
         name: (c.name != n.to_string()).then(|| c.name.clone()),
         length: c.length,
+        lanes: c.lanes.clone(),
         ..Default::default()
     };
     if c.events.is_empty() {
@@ -136,8 +141,8 @@ pub(super) fn from_project(kind: InstrumentType, c: &ProjectClip) -> Result<(u32
 /// A project file's track, parsed and checked.
 pub(super) struct LoadedTrack {
     pub selected: u32,
-    /// (id, name, length, events).
-    pub clips: Vec<(u32, String, u32, Vec<ClipEvent>)>,
+    /// (id, name, length, events, lanes; lanes checked by `set_lanes`).
+    pub clips: Vec<(u32, String, u32, Vec<ClipEvent>, Vec<Lane>)>,
     pub placements: Vec<Placement>,
     pub launched: Option<u32>,
 }
@@ -164,7 +169,7 @@ pub(super) fn load_track(kind: InstrumentType, t: &ProjectTrack) -> Result<Loade
             Some(name) => check_clip_name(name).map_err(|e| format!("clip {n}: {}", e.message))?,
             None => n.to_string(),
         };
-        clips.push((*n, name, length, events));
+        clips.push((*n, name, length, events, c.lanes.clone()));
     }
     let mut placements = t.arrangement.clone();
     placements.sort_by_key(|p| p.start);
@@ -208,6 +213,8 @@ pub(super) struct ClipSets {
     pub places: BTreeMap<String, Vec<(u32, Option<Placement>)>>,
     /// `launched:<id>`: the launched clip, or `None` for the arrangement.
     pub launched: BTreeMap<String, Option<u32>>,
+    /// `lane:<id>.<n>.<path>`: (path, points or `None` to remove).
+    pub lanes: BTreeMap<(String, u32), Vec<(String, Option<Vec<LanePoint>>)>>,
 }
 
 impl ClipSets {
@@ -251,6 +258,18 @@ impl ClipSets {
             "launched" => {
                 self.launched.insert(rest.to_string(), v.as_u64().map(|n| n as u32));
             }
+            "lane" => {
+                // `<id>.<n>.<path>`; ids have no dots, paths do.
+                let mut parts = rest.splitn(3, '.');
+                let id = parts.next()?;
+                let n: u32 = parts.next()?.parse().ok()?;
+                let path = parts.next()?;
+                let points = match v {
+                    Value::Null => None,
+                    v => Some(serde_json::from_value(v.clone()).ok()?),
+                };
+                self.lanes.entry((id.to_string(), n)).or_default().push((path.to_string(), points));
+            }
             "place" => {
                 let (id, start) = rest.split_once('.')?;
                 let start: u32 = start.parse().ok()?;
@@ -277,6 +296,7 @@ impl ClipSets {
         self.selected.retain(|id, _| !ids.contains(id));
         self.places.retain(|id, _| !ids.contains(id));
         self.launched.retain(|id, _| !ids.contains(id));
+        self.lanes.retain(|(id, _), _| !ids.contains(id));
     }
 
     /// Engine commands they may take, at most.
@@ -286,6 +306,7 @@ impl ClipSets {
             + self.selected.len()
             + self.places.values().map(Vec::len).sum::<usize>() * 2
             + self.launched.len()
+            + self.lanes.len() * (MAX_LANES * (MAX_LANE_POINTS + 1))
     }
 }
 
@@ -309,7 +330,7 @@ impl Core {
 
     pub(super) fn clip(&self, id: &str, n: u32) -> Clip {
         let c = &self.track(id).clips[&n];
-        Clip { instrument: id.to_string(), id: n, name: c.name.clone(), length: c.length, events: c.events.clone() }
+        Clip { instrument: id.to_string(), id: n, name: c.name.clone(), length: c.length, events: c.events.clone(), lanes: c.lanes.clone() }
     }
 
     pub(super) fn track_info(&self, id: &str) -> TrackInfo {
@@ -377,7 +398,7 @@ impl Core {
             self.send(Command::AddEvent { clip: engine, event: *e });
         }
         let t = self.tracks.get_mut(id).expect("track exists");
-        t.clips.insert(n, ClipState { name, length, events, engine });
+        t.clips.insert(n, ClipState { name, length, events, engine, lanes: Vec::new(), sent: [None; MAX_LANES] });
     }
 
     /// A new track with one empty one-bar clip, selected (on an instrument
@@ -396,8 +417,15 @@ impl Core {
         let track =
             TrackState { kind, clips: BTreeMap::new(), selected: t.selected, placements: Vec::new(), launched: None, playing: None, restart: false };
         self.tracks.insert(id.to_string(), track);
-        for (n, name, length, events) in t.clips {
+        let mut lanes = Vec::new();
+        for (n, name, length, events, l) in t.clips {
             self.add_clip_unchecked(id, n, name, length, events);
+            lanes.push((n, l));
+        }
+        for (n, l) in lanes.into_iter().filter(|(_, l)| !l.is_empty()) {
+            if let Err(e) = self.set_lanes(id, n, l, "") {
+                return Err(RpcError::invalid(format!("clip {n}: {}", e.message)));
+            }
         }
         if let Some(n) = t.launched {
             self.launch(id, Some(n), true)?;
@@ -749,9 +777,11 @@ impl Core {
             })),
             Request::ClipDuplicate(p) => r(self.clip_ref(p.instrument.as_deref(), p.clip, client).and_then(|(id, n)| {
                 let c = &self.track(&id).clips[&n];
-                let (name, length, list) = (format!("{} copy", c.name), c.length, c.events.clone());
+                let (name, length, list, lanes) = (format!("{} copy", c.name), c.length, c.events.clone(), c.lanes.clone());
                 let name: String = name.chars().take(32).collect();
-                self.new_clip(&id, None, Some(name), length, list, true, origin)
+                self.ensure_room(lanes::lane_commands(&lanes))?;
+                let copy = self.new_clip(&id, None, Some(name), length, list, true, origin)?;
+                if lanes.is_empty() { Ok(copy) } else { self.set_lanes(&id, copy.id, lanes, origin) }
             })),
             Request::ClipRename(p) => r(self.clip_ref(p.instrument.as_deref(), p.clip, client).and_then(|(id, n)| {
                 let name = check_clip_name(&p.name)?;
@@ -765,6 +795,27 @@ impl Core {
                 .clip_ref(p.instrument.as_deref(), p.clip, client)
                 .and_then(|(id, n)| self.delete_clip(&id, n, origin))
                 .and_then(ok),
+            Request::ClipLaneSet(p) => r(self.clip_ref(p.instrument.as_deref(), p.clip, client).and_then(|(id, n)| {
+                if p.points.is_empty() {
+                    return Err(RpcError::invalid("a lane has at least one point (clip.lane.remove removes it)"));
+                }
+                let mut lanes = self.track(&id).clips[&n].lanes.clone();
+                let lane = Lane { path: p.path, points: p.points };
+                match lanes.iter_mut().find(|l| l.path == lane.path) {
+                    Some(l) => *l = lane,
+                    None => lanes.push(lane),
+                }
+                self.set_lanes(&id, n, lanes, origin)
+            })),
+            Request::ClipLaneRemove(p) => r(self.clip_ref(p.instrument.as_deref(), p.clip, client).and_then(|(id, n)| {
+                let mut lanes = self.track(&id).clips[&n].lanes.clone();
+                let before = lanes.len();
+                lanes.retain(|l| l.path != p.path);
+                if lanes.len() == before {
+                    return Err(RpcError::invalid(format!("clip {n} of '{id}' has no lane for '{}'", p.path)));
+                }
+                self.set_lanes(&id, n, lanes, origin)
+            })),
             Request::ClipSelect(p) => self
                 .clip_ref(p.instrument.as_deref(), p.clip, client)
                 .and_then(|(id, n)| self.select_clip(&id, n, origin))
@@ -796,6 +847,9 @@ impl Core {
                 d.insert(format!("clip:{id}.{n}"), json!({ "name": c.name, "length": c.length }));
                 for e in &c.events {
                     d.insert(format!("event:{id}.{n}.{}.{}", e.tick, e.note), json!({ "len": e.len, "velocity": e.velocity }));
+                }
+                for l in &c.lanes {
+                    d.insert(format!("lane:{id}.{n}.{}", l.path), json!(l.points));
                 }
             }
             d.insert(format!("selected:{id}"), json!(t.selected));
@@ -860,6 +914,24 @@ impl Core {
             }
             if self.edit_clip(id, *n, events, None, origin).is_err() {
                 skipped.push(format!("clip:{id}.{n}"));
+            }
+        }
+        // Lanes (after contents: a clip made above exists by now).
+        for ((id, n), list) in &sets.lanes {
+            let Some(c) = self.tracks.get(id).and_then(|t| t.clips.get(n)) else {
+                skipped.push(format!("clip:{id}.{n}"));
+                continue;
+            };
+            let mut lanes = c.lanes.clone();
+            for (path, points) in list {
+                match (lanes.iter_mut().find(|l| &l.path == path), points) {
+                    (Some(l), Some(p)) => l.points = p.clone(),
+                    (None, Some(p)) => lanes.push(Lane { path: path.clone(), points: p.clone() }),
+                    (_, None) => lanes.retain(|l| &l.path != path),
+                }
+            }
+            if self.set_lanes(id, *n, lanes, origin).is_err() {
+                skipped.extend(list.iter().map(|(path, _)| format!("lane:{id}.{n}.{path}")));
             }
         }
         for (id, n) in &sets.selected {

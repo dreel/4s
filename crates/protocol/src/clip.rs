@@ -77,6 +77,32 @@ pub struct Clip {
     pub length: u32,
     /// Sorted by (tick, note).
     pub events: Vec<ClipEvent>,
+    /// Automation lanes (RFC 0010), at most `MAX_LANES`.
+    #[serde(default)]
+    pub lanes: Vec<Lane>,
+}
+
+/// Most automation lanes in a clip.
+pub const MAX_LANES: usize = 8;
+/// Most points in a lane.
+pub const MAX_LANE_POINTS: usize = 64;
+
+/// An automation lane (RFC 0010): a parameter's value over the clip, linear
+/// between points (before the first and after the last, the nearest
+/// point's value).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Lane {
+    /// A parameter path.
+    pub path: String,
+    /// Sorted by tick, unique ticks.
+    pub points: Vec<LanePoint>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LanePoint {
+    pub tick: u32,
+    /// In the parameter's own units.
+    pub value: f64,
 }
 
 /// A note a take is recording, not written yet: where it will go (the

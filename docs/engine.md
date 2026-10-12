@@ -113,6 +113,17 @@ modulator) puts the target back at its base.
   the loop drifts across passes), or a free `rate`
   (0.01..20 Hz); `phase`). Outputs `<id>.1` .. `<id>.4`, -1..1.
 
+## Automation lanes
+
+Each clip-table entry holds up to `MAX_LANES` = 8 **automation lanes**
+(`SetLane`, `SetLanePoint`; RFC 0010): a target, its range, its value set
+by hand, and up to 64 (tick, value) points. Every block, after
+modulation, each track playing a clip writes that clip's lanes' values at
+its playhead (linear between points), so automation overrides modulation
+on the same target. A target no playing lane covers goes back to its
+value set by hand (`SetParam` keeps it current, as it does a route's
+base).
+
 ## Instruments
 
 ### `tr808` (default id `drums`)

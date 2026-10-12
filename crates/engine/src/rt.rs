@@ -12,6 +12,7 @@ pub const RETURN_CAPACITY: usize = 4 * fours_protocol::MAX_INSTRUMENTS + 2 * fou
 /// Capacity of the command ring.
 pub const COMMAND_CAPACITY: usize = fours_protocol::MAX_CLIPS * fours_protocol::MAX_EVENTS
     + fours_protocol::MAX_INSTRUMENTS * fours_protocol::MAX_PLACEMENTS
+    + fours_protocol::MAX_CLIPS * fours_protocol::MAX_LANES * (fours_protocol::MAX_LANE_POINTS + 1)
     + 8192;
 
 pub struct RtEngine {

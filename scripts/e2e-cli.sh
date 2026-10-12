@@ -998,6 +998,32 @@ check "saving under a new name does not stack the name" "1 samples/sampler.1.ton
 check "clearing a pad, and undo" "sampler pad 1  tone.wav" bash -c "$BIN/4s sampler clear 1 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler"
 check "removing the sampler and undo bring its samples back" "sampler pad 1" bash -c "$BIN/4s instrument rm sampler >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler"
 check "a session with samples replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/smp.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/smp.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+# Automation lanes (RFC 0010): a clip's lane moves a parameter while the
+# clip plays; the value set by hand comes back when nothing plays it.
+s project new >/dev/null
+s pattern set kick "x-x-x-x-x-x-x-x-" >/dev/null
+cat > "$TMP/lr.py" <<PY
+import json, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render']))
+l, rr = r['left']['rms'], r['right']['rms']
+print('left' if rr < 0.2 * l else 'even' if abs(rr - l) < 0.01 else (l, rr))
+PY
+check "a centered kick renders even" "even" python3 "$TMP/lr.py"
+check "a lane on channel 1's pan" "lane mixer.1.pan: 0:-1 192:-1" s clip lane drums mixer.1.pan "0:-1 192:-1"
+check "...pans the render left" "left" python3 "$TMP/lr.py"
+check "...and leaves the value set by hand" "pan C" bash -c "$BIN/4s mixer | grep 'ch 1'"
+check "the transport takes no automation" "the transport's" s clip lane drums transport.tempo "0:100"
+check "nor do toggles" "is a toggle" s clip lane drums mixer.1.mute "0:1"
+check "values are clamped to the parameter's range" "lane mixer.1.volume: 0:1.5" s clip lane drums mixer.1.volume "0:9"
+check "a duplicate copies the lanes" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s clip dup drums | grep pan"
+s clip select drums 1 >/dev/null
+s clip del drums --clip 2 >/dev/null
+check "removing a lane is one undo step" "undid: clip.lane.remove" bash -c "$BIN/4s clip lane drums mixer.1.volume --rm >/dev/null && $BIN/4s undo"
+check "lanes save with the project and load back" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s project save lanes >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load lanes >/dev/null && $BIN/4s clip show drums"
+check "a lane on an effect goes with the effect" "no lane" bash -c "$BIN/4s device add filter --on 1 >/dev/null && $BIN/4s clip lane drums filter.cutoff '0:0.1' >/dev/null && $BIN/4s device rm filter >/dev/null && ($BIN/4s clip show drums | grep -q filter.cutoff || echo no lane)"
+check "...and undo brings both back" "lane filter.cutoff: 0:0.1" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show drums"
+check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null && python3 '$TMP/lr.py'"
+check "a session with lanes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/lanes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/lanes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status

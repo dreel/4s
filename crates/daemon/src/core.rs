@@ -12,6 +12,7 @@
 mod clips;
 mod devices;
 mod grid;
+mod lanes;
 pub(crate) mod record;
 mod samples;
 mod seats;
@@ -328,8 +329,10 @@ impl Core {
 
     fn graph_changed(&mut self, origin: &str) {
         self.rebuild_params();
-        // Routes whose source or target went with the change go too.
+        // Routes whose source or target went with the change go too, and
+        // so do lanes.
         self.prune_routes();
+        self.refresh_lanes(origin);
         let graph = self.graph();
         self.emit(origin, Event::Graph { graph });
         self.mark_dirty(origin);
@@ -919,7 +922,7 @@ impl Core {
             .tracks
             .values()
             .flat_map(|t| t.clips.values())
-            .map(|c| RenderClip { index: c.engine, length: c.length, events: c.events.clone() })
+            .map(|c| RenderClip { index: c.engine, length: c.length, events: c.events.clone(), lanes: self.render_lanes(c) })
             .collect();
         let device_params = |d: &DeviceState| -> RenderEffect {
             let own = Self::device_target(d, 0);
@@ -1564,7 +1567,7 @@ impl Core {
             match file.tracks.get(&i.id).map(|t| clips::load_track(i.kind, t)) {
                 Some(Ok(t)) => {
                     clip_count += t.clips.len();
-                    track_commands += t.clips.iter().map(|c| c.3.len() + 3).sum::<usize>() + t.placements.len() + 2;
+                    track_commands += t.clips.iter().map(|c| c.3.len() + 3 + lanes::lane_commands(&c.4)).sum::<usize>() + t.placements.len() + 2;
                 }
                 // Loaded as an empty track (with a warning).
                 _ => {
@@ -1987,7 +1990,7 @@ impl Core {
                 "channels" => serde_json::from_value(v.clone()).ok().map(|o| order = Some(o)),
                 "route" => Some(routes.push((rest.to_string(), v.as_u64().map(|n| n as u32)))),
                 "param" => Some(params.push((rest.to_string(), v.as_f64()))),
-                "clip" | "event" | "selected" | "place" | "launched" => clip_sets.parse(kind, rest, v),
+                "clip" | "event" | "selected" | "place" | "launched" | "lane" => clip_sets.parse(kind, rest, v),
                 "device" | "chain" | "mod" => device_sets.parse(kind, rest, v),
                 "sample" => rest.rsplit_once('.').and_then(|(id, pad)| {
                     let pad = pad.parse().ok()?;
@@ -2608,7 +2611,9 @@ impl Core {
             | Request::ClipUpdate(_)
             | Request::ClipLength(_)
             | Request::ClipClear(_)
-            | Request::ClipQuantize(_) => unreachable!("handled by handle_clip"),
+            | Request::ClipQuantize(_)
+            | Request::ClipLaneSet(_)
+            | Request::ClipLaneRemove(_) => unreachable!("handled by handle_clip"),
         }
     }
 }
@@ -2666,7 +2671,7 @@ fn read_only(req: &Request) -> bool {
         | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
         | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
         | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) | SamplerLoad(_) | SamplerUpload(_) | SamplerClear(_) => false,
+        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | ClipLaneSet(_) | ClipLaneRemove(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) | SamplerLoad(_) | SamplerUpload(_) | SamplerClear(_) => false,
     }
 }
 

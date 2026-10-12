@@ -859,6 +859,21 @@ enum ClipCmd {
         #[arg(long, allow_hyphen_values = true)]
         notes: Option<String>,
     },
+    /// Automate a parameter over the clip while it plays (RFC 0010):
+    /// `tick:value` points, linear between them, e.g.
+    /// `4s clip lane drums mixer.1.pan "0:-1 192:1 384:-1"`. Continuous
+    /// and whole-number parameters; `--rm` removes the lane. When nothing
+    /// plays the clip, the parameter goes back to its value set by hand.
+    Lane {
+        instrument: String,
+        path: String,
+        /// `tick:value` tokens (values in the parameter's units, or a
+        /// percentage).
+        #[arg(allow_hyphen_values = true)]
+        points: Option<String>,
+        #[arg(long)]
+        rm: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1157,6 +1172,17 @@ fn step_index(n: u32) -> Result<u32> {
 }
 
 /// Parse `0.35`, `35%`, `on`/`off`, `true`/`false`.
+/// `tick:value` tokens.
+fn lane_points(s: &str) -> Result<Vec<LanePoint>> {
+    s.split_whitespace()
+        .map(|t| {
+            let (tick, value) = t.split_once(':').ok_or_else(|| anyhow!("'{t}': points are tick:value"))?;
+            let tick = tick.parse().map_err(|_| anyhow!("'{t}': the tick is a whole number"))?;
+            Ok(LanePoint { tick, value: parse_value(value)? })
+        })
+        .collect()
+}
+
 fn parse_value(s: &str) -> Result<f64> {
     let t = s.trim().to_ascii_lowercase();
     match t.as_str() {
@@ -1568,6 +1594,14 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 strength: strength.as_deref().map(|v| parse_value(v).map(|v| v as f32)).transpose()?,
                 events: notes.as_deref().map(event_keys).transpose()?,
             }),
+            ClipCmd::Lane { instrument, path, points, rm } => match (rm, points) {
+                (true, None) => Request::ClipLaneRemove(LaneRemoveParams { instrument: Some(instrument), clip: *clip, path }),
+                (false, Some(p)) => {
+                    Request::ClipLaneSet(LaneSetParams { instrument: Some(instrument), clip: *clip, path, points: lane_points(&p)? })
+                }
+                (true, Some(_)) => bail!("--rm takes no points"),
+                (false, None) => bail!("a lane needs points (\"tick:value ...\") or --rm"),
+            },
         }],
         Cmd::Song { cmd } => match cmd.clone().unwrap_or(SongCmd::Show) {
             SongCmd::Show => vec![Request::StateGet(e.clone()), Request::SongGet(e)],
@@ -1999,6 +2033,10 @@ fn print_clip(c: &Clip) {
         println!("  {:>5}  {at:<12} {name:<4} len {:<3} vel {}", e.tick, e.len, e.velocity);
     }
     println!("  {}", format_events(&c.events));
+    for l in &c.lanes {
+        let points: Vec<String> = l.points.iter().map(|p| format!("{}:{}", p.tick, p.value)).collect();
+        println!("  lane {}: {}", l.path, points.join(" "));
+    }
 }
 
 fn fmt_note_range(b: &NoteBinding) -> String {
@@ -2857,7 +2895,7 @@ mod tests {
             "daemon status", "daemon stop", "undo", "redo", "history", "journal",
             "clip", "clip show bass", "clip set bass 0:C2:12", "clip add bass 36 C3 --len 6", "clip rm bass 36 C3",
             "clip length bass 12", "clip clear bass", "clip quantize bass 1/8", "clip update bass --rm 0:C2", "clip new bass", "clip dup bass",
-            "clip rename bass B --clip 2", "clip del bass --clip 2", "clip select bass 1", "clip launch bass 2", "clip list", "song",
+            "clip rename bass B --clip 2", "clip del bass --clip 2", "clip lane bass mixer.1.pan 0:-1", "clip lane bass mixer.1.pan --rm", "clip select bass 1", "clip launch bass 2", "clip list", "song",
             "step bass", "step bass 3 C2 --set accent",
             "song place drums --at 1 --bars 4", "song rm drums 1", "song mv drums 1 3", "song back", "locate 5",
             "batch []", "record", "record --off",

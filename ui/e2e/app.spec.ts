@@ -1197,6 +1197,44 @@ test("returns: a return bus with a reverb, fed by a send knob on a track strip",
   await expect(rpc("route.set", { source: "drums", channel: 2, swap: false })).rejects.toThrow("return bus");
 });
 
+test("automation lanes: add a lane in the piano roll, add, drag, and remove points, remove the lane", async () => {
+  const { page, rpc } = h;
+  const lanes = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).lanes;
+  await page.getByTestId("view-roll").click();
+  await page.getByTestId("roll-zoom").selectOption("1");
+  // A lane on channel 1's pan starts flat at the value set by hand.
+  await page.getByTestId("lane-add").fill("mixer.1.pan");
+  await page.getByTestId("lane-add").press("Enter");
+  await expect.poll(lanes).toEqual([{ path: "mixer.1.pan", points: [{ tick: 0, value: 0 }] }]);
+  const strip = page.getByTestId("lane-mixer.1.pan");
+  await strip.scrollIntoViewIfNeeded();
+  const box = (await strip.boundingBox())!;
+  // 1 px per tick; the strip's top is the range's top (pan 1). A click
+  // near a beat lands on the 1/16 grid.
+  await page.mouse.click(box.x + 190, box.y + 2);
+  await expect.poll(lanes).toEqual([{ path: "mixer.1.pan", points: [{ tick: 0, value: 0 }, { tick: 192, value: 1 }] }]);
+  // Drag the first point to the bottom (pan -1).
+  await expect(page.getByTestId("lane-point-mixer.1.pan-192")).toBeVisible();
+  const first = (await page.getByTestId("lane-point-mixer.1.pan-0").boundingBox())!;
+  await page.mouse.move(first.x + 4, first.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(first.x + 4, box.y + 30);
+  await page.mouse.move(first.x + 4, box.y + box.height - 2);
+  await page.mouse.up();
+  await expect.poll(async () => (await lanes())[0].points[0]).toEqual({ tick: 0, value: -1 });
+  // The value set by hand stays.
+  expect((await rpc("param.get", { path: "mixer.1.pan" })).value).toBe(0);
+  await page.getByTestId("pianoroll-drums").screenshot({ path: "test-results/lanes.png" });
+  // Alt-click removes a point; the x removes the lane.
+  await page.keyboard.down("Alt");
+  await page.getByTestId("lane-point-mixer.1.pan-192").click();
+  await page.keyboard.up("Alt");
+  await expect.poll(async () => (await lanes())[0].points.length).toBe(1);
+  await page.getByTestId("lane-remove-mixer.1.pan").click();
+  await expect.poll(lanes).toEqual([]);
+  await expect(strip).toHaveCount(0);
+});
+
 test("modulators: an LFO from the rack, mapped onto a knob by pressing it, depth and unroute", async () => {
   const { page, rpc } = h;
   const routes = async () => (await rpc("state.get", {})).graph.mod_routes;

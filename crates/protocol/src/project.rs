@@ -115,12 +115,15 @@ pub struct ProjectClip {
     pub pattern: Option<ProjectPattern>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events: Option<String>,
+    /// Automation lanes (RFC 0010).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lanes: Vec<crate::clip::Lane>,
 }
 
 impl Default for ProjectClip {
     /// An empty one-bar clip.
     fn default() -> Self {
-        Self { name: None, length: default_clip_length(), pattern: None, events: None }
+        Self { name: None, length: default_clip_length(), pattern: None, events: None, lanes: Vec::new() }
     }
 }
 

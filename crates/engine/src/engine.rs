@@ -35,7 +35,7 @@ use crate::modulator::{ModContext, Modulator};
 use crate::params::*;
 use fours_protocol::{
     ClipEvent, DEFAULT_CLIP_LENGTH, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_CLIPS, MAX_EFFECTS, MAX_EVENTS, MAX_INSERTS,
-    MAX_INSTRUMENTS, MAX_MOD_ROUTES, MAX_MODULATORS, MAX_PLACEMENTS, OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
+    MAX_INSTRUMENTS, MAX_LANE_POINTS, MAX_LANES, MAX_MOD_ROUTES, MAX_MODULATORS, MAX_PLACEMENTS, OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
 };
 use std::f32::consts::TAU;
 
@@ -110,6 +110,12 @@ pub enum Command {
     /// Set modulation route `index` (its target's current value is its
     /// base), or (`None`) clear it, putting its target back at its base.
     SetModRoute { index: u8, route: Option<ModRoute> },
+    /// Set a clip's automation lane: its target (`None`: no lane), the
+    /// target's value set by hand, its range, and how many of its points
+    /// it uses (the points themselves stay: a retargeted lane keeps them).
+    SetLane { clip: u16, lane: u8, target: Option<ParamTarget>, base: f32, min: f32, max: f32, len: u8 },
+    /// Set point `index` of a lane (a lane's points are in tick order).
+    SetLanePoint { clip: u16, lane: u8, index: u8, tick: u32, value: f32 },
     /// Remove every event from a clip (an index in the clip table).
     ClearClip { clip: u16 },
     /// Add an event (replacing one at the same tick and note).
@@ -152,6 +158,8 @@ impl std::fmt::Debug for Command {
             Command::SetSample { slot, pad, sample } => write!(f, "SetSample({slot}, {pad}, {:?})", sample.as_ref().map(|s| s.len())),
             Command::RemoveModulator { slot } => write!(f, "RemoveModulator({slot})"),
             Command::SetModRoute { index, route } => write!(f, "SetModRoute({index}, {route:?})"),
+            Command::SetLane { clip, lane, target, .. } => write!(f, "SetLane({clip}, {lane}, {target:?})"),
+            Command::SetLanePoint { clip, lane, index, tick, value } => write!(f, "SetLanePoint({clip}, {lane}, {index}, {tick}, {value})"),
             Command::ClearClip { clip } => write!(f, "ClearClip({clip})"),
             Command::AddEvent { clip, event } => write!(f, "AddEvent({clip}, {event:?})"),
             Command::RemoveEvent { clip, tick, note } => write!(f, "RemoveEvent({clip}, {tick}, {note})"),
@@ -246,7 +254,49 @@ struct ClipStore {
     /// Sorted by (tick, note); at most `MAX_EVENTS`.
     events: Vec<ClipEvent>,
     length: u32,
+    lanes: [LaneStore; MAX_LANES],
 }
+
+/// An automation lane in the clip table (RFC 0010): a target, its value set
+/// by hand (`base`, restored when no playing clip automates it), its range,
+/// and up to `MAX_LANE_POINTS` (tick, value) points sorted by tick.
+#[derive(Clone, Copy)]
+struct LaneStore {
+    target: Option<ParamTarget>,
+    base: f32,
+    min: f32,
+    max: f32,
+    points: [(u32, f32); MAX_LANE_POINTS],
+    len: u8,
+}
+
+impl Default for LaneStore {
+    fn default() -> Self {
+        Self { target: None, base: 0.0, min: 0.0, max: 1.0, points: [(0, 0.0); MAX_LANE_POINTS], len: 0 }
+    }
+}
+
+impl LaneStore {
+    /// The value at clip tick `tick`: linear between points, the nearest
+    /// point's value outside them.
+    fn value(&self, tick: f32) -> Option<f32> {
+        let pts = &self.points[..self.len as usize];
+        let first = pts.first()?;
+        if tick <= first.0 as f32 {
+            return Some(first.1);
+        }
+        for w in pts.windows(2) {
+            if tick < w[1].0 as f32 {
+                let t = (tick - w[0].0 as f32) / (w[1].0 - w[0].0).max(1) as f32;
+                return Some(w[0].1 + (w[1].1 - w[0].1) * t);
+            }
+        }
+        pts.last().map(|p| p.1)
+    }
+}
+
+/// Most parameters automated at once.
+const MAX_AUTOMATED: usize = 64;
 
 impl ClipStore {
     fn position(&self, e: &ClipEvent) -> Result<usize, usize> {
@@ -277,10 +327,13 @@ struct Track {
     /// (absolute tick it ends at, note), for notes the clips started.
     active: [(u64, u8); MAX_ACTIVE],
     num_active: usize,
+    /// The clip playing at the last tick and its tick there (automation).
+    at: Option<(u16, u32)>,
 }
 
 impl Track {
     fn reset(&mut self) {
+        self.at = None;
         self.placements.clear();
         self.launched = None;
         self.pending = None;
@@ -294,6 +347,7 @@ impl Track {
             pending: None,
             active: [(0, 0); MAX_ACTIVE],
             num_active: 0,
+            at: None,
         }
     }
 
@@ -436,6 +490,8 @@ pub struct Engine {
     dry_to_master: f32,
     modulators: Vec<Option<Box<dyn Modulator>>>,
     routes: [Option<ModRoute>; MAX_MOD_ROUTES],
+    /// Parameters automation set in the last block, with their bases.
+    automated: [Option<(ParamTarget, f32)>; MAX_AUTOMATED],
     /// Beats since the song's tick 0, advanced every block (synced LFOs
     /// follow it; it runs while stopped too).
     beat: f64,
@@ -479,7 +535,7 @@ impl Engine {
             slots: (0..MAX_INSTRUMENTS).map(|_| None).collect(),
             tracks: (0..MAX_INSTRUMENTS).map(|_| Track::new()).collect(),
             clips: (0..MAX_CLIPS)
-                .map(|_| ClipStore { events: Vec::with_capacity(MAX_EVENTS), length: DEFAULT_CLIP_LENGTH })
+                .map(|_| ClipStore { events: Vec::with_capacity(MAX_EVENTS), length: DEFAULT_CLIP_LENGTH, lanes: [LaneStore::default(); MAX_LANES] })
                 .collect(),
             channels: (0..MAX_CHANNELS).map(|_| Channel::new(sr)).collect(),
             effects: (0..MAX_EFFECTS).map(|_| None).collect(),
@@ -492,6 +548,7 @@ impl Engine {
             dry_to_master: 1.0,
             modulators: (0..MAX_MODULATORS).map(|_| None).collect(),
             routes: [None; MAX_MOD_ROUTES],
+            automated: [None; MAX_AUTOMATED],
             beat: 0.0,
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
@@ -605,9 +662,18 @@ impl Engine {
     pub fn apply(&mut self, cmd: Command, emit: &mut impl FnMut(Feedback)) -> Option<Returned> {
         match cmd {
             Command::SetParam { target, value } => {
-                // A modulated target's routes move around the new value.
+                // A modulated target's routes move around the new value, and
+                // automation comes back to it.
                 for r in self.routes.iter_mut().flatten().filter(|r| r.target == target) {
                     r.base = value;
+                }
+                for c in self.clips.iter_mut() {
+                    for l in c.lanes.iter_mut().filter(|l| l.target == Some(target)) {
+                        l.base = value;
+                    }
+                }
+                for a in self.automated.iter_mut().flatten().filter(|a| a.0 == target) {
+                    a.1 = value;
                 }
                 self.write_param(target, value);
             }
@@ -631,6 +697,18 @@ impl Engine {
                     }
                 }
                 return self.modulators.get_mut(slot as usize)?.take().map(Returned::Modulator);
+            }
+            Command::SetLane { clip, lane, target, base, min, max, len } => {
+                if let Some(l) = self.clips.get_mut(clip as usize).and_then(|c| c.lanes.get_mut(lane as usize)) {
+                    *l = LaneStore { target, base, min, max, len: len.min(MAX_LANE_POINTS as u8), points: l.points };
+                }
+            }
+            Command::SetLanePoint { clip, lane, index, tick, value } => {
+                if let Some(l) = self.clips.get_mut(clip as usize).and_then(|c| c.lanes.get_mut(lane as usize))
+                    && (index as usize) < MAX_LANE_POINTS
+                {
+                    l.points[index as usize] = (tick, value);
+                }
             }
             Command::SetModRoute { index, route } => {
                 if let Some(cell) = self.routes.get_mut(index as usize) {
@@ -724,6 +802,7 @@ impl Engine {
                 if let Some(c) = self.clips.get_mut(clip as usize) {
                     c.events.clear();
                     c.length = DEFAULT_CLIP_LENGTH;
+                    c.lanes = [LaneStore::default(); MAX_LANES];
                 }
             }
             Command::AddEvent { clip, event } => {
@@ -900,6 +979,40 @@ impl Engine {
         }
     }
 
+    /// Set every parameter a playing clip automates to its lane's value at
+    /// the clip's position; parameters no longer automated go back to their
+    /// bases. After modulation, so a lane overrides a route on its target.
+    fn automate(&mut self) {
+        let mut now: [Option<(ParamTarget, f32)>; MAX_AUTOMATED] = [None; MAX_AUTOMATED];
+        let mut count = 0;
+        if self.playing {
+            for slot in 0..self.tracks.len() {
+                if self.slots[slot].is_none() {
+                    continue;
+                }
+                let Some((clip, pos)) = self.tracks[slot].at else { continue };
+                for k in 0..MAX_LANES {
+                    let l = self.clips[clip as usize].lanes[k];
+                    let (Some(target), Some(v)) = (l.target, l.value(pos as f32)) else { continue };
+                    if count < MAX_AUTOMATED && !now[..count].iter().flatten().any(|a| a.0 == target) {
+                        now[count] = Some((target, l.base));
+                        count += 1;
+                        self.write_param(target, v.clamp(l.min, l.max));
+                    }
+                }
+            }
+        }
+        // What automation let go of goes back to its value set by hand.
+        for i in 0..MAX_AUTOMATED {
+            if let Some((target, base)) = self.automated[i]
+                && !now[..count].iter().flatten().any(|a| a.0 == target)
+            {
+                self.write_param(target, base);
+            }
+        }
+        self.automated = now;
+    }
+
     /// Advance the modulators by `n` frames and move every modulated target
     /// to its base plus its routes' sum.
     fn modulate(&mut self, n: usize) {
@@ -1054,18 +1167,20 @@ impl Engine {
             // What plays here: a launched clip, looping from where it
             // started; else the placement under the song position (notes
             // end with it).
-            let (clip, pos, until) = match t.launched {
-                Some((c, since)) => {
-                    let c = &self.clips[c as usize];
-                    (c, ((song - since) % c.length.max(1) as u64) as u32, None)
-                }
+            let (index, pos, until) = match t.launched {
+                Some((c, since)) => (c, ((song - since) % self.clips[c as usize].length.max(1) as u64) as u32, None),
                 None => {
-                    let Some(p) = t.placement_at(song_pos) else { continue };
-                    let c = &self.clips[p.clip as usize];
+                    let Some(p) = t.placement_at(song_pos) else {
+                        t.at = None;
+                        continue;
+                    };
                     let into = song_pos - p.start as u64;
-                    (c, ((into + p.offset as u64) % c.length.max(1) as u64) as u32, Some(p.length as u64 - into))
+                    let len = self.clips[p.clip as usize].length.max(1) as u64;
+                    (p.clip, ((into + p.offset as u64) % len) as u32, Some(p.length as u64 - into))
                 }
             };
+            t.at = Some((index, pos));
+            let clip = &self.clips[index as usize];
             let first = clip.events.partition_point(|e| e.tick < pos);
             for e in clip.events[first..].iter().take_while(|e| e.tick == pos) {
                 let velocity = e.velocity as f32 / 127.0;
@@ -1122,6 +1237,7 @@ impl Engine {
 
     fn render_block(&mut self, out: &mut [f32], channels: usize, n: usize) {
         self.modulate(n);
+        self.automate();
         for s in self.slots.iter_mut().flatten() {
             s.instrument.render(n);
         }
@@ -1674,6 +1790,31 @@ pub(crate) mod tests {
         apply(&mut e, Command::SetParam { target: pan, value: -0.3 });
         apply(&mut e, Command::SetModRoute { index: 0, route: None });
         assert_eq!(e.channels[0].params[CH_PAN], -0.3);
+    }
+
+    /// An automation lane moves its parameter while its clip plays and lets
+    /// go of it (back to the value set by hand) when nothing plays it: a
+    /// ramp on channel 0's pan from -1 to 1 over the launched clip's bar.
+    #[test]
+    fn a_lane_automates_while_its_clip_plays() {
+        let mut e = drum_engine();
+        let pan = ParamTarget::Channel { ch: 0, index: CH_PAN as u8 };
+        let mut apply = |e: &mut Engine, c| {
+            let _ = e.apply(c, &mut |_| {});
+        };
+        apply(&mut e, Command::SetParam { target: pan, value: 0.25 });
+        apply(&mut e, Command::Launch { slot: 0, clip: Some(0), now: false });
+        apply(&mut e, Command::SetLane { clip: 0, lane: 0, target: Some(pan), base: 0.25, min: -1.0, max: 1.0, len: 2 });
+        apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 0, tick: 0, value: -1.0 });
+        apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 1, tick: 384, value: 1.0 });
+        assert_eq!(e.channels[0].params[CH_PAN], 0.25, "stopped: the value set by hand");
+        apply(&mut e, Command::Play { count_in: 0 });
+        render_secs(&mut e, 1.0, &mut vec![]);
+        let mid = e.channels[0].params[CH_PAN];
+        assert!(mid.abs() < 0.05, "half the bar: {mid}");
+        apply(&mut e, Command::Stop);
+        render_secs(&mut e, 0.1, &mut vec![]);
+        assert_eq!(e.channels[0].params[CH_PAN], 0.25, "let go: back to the value set by hand");
     }
 
     /// A waiting launch lands on a loop's wrap: a one-bar loop over bar 2

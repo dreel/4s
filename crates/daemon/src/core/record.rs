@@ -541,6 +541,8 @@ pub struct RenderRecord {
     pub target: TakeTarget,
     /// The track's clips by id: (name, length, events).
     pub clips: BTreeMap<u32, (String, u32, Vec<ClipEvent>)>,
+    /// Their automation lanes (a take leaves them as they are).
+    pub lanes: BTreeMap<u32, Vec<Lane>>,
     pub tempo: f64,
 }
 
@@ -559,6 +561,7 @@ impl RenderRecord {
                 name: self.clips.get(&n).map_or_else(|| n.to_string(), |c| c.0.clone()),
                 length,
                 events,
+                lanes: self.lanes.get(&n).cloned().unwrap_or_default(),
             })
             .collect()
     }
@@ -605,6 +608,7 @@ impl Core {
                 let mut settings = self.record.clone();
                 settings.update(r)?;
                 let clips = self.track(&id).clips.iter().map(|(n, c)| (*n, (c.name.clone(), c.length, c.events.clone()))).collect();
+                let lanes = self.track(&id).clips.iter().map(|(n, c)| (*n, c.lanes.clone())).collect();
                 Some(RenderRecord {
                     instrument: id.clone(),
                     slot,
@@ -613,6 +617,7 @@ impl Core {
                     // tick 0.
                     target: self.take_target(&id, self.track(&id).launched.map(|n| (n, 0))),
                     clips,
+                    lanes,
                     tempo: self.global(params::TEMPO),
                 })
             }

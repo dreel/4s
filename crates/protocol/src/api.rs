@@ -270,6 +270,32 @@ pub struct ModRoutesResult {
     pub routes: Vec<crate::device::ModRoute>,
 }
 
+// ---- automation lanes (RFC 0010) ----------------------------------------------
+
+/// Set (add or replace) a clip's automation lane for a parameter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LaneSetParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Default: the selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
+    pub path: String,
+    /// 1..`MAX_LANE_POINTS`, ticks below `MAX_CLIP_TICKS` (points past the
+    /// clip's loop never play); sorted and made unique by tick (the last of
+    /// a tick wins), values clamped to the parameter's range.
+    pub points: Vec<LanePoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LaneRemoveParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    #[serde(default)]
+    pub clip: Option<u32>,
+    pub path: String,
+}
+
 // ---- the sampler (RFC 0010) ---------------------------------------------------
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -1318,6 +1344,11 @@ api! {
     ClipRename = "clip.rename" (ClipRenameParams) -> Clip;
     /// Delete a clip and its placements (a track keeps at least one clip).
     ClipDelete = "clip.delete" (ClipRefParams) -> TrackInfo;
+    /// Set a clip's automation lane for a parameter (RFC 0010): while the
+    /// clip plays, the parameter follows it.
+    ClipLaneSet = "clip.lane.set" (LaneSetParams) -> Clip;
+    /// Remove a clip's automation lane.
+    ClipLaneRemove = "clip.lane.remove" (LaneRemoveParams) -> Clip;
     /// Select the clip editors edit (the step views, the Block, and the
     /// `clip.*` defaults). It does not change what plays.
     ClipSelect = "clip.select" (ClipRefParams) -> TrackInfo;

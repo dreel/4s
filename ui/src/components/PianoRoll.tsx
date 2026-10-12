@@ -3,7 +3,8 @@
 // to a grid. Click empty space to add a note, drag a note to move it (time
 // and pitch), drag its right edge to resize, alt-drag to copy, shift-click
 // to add to the selection, drag on empty space to select a box, Delete to
-// remove. The velocity lane below sets velocities. Every edit is one
+// remove. The velocity lane below sets velocities, and automation lanes
+// under it move parameters (`AutomationLanes.tsx`). Every edit is one
 // `clip.update` (one undo step); the daemon decides, the view only draws.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,6 +12,7 @@ import type { ClipEvent } from "../generated/ClipEvent";
 import type { EventKey } from "../generated/EventKey";
 import type { TakeNote } from "../generated/TakeNote";
 import { act, client, useApp, useLive, useSelectedClipTick } from "../store";
+import { AddLane, LaneLabel, LaneStrip } from "./AutomationLanes";
 import { noteName } from "./StepView";
 import { GM_NOTES, voiceShort } from "./voices";
 import type { Voice } from "../generated/Voice";
@@ -301,6 +303,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
         <button className={btn} disabled={!selected.size} data-testid="roll-delete" onClick={() => void update(events.filter((x) => selected.has(key(x))).map((x) => ({ tick: x.tick, note: x.note })), [])}>
           delete
         </button>
+        <AddLane clip={clip} />
         <span className="ml-auto text-zinc-500">click: add - drag: move - edge: length - alt-drag: copy - shift: select</span>
       </div>
       <div className="flex max-h-96 overflow-auto rounded border border-zinc-800 bg-zinc-950" data-testid="roll-scroll">
@@ -319,6 +322,9 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
           <div className="text-[9px] text-zinc-500 px-1 pt-1" style={{ height: VEL_H }}>
             vel
           </div>
+          {clip.lanes.map((l) => (
+            <LaneLabel key={l.path} clip={clip} lane={l} />
+          ))}
         </div>
         <div className="relative shrink-0" style={{ width }}>
           {/* Bar/beat ruler. */}
@@ -411,6 +417,9 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
               />
             ))}
           </div>
+          {clip.lanes.map((l) => (
+            <LaneStrip key={l.path} clip={clip} lane={l} px={px} snap={snap} width={width} />
+          ))}
         </div>
       </div>
     </section>

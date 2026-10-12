@@ -332,6 +332,20 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   that reloads the pad fails (skipped). Point undo at the bundle copy, or
   keep decoded samples by content.
 
+- (2026-10-12, automation lanes) lanes: `state.get` does not show the
+  live values of automated (or modulated) parameters, as RFC 0010 section 6
+  plans (`automated`); knobs show the value set by hand while a lane moves
+  the sound. Report them from the engine at meter rate (`Feedback`) and
+  draw them on the knob.
+- (2026-10-12, automation lanes) lanes: a lane's first value at play start
+  ramps in through parameter smoothing (a few ms), so the first hit can
+  sound partly at the value set by hand (the pan e2e's right channel peaks
+  0.18 for one hit). Snap automated targets' smoothers when play starts.
+- (2026-10-12, automation lanes) lanes: the step views (drum grid, 303
+  editor, sampler) show no lanes; only the piano roll edits them. Points
+  are linear only (no curves or steps), and there is no way to record a
+  knob's moves into a lane.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

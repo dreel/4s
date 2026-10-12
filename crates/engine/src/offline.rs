@@ -32,6 +32,18 @@ pub struct RenderClip {
     pub index: u16,
     pub length: u32,
     pub events: Vec<ClipEvent>,
+    pub lanes: Vec<RenderLane>,
+}
+
+/// A clip's automation lane, resolved: its target, the target's value set
+/// by hand, its range, and its (tick, value) points in tick order.
+#[derive(Clone, Debug)]
+pub struct RenderLane {
+    pub target: ParamTarget,
+    pub base: f32,
+    pub min: f32,
+    pub max: f32,
+    pub points: Vec<(u32, f32)>,
 }
 
 /// An audio effect in its engine slot, with its parameter values (in
@@ -137,6 +149,15 @@ impl RenderSpec {
             let _ = e.apply(Command::SetClipLength { clip: c.index, length: c.length }, &mut fb);
             for event in &c.events {
                 let _ = e.apply(Command::AddEvent { clip: c.index, event: *event }, &mut fb);
+            }
+            for (k, l) in c.lanes.iter().enumerate() {
+                let len = l.points.len() as u8;
+                let lane = Command::SetLane { clip: c.index, lane: k as u8, target: Some(l.target), base: l.base, min: l.min, max: l.max, len };
+                let _ = e.apply(lane, &mut fb);
+                for (i, (tick, value)) in l.points.iter().enumerate() {
+                    let point = Command::SetLanePoint { clip: c.index, lane: k as u8, index: i as u8, tick: *tick, value: *value };
+                    let _ = e.apply(point, &mut fb);
+                }
             }
         }
         let _ = e.apply(Command::Locate { tick: self.start }, &mut fb);
@@ -339,7 +360,7 @@ mod tests {
                 placements: Vec::new(),
                 samples: Vec::new(),
             }],
-            clips: vec![RenderClip { index: 0, length: fours_protocol::DEFAULT_CLIP_LENGTH, events }],
+            clips: vec![RenderClip { index: 0, length: fours_protocol::DEFAULT_CLIP_LENGTH, events, lanes: Vec::new() }],
             effects: Vec::new(),
             chains: Vec::new(),
             returns: Vec::new(),

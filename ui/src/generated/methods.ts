@@ -41,6 +41,8 @@ import type { InstrumentTypesResult } from "./InstrumentTypesResult";
 import type { JournalGetParams } from "./JournalGetParams";
 import type { JournalGetResult } from "./JournalGetResult";
 import type { KnobParams } from "./KnobParams";
+import type { LaneRemoveParams } from "./LaneRemoveParams";
+import type { LaneSetParams } from "./LaneSetParams";
 import type { LocateParams } from "./LocateParams";
 import type { MidiConnectParams } from "./MidiConnectParams";
 import type { MidiDisconnectParams } from "./MidiDisconnectParams";
@@ -174,6 +176,8 @@ export interface Methods {
   "clip.duplicate": { params: ClipRefParams; result: Clip };
   "clip.rename": { params: ClipRenameParams; result: Clip };
   "clip.delete": { params: ClipRefParams; result: TrackInfo };
+  "clip.lane.set": { params: LaneSetParams; result: Clip };
+  "clip.lane.remove": { params: LaneRemoveParams; result: Clip };
   "clip.select": { params: ClipRefParams; result: TrackInfo };
   "clip.launch": { params: ClipLaunchParams; result: TrackInfo };
   "batch": { params: BatchParams; result: BatchResult };
@@ -282,6 +286,8 @@ export const METHODS: MethodName[] = [
   "clip.duplicate",
   "clip.rename",
   "clip.delete",
+  "clip.lane.set",
+  "clip.lane.remove",
   "clip.select",
   "clip.launch",
   "batch",
