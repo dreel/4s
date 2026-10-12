@@ -19,14 +19,14 @@ export function openDevice(id: string | null) {
 
 /** A chain's inserts and a select to add one; `n` 0 is the master. */
 export function Inserts({ n }: { n: number }) {
-  const devices = useApp((s) => s.snapshot?.graph.devices ?? []);
-  const params = useApp((s) => s.snapshot?.params ?? {});
+  const devices = useApp((s) => s.snapshot?.graph.devices);
+  const params = useApp((s) => s.snapshot?.params);
   const open = useApp((s) => s.device);
-  const here = devices.filter((d) => d.channel === n);
+  const here = (devices ?? []).filter((d) => d.channel === n);
   return (
     <div className="flex flex-col items-stretch gap-0.5 w-20" data-testid={`inserts-${n}`}>
       {here.map((d) => {
-        const bypassed = (params[`${d.id}.bypass`] ?? 0) >= 0.5;
+        const bypassed = (params?.[`${d.id}.bypass`] ?? 0) >= 0.5;
         return (
           <button
             key={d.id}
@@ -70,9 +70,10 @@ export function DevicePanel() {
   const id = useApp((s) => s.device);
   const device = useApp((s) => s.snapshot?.graph.devices.find((d) => d.id === s.device));
   const chain = useApp((s) => s.snapshot?.graph.devices.filter((d) => d.channel === device?.channel).length ?? 0);
-  const params = useApp((s) => s.registry.filter((p) => s.device !== null && p.path.startsWith(`${s.device}.`)));
+  const registry = useApp((s) => s.registry);
   const bypassed = useApp((s) => (s.snapshot?.params[`${s.device}.bypass`] ?? 0) >= 0.5);
   if (!id || !device) return null;
+  const params = registry.filter((p) => p.path.startsWith(`${id}.`));
   const move = (position: number) => void act(client.call("device.move", { id, channel: device.channel, position }));
   const btn = "px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:opacity-30";
   return (
