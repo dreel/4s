@@ -424,14 +424,24 @@ impl Core {
             lanes.push((n, l));
         }
         for (n, l) in lanes.into_iter().filter(|(_, l)| !l.is_empty()) {
-            let mut kept = Vec::new();
+            // Check each lane on its own, then send the clip's once.
+            let mut kept: Vec<Lane> = Vec::new();
             for lane in l {
-                let mut with = kept.clone();
-                with.push(lane.clone());
-                match self.set_lanes(id, n, with, "") {
-                    Ok(_) => kept.push(lane),
-                    Err(e) => warnings.push(format!("{id}: clip {n}: ignored the lane for '{}': {}", lane.path, e.message)),
+                let path = lane.path.clone();
+                let ok = if kept.len() >= MAX_LANES {
+                    Err(RpcError::invalid(format!("at most {MAX_LANES} lanes in a clip")))
+                } else if kept.iter().any(|k| k.path == path) {
+                    Err(RpcError::invalid("a second lane for it"))
+                } else {
+                    self.check_lane(lane)
+                };
+                match ok {
+                    Ok(lane) => kept.push(lane),
+                    Err(e) => warnings.push(format!("{id}: clip {n}: ignored the lane for '{path}': {}", e.message)),
                 }
+            }
+            if let Err(e) = self.set_lanes(id, n, kept, "") {
+                warnings.push(format!("{id}: clip {n}: ignored its lanes: {}", e.message));
             }
         }
         if let Some(n) = t.launched {

@@ -52,6 +52,20 @@ impl Core {
         }
     }
 
+    /// A lane with its points sorted and clamped (and rounded, for a
+    /// whole-number parameter) to its parameter's range, or why not.
+    pub(super) fn check_lane(&self, l: Lane) -> Result<Lane, RpcError> {
+        let (.., pid) = self.lane_target(&l.path)?;
+        let mut points = normalize_points(&l.points).map_err(|e| RpcError::invalid(format!("{}: {e}", l.path)))?;
+        if points.is_empty() {
+            return Err(RpcError::invalid(format!("{}: a lane has at least one point", l.path)));
+        }
+        for p in &mut points {
+            p.value = self.params[pid].info.clamp(p.value);
+        }
+        Ok(Lane { path: l.path, points })
+    }
+
     /// Replace a clip's lanes: checked (known parameters, one lane each, at
     /// most `MAX_LANES`), points sorted and clamped to their parameter's
     /// range, then sent to the engine. Emits `clip_changed`.
@@ -65,15 +79,7 @@ impl Core {
             if checked.iter().any(|c| c.path == l.path) {
                 return Err(RpcError::invalid(format!("two lanes for '{}'", l.path)));
             }
-            let (_, min, max, _) = self.lane_target(&l.path)?;
-            let mut points = normalize_points(&l.points).map_err(|e| RpcError::invalid(format!("{}: {e}", l.path)))?;
-            if points.is_empty() {
-                return Err(RpcError::invalid(format!("{}: a lane has at least one point", l.path)));
-            }
-            for p in &mut points {
-                p.value = p.value.clamp(min as f64, max as f64);
-            }
-            checked.push(Lane { path: l.path, points });
+            checked.push(self.check_lane(l)?);
         }
         if self.track(id).clips[&n].lanes == checked {
             return Ok(self.clip(id, n));
@@ -93,8 +99,10 @@ impl Core {
     fn sync_lanes(&mut self, id: &str, n: u32, points: bool) {
         let c = &self.track(id).clips[&n];
         let (clip, mut sent) = (c.engine, c.sent);
-        let mut commands = Vec::new();
+        // Per lane: what it will be once its commands are queued.
+        let mut commands: Vec<(usize, Option<(ParamTarget, u8)>, Vec<Command>)> = Vec::new();
         for (k, sent) in sent.iter_mut().enumerate() {
+            let mut lane_commands = Vec::new();
             let lane = k as u8;
             let want = c.lanes.get(k).and_then(|l| self.lane_target(&l.path).ok().map(|t| (t, l)));
             let key = want.map(|((target, ..), l)| (target, l.points.len() as u8));
@@ -105,19 +113,29 @@ impl Core {
                 Some(((target, min, max, pid), l)) => {
                     let base = self.params[pid].value as f32;
                     let len = l.points.len() as u8;
-                    commands.push(Command::SetLane { clip, lane, target: Some(target), base, min, max, len });
+                    lane_commands.push(Command::SetLane { clip, lane, target: Some(target), base, min, max, len });
                     if points || sent.is_none_or(|s| s.1 != len) {
                         for (i, p) in l.points.iter().enumerate() {
-                            commands.push(Command::SetLanePoint { clip, lane, index: i as u8, tick: p.tick, value: p.value as f32 });
+                            lane_commands.push(Command::SetLanePoint { clip, lane, index: i as u8, tick: p.tick, value: p.value as f32 });
                         }
                     }
                 }
-                None => commands.push(Command::SetLane { clip, lane, target: None, base: 0.0, min: 0.0, max: 1.0, len: 0 }),
+                None => lane_commands.push(Command::SetLane { clip, lane, target: None, base: 0.0, min: 0.0, max: 1.0, len: 0 }),
             }
-            *sent = key;
+            commands.push((k, key, lane_commands));
         }
-        for command in commands {
-            self.send(command);
+        // A lane whose commands did not all fit is not marked sent (a lane
+        // that did not get its points is marked unsent), so the next sync
+        // sends it again instead of trusting the engine has it.
+        for (k, key, lane_commands) in commands {
+            let mut queued = true;
+            for command in lane_commands {
+                if let Err(rtrb::PushError::Full(command)) = self.commands.push(command) {
+                    tracing::warn!("engine command queue full; dropped {command:?}");
+                    queued = false;
+                }
+            }
+            sent[k] = if queued { key } else if key.is_some() { None } else { sent[k] };
         }
         self.tracks.get_mut(id).and_then(|t| t.clips.get_mut(&n)).expect("checked").sent = sent;
     }

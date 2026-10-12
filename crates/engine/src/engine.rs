@@ -116,7 +116,8 @@ pub enum Command {
     SetLane { clip: u16, lane: u8, target: Option<ParamTarget>, base: f32, min: f32, max: f32, len: u8 },
     /// Set point `index` of a lane (a lane's points are in tick order).
     SetLanePoint { clip: u16, lane: u8, index: u8, tick: u32, value: f32 },
-    /// Remove every event from a clip (an index in the clip table).
+    /// Empty a clip (an index in the clip table): no events, no lanes, the
+    /// default length.
     ClearClip { clip: u16 },
     /// Add an event (replacing one at the same tick and note).
     AddEvent { clip: u16, event: ClipEvent },

@@ -13,8 +13,8 @@ import type { ParamInfo } from "../generated/ParamInfo";
 import { act, client, useApp } from "../store";
 
 export const LANE_H = 48;
-/** The protocol's `MAX_CLIP_TICKS` and `MAX_LANES`. */
-const MAX_CLIP_TICKS = 64 * 24;
+/** The protocol's `MAX_CLIP_TICKS` (the longest clip) and `MAX_LANES`. */
+export const MAX_CLIP_TICKS = 64 * 24;
 const MAX_LANES = 8;
 
 /** A parameter's range (from the registry); 0..1 if unknown. */
@@ -105,8 +105,9 @@ export function LaneStrip({ clip, lane, px, snap, width }: { clip: Clip; lane: L
       onPointerUp={() => {
         if (!drag) return;
         setDrag(null);
+        // Someone else may have changed the lane meanwhile.
         const was = lane.points[drag.index];
-        if (was.tick === drag.tick && was.value === drag.value) return;
+        if (!was || (was.tick === drag.tick && was.value === drag.value)) return;
         // A point dropped on another's tick replaces it.
         const next = lane.points.filter((q, i) => i !== drag.index && q.tick !== drag.tick);
         void setLane(clip, lane.path, [...next, { tick: drag.tick, value: drag.value }]);

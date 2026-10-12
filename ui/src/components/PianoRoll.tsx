@@ -12,7 +12,7 @@ import type { ClipEvent } from "../generated/ClipEvent";
 import type { EventKey } from "../generated/EventKey";
 import type { TakeNote } from "../generated/TakeNote";
 import { act, client, useApp, useLive, useSelectedClipTick } from "../store";
-import { AddLane, LaneLabel, LaneStrip } from "./AutomationLanes";
+import { AddLane, LaneLabel, LaneStrip, MAX_CLIP_TICKS } from "./AutomationLanes";
 import { noteName } from "./StepView";
 import { GM_NOTES, voiceShort } from "./voices";
 import type { Voice } from "../generated/Voice";
@@ -21,8 +21,6 @@ import type { Voice } from "../generated/Voice";
 const STEP = 24;
 const BEAT = 96;
 const BAR = 384;
-/** The longest clip, in ticks (`MAX_CLIP_TICKS`). */
-const MAX_TICKS = 64 * STEP;
 const ROW = 16;
 const VEL_H = 48;
 const VOICES: Voice[] = ["kick", "snare", "clap", "closed_hat", "open_hat", "low_tom", "high_tom", "cowbell"];
@@ -138,7 +136,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
     if (!drag || !("notes" in drag) || !drag.notes.some((n) => key(n) === key(e))) return e;
     if (drag.kind === "move" || drag.kind === "copy") {
       const r = clamp(rowOf(e.note) + drag.dn, 0, rows.length - 1);
-      return { ...e, tick: clamp(e.tick + drag.dt, 0, Math.min(length, MAX_TICKS) - 1), note: rows[r] };
+      return { ...e, tick: clamp(e.tick + drag.dt, 0, Math.min(length, MAX_CLIP_TICKS) - 1), note: rows[r] };
     }
     if (drag.kind === "resize") return { ...e, len: Math.max(1, e.len + drag.dl) };
     return { ...e, velocity: clamp(e.velocity + drag.dv, 1, 127) };
@@ -189,7 +187,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
         const r = Math.floor(drag.y / ROW);
         const t = Math.floor(drag.x / px / snap) * snap;
         // Not past the clip's loop (it would never play).
-        if (r < 0 || r >= rows.length || t >= Math.min(length, MAX_TICKS)) return;
+        if (r < 0 || r >= rows.length || t >= Math.min(length, MAX_CLIP_TICKS)) return;
         const n = { tick: t, len: drums ? STEP : Math.max(snap, STEP / 2), note: rows[r], velocity: 100 };
         setSelected(new Set([key(n)]));
         void update([], [n]);
