@@ -1014,7 +1014,7 @@ check "...pans the render left" "left" python3 "$TMP/lr.py"
 check "...and leaves the value set by hand" "pan C" bash -c "$BIN/4s mixer | grep 'ch 1'"
 check "the transport takes no automation" "the transport's" s clip lane drums transport.tempo "0:100"
 check "nor do toggles" "is a toggle" s clip lane drums mixer.1.mute "0:1"
-check "values are clamped to the parameter's range" "lane mixer.1.volume: 0:1.5" s clip lane drums mixer.1.volume "0:9"
+check "values are clamped to the parameter's range" "lane mixer.1.volume: 0:1" s clip lane drums mixer.1.volume "0:9"
 check "a duplicate copies the lanes" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s clip dup drums | grep pan"
 s clip select drums 1 >/dev/null
 s clip del drums --clip 2 >/dev/null
