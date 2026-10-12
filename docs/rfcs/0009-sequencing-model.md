@@ -1,11 +1,11 @@
 # RFC 0009: One transport, clip launching, and a generic step view
 
-- Status: accepted (direction approved by Sam in the project thread,
-  2026-10-11: one transport that always plays the arrangement, plus
-  Ableton-style clip launching in place of pattern mode; the details below
-  are open to review on this PR)
+- Status: proposed (the direction was approved by Sam in the project
+  thread on 2026-10-11: one transport that always plays the arrangement,
+  plus Ableton-style clip launching in place of pattern mode; the details
+  are for review on this PR, and merging it accepts them)
 - Author: Sam (@dreel), drafted with Claude
-- Created: 2026-10-12
+- Created: 2026-10-11
 - Discussion: the PR that introduces this RFC.
 
 ## Summary
@@ -54,7 +54,9 @@ sit on top of the arrangement instead of beside it.
   today.
 - Playback without a loop stops at the song's end, unless recording (as
   today) or **any track is playing a launched clip** (a launched clip plays
-  until stopped).
+  until stopped). A return to the arrangement that is still waiting for
+  its boundary counts as launched: past the song's end, the transport stops
+  when the last one lands.
 - **Loop this placement**: a UI action (and documented CLI recipe) that
   sets the brace to the bars a placement covers (rounded out to whole bars,
   since the loop parameters are bars) and turns the loop on, as one
@@ -67,12 +69,15 @@ clip**:
 
 - `clip.launch { instrument?, clip?, now? }` (default: the caller's focus,
   its selected clip) makes the track loop that clip, from the clip's start,
-  instead of its placements.
+  instead of its placements. The selected clip is per track, shared by
+  everyone, and the journal records the instrument and clip a launch
+  resolved to, so a replay launches the same clip whatever the replaying
+  client's focus.
 - `song.back { instrument? }` returns one track to the arrangement, or
   every track when no instrument is named (Ableton's "back to
   arrangement").
 - **Quantized.** While playing, a launch or a back waits for the next
-  multiple of `launch.quantize` on the song timeline: a parameter, 0 none
+  multiple of `transport.launch_quantize` on the song timeline: a parameter, 0 none
   (the next tick), 1 a beat, 2 a bar (default), 3 two bars, 4 four bars.
   `now: true` ignores it. While stopped it takes effect at once, and every
   launched clip starts from its beginning when the transport starts
@@ -90,7 +95,9 @@ clip**:
   (so a project reopens sounding as it was saved) and every launch is a
   journaled request (so a replay reproduces it), but launching is a
   performance action like the transport and the metronome: it is not in
-  the undo doc. Deleting a launched clip sends its track back.
+  the undo doc. Deleting a launched clip sends its track back; undoing the
+  delete brings the clip back but does not launch it again (launch it
+  again by hand), which keeps undo out of performance state entirely.
 - `clip.select` no longer affects playback: the selected clip is only
   the edit target (step views, the piano roll panel, the Block, and the
   `clip.*` defaults).
@@ -123,6 +130,10 @@ target, as a locate does today.
 
 ### 5. One step view (phase 2)
 
+Sections 1-4 are phase 1; sections 5-6 phase 2; section 7 phase 3, with
+its own RFC.
+
+
 - `DrumEditor` and `BassEditor` become one `StepView` over any clip: a
   grid of steps at a resolution (1/16 default, 1/8, 1/32, triplets) over
   the clip's length, scrolling and paging like the piano roll.
@@ -151,7 +162,7 @@ target, as a locate does today.
   track's clips as pads: press to launch, the track's row end to go back
   to the arrangement.
 
-### 7. Devices (later phase, own RFC)
+### 7. Devices (phase 3, own RFC)
 
 Recorded here so the clip work does not paint itself into a corner:
 
@@ -175,7 +186,7 @@ This RFC changes none of that; it only keeps instruments behind the
   `clip.launch` and `song.back` and draws `launched`, `pending`, and the
   playhead's `clips`.
 - **API parity**: `clip.launch` -> `4s clip launch`, `song.back` -> `4s
-  song back`; `launch.quantize` is a parameter (`4s set`). The parity test
+  song back`; `transport.launch_quantize` is a parameter (`4s set`). The parity test
   covers them.
 - **Real-time safety**: a launch is a small command; the engine keeps a
   pending switch per slot in preallocated state and resolves it on the
@@ -185,7 +196,10 @@ This RFC changes none of that; it only keeps instruments behind the
   from triggers in a render, and live through the CLI and Electron e2e.
 - **Modularity**: note maps and declared expressions move instrument
   specifics out of the protocol and the UI (phase 2); devices follow.
-- **Network transparency**: no impact; all state is in the daemon.
+- **Network transparency**: all state is in the daemon. `launched` and
+  `pending` are in each `TrackInfo` and the playhead's `clips` in
+  `TransportState`, so a client that reconnects gets them from
+  `state.get` like everything else.
 
 ## Alternatives
 
@@ -209,7 +223,7 @@ This RFC changes none of that; it only keeps instruments behind the
   16 steps) in ticks. Tracks gain `launched`. Projects saved in song mode
   launch nothing.
 - **Protocol 8**: `song.mode` and `sequencer.length` are gone;
-  `clip.launch`, `song.back`, `launch.quantize`; `Clip.length` and
+  `clip.launch`, `song.back`, `transport.launch_quantize`; `Clip.length` and
   `ClipHeader.length` are numbers; `clip.length` takes a number;
   `TrackInfo` has `launched` and `pending`; `TransportState` and the
   `playhead` event have `clips`, and `step` is the song position in
@@ -237,12 +251,12 @@ This RFC changes none of that; it only keeps instruments behind the
 ## Implementation plan
 
 1. This RFC.
-2. Transport unification and clip launching (sections 1-4), with the v6
-   migration, protocol 8, CLI, e2e, and UI (no pattern/song toggle, launch
-   and back controls, loop this placement).
-3. The generic step view, note maps, declared expressions, and the Block
-   on clips (sections 5-6).
-4. Devices: a follow-up RFC.
+2. Phase 1: transport unification and clip launching (sections 1-4), with
+   the v6 migration, protocol 8, CLI, e2e, and UI (no pattern/song toggle,
+   launch and back controls, loop this placement).
+3. Phase 2: the generic step view, note maps, declared expressions, and
+   the Block on clips (sections 5-6).
+4. Phase 3: devices, in a follow-up RFC.
 
 ## Open questions
 
