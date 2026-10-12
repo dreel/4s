@@ -313,6 +313,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   effect at the render's tempo, so no render check can see it; a live check
   would need the audio output (or engine feedback of the delay time).
 
+- (2026-10-12, modulators review) undo's ownership (`journal.rs`,
+  `owner`) does not know `mod:` keys: undoing an instrument's add removes
+  another user's routes to it without reporting them as skipped.
+- (2026-10-12, modulators review) the LFO bank's four outputs are spelled
+  out in `DeviceType::ports`, `modulator::LFOS`, and the UI's map buttons;
+  derive the UI's from the registry's ports and share one constant.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

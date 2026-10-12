@@ -96,7 +96,7 @@ struct Lfo {
     rate: f32,
     division: usize,
     phase: f32,
-    /// Free-running phase, 0..1.
+    /// Free-running cycles (not wrapped, so cycle changes show).
     free: f64,
     /// The cycle a sample-and-hold value belongs to, and the value.
     held: (i64, f32),
@@ -104,10 +104,17 @@ struct Lfo {
 }
 
 /// Four LFOs.
-#[derive(Default)]
 pub struct LfoBank {
     lfos: [Lfo; LFOS],
     noise: u32,
+}
+
+impl Default for LfoBank {
+    fn default() -> Self {
+        // No sample-and-hold value yet: the first block takes one.
+        let lfo = Lfo { held: (i64::MIN, 0.0), ..Lfo::default() };
+        Self { lfos: [lfo; LFOS], noise: 0x9e37_79b9 }
+    }
 }
 
 fn wave(shape: u8, x: f32) -> f32 {
@@ -147,7 +154,11 @@ impl Modulator for LfoBank {
             } else {
                 // 0.01 Hz .. 20 Hz.
                 let hz = 0.01 * 2000f64.powf(l.rate as f64);
-                l.free = (l.free + hz * frames as f64 / ctx.sr as f64).fract();
+                l.free += hz * frames as f64 / ctx.sr as f64;
+                // Keep it small without losing the cycle count's changes.
+                if l.free > 1e6 {
+                    l.free -= 1e6;
+                }
                 l.free
             };
             let t = cycles + l.phase as f64;
@@ -191,6 +202,34 @@ mod tests {
         assert!((at(&mut m, 1.0) - 1.0).abs() < 1e-5);
         assert!(at(&mut m, 2.0).abs() < 1e-4);
         assert!((at(&mut m, 3.0) + 1.0).abs() < 1e-5);
+    }
+
+    /// Sample and hold takes a new value once a cycle, starting with the
+    /// first block, free or synced.
+    #[test]
+    fn sample_and_hold_changes_once_a_cycle() {
+        let mut m = make(DeviceType::Lfo);
+        m.set_param(0, 5.0); // shape: sample and hold
+        m.set_param(1, 0.0); // free
+        m.set_param(2, 0.0); // 0.01 Hz: one cycle per 100 s
+        let ctx = |beat| ModContext { sr: 1000.0, tempo: 120.0, beat };
+        m.advance(1, &ctx(0.0));
+        let first = m.output(0);
+        assert!(first != 0.0, "the first block samples");
+        m.advance(1000, &ctx(0.0));
+        assert_eq!(m.output(0), first, "held within the cycle");
+        m.advance(100_000, &ctx(0.0));
+        assert!(m.output(0) != first, "a new value the next cycle");
+        // Synced: one value per period, from the first one.
+        let mut s = make(DeviceType::Lfo);
+        s.set_param(0, 5.0);
+        s.advance(1, &ctx(0.5));
+        let a = s.output(0);
+        assert!(a != 0.0);
+        s.advance(1, &ctx(3.9));
+        assert_eq!(s.output(0), a);
+        s.advance(1, &ctx(4.1));
+        assert!(s.output(0) != a);
     }
 
     /// Every shape stays in -1..1.

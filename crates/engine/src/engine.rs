@@ -623,7 +623,11 @@ impl Engine {
             Command::SetModRoute { index, route } => {
                 if let Some(cell) = self.routes.get_mut(index as usize) {
                     let old = std::mem::replace(cell, route);
-                    if let Some(o) = old.filter(|o| route.is_none_or(|r| r.target != o.target)) {
+                    // Its target goes back to its base unless another route
+                    // still moves it (a route shifting to another index).
+                    if let Some(o) = old.filter(|o| route.is_none_or(|r| r.target != o.target))
+                        && !self.routes.iter().flatten().any(|r| r.target == o.target)
+                    {
                         self.write_param(o.target, o.base);
                     }
                 }

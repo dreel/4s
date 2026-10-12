@@ -2014,7 +2014,9 @@ impl Core {
                 + clip_sets.commands()
                 + device_sets.devices.len() * ADD_COMMANDS
                 + (channel_inserts + made_devices) * 2
+                // Routes it adds or removes, and those a removal prunes.
                 + if device_sets.routes.is_empty() { 0 } else { MAX_MOD_ROUTES }
+                + self.route_commands()
                 + device_sets.chains.len() * 2,
         )?;
 
