@@ -43,6 +43,7 @@ pub struct RenderLane {
     pub base: f32,
     pub min: f32,
     pub max: f32,
+    pub whole: bool,
     pub points: Vec<(u32, f32)>,
 }
 
@@ -152,7 +153,7 @@ impl RenderSpec {
             }
             for (k, l) in c.lanes.iter().enumerate() {
                 let len = l.points.len() as u8;
-                let lane = Command::SetLane { clip: c.index, lane: k as u8, target: Some(l.target), base: l.base, min: l.min, max: l.max, len };
+                let lane = Command::SetLane { clip: c.index, lane: k as u8, target: Some(l.target), base: l.base, min: l.min, max: l.max, whole: l.whole, len };
                 let _ = e.apply(lane, &mut fb);
                 for (i, (tick, value)) in l.points.iter().enumerate() {
                     let point = Command::SetLanePoint { clip: c.index, lane: k as u8, index: i as u8, tick: *tick, value: *value };

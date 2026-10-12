@@ -384,7 +384,8 @@ instruments.
   points; `clip.lane.set` replaces one lane (adds it if new), sorting its
   points and clamping their values to the parameter's range;
   `clip.lane.remove` drops it. Continuous and whole-number parameters
-  only; not toggles, not `transport.*`. Point ticks are checked against
+  only; not toggles, not the transport's (`transport.*` and the song's
+  loop, `song.*`: the daemon counts time by them). Point ticks are checked against
   the longest clip, not the clip's length, so undo can restore a lane
   before the clip's length; points past the loop never play.
 - Engine: each clip-table entry holds its lanes (`Command::SetLane`,
@@ -405,6 +406,9 @@ instruments.
   value set by hand (backlog).
 - CLI: `4s clip lane <instrument> <path> "tick:value ..."` (`--rm`), and
   `4s clip show` lists lanes.
+- Whole-number parameters' lanes are rounded (points in the daemon, the
+  line between them in the engine). The UI's limits come from the
+  generated `limits.ts`.
 - UI: `AutomationLanes.tsx`: a lane strip per lane under the piano roll's
   velocity lane (click: add a point on the snap grid, drag: move,
   alt-click: remove; a dashed line is the value set by hand), and a

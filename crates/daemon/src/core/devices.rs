@@ -360,7 +360,7 @@ impl Core {
     /// A route's target: a continuous parameter, and its range. Not the
     /// transport's (the daemon counts time by them).
     fn mod_target(&self, path: &str) -> Result<(ParamTarget, f32, f32), RpcError> {
-        if path.starts_with("transport.") {
+        if transport_param(path) {
             return Err(RpcError::invalid(format!("'{path}' is the transport's: it takes no modulation")));
         }
         let p = &self.params[self.param_id(path)?];

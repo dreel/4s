@@ -9,13 +9,11 @@ import { useState } from "react";
 import type { Clip } from "../generated/Clip";
 import type { Lane } from "../generated/Lane";
 import type { LanePoint } from "../generated/LanePoint";
+import { MAX_CLIP_TICKS, MAX_LANES } from "../generated/limits";
 import type { ParamInfo } from "../generated/ParamInfo";
 import { act, client, useApp } from "../store";
 
 export const LANE_H = 48;
-/** The protocol's `MAX_CLIP_TICKS` (the longest clip) and `MAX_LANES`. */
-export const MAX_CLIP_TICKS = 64 * 24;
-const MAX_LANES = 8;
 
 /** A parameter's range (from the registry); 0..1 if unknown. */
 function rangeOf(registry: ParamInfo[], path: string): [number, number] {
@@ -31,10 +29,10 @@ function useRange(path: string): [number, number] {
 }
 
 /** Parameters a lane can take: continuous and whole-number, not the
- * transport's. */
+ * transport's (`transport_param` in the protocol). */
 export function useAutomatable(): string[] {
   const registry = useApp((s) => s.registry);
-  return registry.filter((p) => p.kind !== "toggle" && !p.path.startsWith("transport.")).map((p) => p.path);
+  return registry.filter((p) => p.kind !== "toggle" && !p.path.startsWith("transport.") && !p.path.startsWith("song.")).map((p) => p.path);
 }
 
 /** Set a lane's points (one undo step), or remove it with none left. */

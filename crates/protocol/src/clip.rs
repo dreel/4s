@@ -82,6 +82,13 @@ pub struct Clip {
     pub lanes: Vec<Lane>,
 }
 
+/// Whether a parameter belongs to the transport (tempo, swing, the song's
+/// loop, launch quantize): the daemon counts time by these, so nothing but a
+/// hand (or a CC) moves them, not automation.
+pub fn transport_param(path: &str) -> bool {
+    path.starts_with("transport.") || path.starts_with("song.")
+}
+
 /// Most automation lanes in a clip.
 pub const MAX_LANES: usize = 8;
 /// Most points in a lane.

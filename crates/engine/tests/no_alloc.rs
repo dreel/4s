@@ -111,10 +111,10 @@ fn process_never_allocates() {
             Command::SetClipLength { clip: 1, length: 48 },
             // Automation lanes (RFC 0010): the bass clip moves channel 2's
             // pan and the filter's cutoff (over its modulation).
-            Command::SetLane { clip: 1, lane: 0, target: Some(ParamTarget::Channel { ch: 1, index: 1 }), base: 0.0, min: -1.0, max: 1.0, len: 2 },
+            Command::SetLane { clip: 1, lane: 0, target: Some(ParamTarget::Channel { ch: 1, index: 1 }), base: 0.0, min: -1.0, max: 1.0, whole: false, len: 2 },
             Command::SetLanePoint { clip: 1, lane: 0, index: 0, tick: 0, value: -1.0 },
             Command::SetLanePoint { clip: 1, lane: 0, index: 1, tick: 40, value: 1.0 },
-            Command::SetLane { clip: 1, lane: 1, target: Some(ParamTarget::Effect { slot: 0, index: 3 }), base: 0.3, min: 0.0, max: 1.0, len: 1 },
+            Command::SetLane { clip: 1, lane: 1, target: Some(ParamTarget::Effect { slot: 0, index: 3 }), base: 0.3, min: 0.0, max: 1.0, whole: false, len: 1 },
             Command::SetLanePoint { clip: 1, lane: 1, index: 0, tick: 0, value: 0.9 },
             Command::Launch { slot: 0, clip: Some(0), now: false },
             Command::Launch { slot: 1, clip: Some(1), now: false },
@@ -160,7 +160,7 @@ fn process_never_allocates() {
         for c in [
             Command::Launch { slot: 0, clip: None, now: true },
             Command::Launch { slot: 1, clip: None, now: false },
-            Command::SetLane { clip: 1, lane: 1, target: None, base: 0.0, min: 0.0, max: 1.0, len: 0 },
+            Command::SetLane { clip: 1, lane: 1, target: None, base: 0.0, min: 0.0, max: 1.0, whole: false, len: 0 },
             Command::SetParam { target: ParamTarget::Global(params::LOOP), value: 2.0 },
             Command::SetParam { target: ParamTarget::Global(params::LOOP_END), value: 1.0 },
             Command::Locate { tick: 0 },

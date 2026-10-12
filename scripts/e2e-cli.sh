@@ -1013,6 +1013,7 @@ check "a lane on channel 1's pan" "lane mixer.1.pan: 0:-1 192:-1" s clip lane dr
 check "...pans the render left" "left" python3 "$TMP/lr.py"
 check "...and leaves the value set by hand" "pan C" bash -c "$BIN/4s mixer | grep 'ch 1'"
 check "the transport takes no automation" "the transport's" s clip lane drums transport.tempo "0:100"
+check "nor does the song's loop (the daemon counts time by it)" "the transport's" s clip lane drums song.loop_end "0:2"
 check "nor do toggles" "is a toggle" s clip lane drums mixer.1.mute "0:1"
 check "values are clamped to the parameter's range" "lane mixer.1.volume: 0:1" s clip lane drums mixer.1.volume "0:9"
 check "a duplicate copies the lanes" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s clip dup drums | grep pan"

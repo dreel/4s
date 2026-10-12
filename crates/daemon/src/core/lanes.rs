@@ -40,7 +40,7 @@ impl Core {
     /// Continuous or whole-number, and not the transport's (the daemon
     /// counts time by it).
     pub(super) fn lane_target(&self, path: &str) -> Result<(ParamTarget, f32, f32, usize), RpcError> {
-        if path.starts_with("transport.") {
+        if transport_param(path) {
             return Err(RpcError::invalid(format!("'{path}' is the transport's: it takes no automation")));
         }
         let id = self.param_id(path)?;
@@ -112,21 +112,24 @@ impl Core {
             match want {
                 Some(((target, min, max, pid), l)) => {
                     let base = self.params[pid].value as f32;
+                    let whole = matches!(self.params[pid].info.kind, ParamKind::Integer { .. });
                     let len = l.points.len() as u8;
-                    lane_commands.push(Command::SetLane { clip, lane, target: Some(target), base, min, max, len });
+                    lane_commands.push(Command::SetLane { clip, lane, target: Some(target), base, min, max, whole, len });
                     if points || sent.is_none_or(|s| s.1 != len) {
                         for (i, p) in l.points.iter().enumerate() {
                             lane_commands.push(Command::SetLanePoint { clip, lane, index: i as u8, tick: p.tick, value: p.value as f32 });
                         }
                     }
                 }
-                None => lane_commands.push(Command::SetLane { clip, lane, target: None, base: 0.0, min: 0.0, max: 1.0, len: 0 }),
+                None => lane_commands.push(Command::SetLane { clip, lane, target: None, base: 0.0, min: 0.0, max: 1.0, whole: false, len: 0 }),
             }
             commands.push((k, key, lane_commands));
         }
         // A lane whose commands did not all fit is not marked sent (a lane
         // that did not get its points is marked unsent), so the next sync
-        // sends it again instead of trusting the engine has it.
+        // sends it again instead of trusting the engine has it. Until then
+        // (the next edit or graph change) it may play stale points; callers'
+        // `ensure_room` makes a full queue here unlikely.
         for (k, key, lane_commands) in commands {
             let mut queued = true;
             for command in lane_commands {
@@ -171,7 +174,8 @@ impl Core {
             .filter_map(|l| {
                 let (target, min, max, pid) = self.lane_target(&l.path).ok()?;
                 let points = l.points.iter().map(|p| (p.tick, p.value as f32)).collect();
-                Some(fours_engine::offline::RenderLane { target, base: self.params[pid].value as f32, min, max, points })
+                let whole = matches!(self.params[pid].info.kind, ParamKind::Integer { .. });
+                Some(fours_engine::offline::RenderLane { target, base: self.params[pid].value as f32, min, max, whole, points })
             })
             .collect()
     }

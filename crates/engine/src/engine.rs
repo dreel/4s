@@ -112,8 +112,9 @@ pub enum Command {
     SetModRoute { index: u8, route: Option<ModRoute> },
     /// Set a clip's automation lane: its target (`None`: no lane), the
     /// target's value set by hand, its range, and how many of its points
-    /// it uses (the points themselves stay: a retargeted lane keeps them).
-    SetLane { clip: u16, lane: u8, target: Option<ParamTarget>, base: f32, min: f32, max: f32, len: u8 },
+    /// it uses (the points themselves stay: a retargeted lane keeps them);
+    /// `whole`: the parameter takes whole numbers, so values are rounded.
+    SetLane { clip: u16, lane: u8, target: Option<ParamTarget>, base: f32, min: f32, max: f32, whole: bool, len: u8 },
     /// Set point `index` of a lane (a lane's points are in tick order).
     SetLanePoint { clip: u16, lane: u8, index: u8, tick: u32, value: f32 },
     /// Empty a clip (an index in the clip table): no events, no lanes, the
@@ -267,13 +268,14 @@ struct LaneStore {
     base: f32,
     min: f32,
     max: f32,
+    whole: bool,
     points: [(u32, f32); MAX_LANE_POINTS],
     len: u8,
 }
 
 impl Default for LaneStore {
     fn default() -> Self {
-        Self { target: None, base: 0.0, min: 0.0, max: 1.0, points: [(0, 0.0); MAX_LANE_POINTS], len: 0 }
+        Self { target: None, base: 0.0, min: 0.0, max: 1.0, whole: false, points: [(0, 0.0); MAX_LANE_POINTS], len: 0 }
     }
 }
 
@@ -690,6 +692,7 @@ impl Engine {
                 return s.replace(modulator).map(Returned::Modulator);
             }
             Command::RemoveModulator { slot } => {
+                self.forget_automated(|t| matches!(t, ParamTarget::Modulator { slot: s, .. } if s == slot));
                 // Its routes go first, their targets back at their bases.
                 for i in 0..MAX_MOD_ROUTES {
                     if let Some(r) = self.routes[i].filter(|r| r.source == slot) {
@@ -699,9 +702,9 @@ impl Engine {
                 }
                 return self.modulators.get_mut(slot as usize)?.take().map(Returned::Modulator);
             }
-            Command::SetLane { clip, lane, target, base, min, max, len } => {
+            Command::SetLane { clip, lane, target, base, min, max, whole, len } => {
                 if let Some(l) = self.clips.get_mut(clip as usize).and_then(|c| c.lanes.get_mut(lane as usize)) {
-                    *l = LaneStore { target, base, min, max, len: len.min(MAX_LANE_POINTS as u8), points: l.points };
+                    *l = LaneStore { target, base, min, max, whole, len: len.min(MAX_LANE_POINTS as u8), points: l.points };
                 }
             }
             Command::SetLanePoint { clip, lane, index, tick, value } => {
@@ -733,6 +736,7 @@ impl Engine {
                 return s.replace(EffectSlot { effect, bypass: false, mix: 0.0, wet, idle: false }).map(|e| Returned::Effect(e.effect));
             }
             Command::RemoveEffect { slot } => {
+                self.forget_automated(|t| matches!(t, ParamTarget::Effect { slot: s, .. } if s == slot));
                 // Out of every chain first, so nothing runs a missing slot.
                 for c in 0..=MAX_CHANNELS {
                     let len = self.chain_len[c] as usize;
@@ -761,6 +765,7 @@ impl Engine {
                 return s.replace(Slot { instrument, routes: [None; MAX_OUTPUTS] }).map(|s| Returned::Instrument(s.instrument));
             }
             Command::RemoveInstrument { slot } => {
+                self.forget_automated(|t| matches!(t, ParamTarget::Instrument { slot: s, .. } if s == slot));
                 if let Some(t) = self.tracks.get_mut(slot as usize) {
                     t.reset();
                 }
@@ -985,6 +990,16 @@ impl Engine {
         }
     }
 
+    /// Forget automated targets whose slot goes, so letting go of them later
+    /// does not write a stale value into whatever takes the slot next.
+    fn forget_automated(&mut self, gone: impl Fn(ParamTarget) -> bool) {
+        for a in self.automated.iter_mut() {
+            if a.is_some_and(|(t, _)| gone(t)) {
+                *a = None;
+            }
+        }
+    }
+
     /// Set every parameter a playing clip automates to its lane's value at
     /// the clip's position; parameters no longer automated go back to their
     /// bases. After modulation, so a lane overrides a route on its target.
@@ -1003,6 +1018,7 @@ impl Engine {
                     if count < MAX_AUTOMATED && !now[..count].iter().flatten().any(|a| a.0 == target) {
                         now[count] = Some((target, l.base));
                         count += 1;
+                        let v = if l.whole { v.round() } else { v };
                         self.write_param(target, v.clamp(l.min, l.max));
                     }
                 }
@@ -1812,7 +1828,7 @@ pub(crate) mod tests {
         };
         apply(&mut e, Command::SetParam { target: pan, value: 0.25 });
         apply(&mut e, Command::Launch { slot: 0, clip: Some(0), now: false });
-        apply(&mut e, Command::SetLane { clip: 0, lane: 0, target: Some(pan), base: 0.25, min: -1.0, max: 1.0, len: 2 });
+        apply(&mut e, Command::SetLane { clip: 0, lane: 0, target: Some(pan), base: 0.25, min: -1.0, max: 1.0, whole: false, len: 2 });
         apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 0, tick: 0, value: -1.0 });
         apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 1, tick: 384, value: 1.0 });
         assert_eq!(e.channels[0].params[CH_PAN], 0.25, "stopped: the value set by hand");

@@ -177,4 +177,5 @@ export * from "./TrackPattern";
 export * from "./TransportState";
 export * from "./TriggerParams";
 export * from "./Voice";
+export * from "./limits";
 export * from "./methods";
