@@ -24,7 +24,10 @@ pub trait AudioEffect: Send {
     /// `frames` long.
     fn process(&mut self, buf: &mut [f32], frames: usize, ctx: &ProcessContext);
     /// Jump smoothers to their targets (before an offline render).
-    fn snap(&mut self) {}
+    fn snap(&mut self, _ctx: &ProcessContext) {}
+    /// Forget what it was holding (a delay's echoes, a reverb's tail), when
+    /// it resumes after a bypass. Must not allocate.
+    fn reset(&mut self) {}
 }
 
 /// Parameters every effect has, before its own: bypass and dry/wet mix.
@@ -88,7 +91,7 @@ pub fn make(kind: DeviceType, sample_rate: f32) -> Box<dyn AudioEffect> {
     for (i, p) in params(kind, "x").iter().enumerate().skip(COMMON_PARAMS) {
         e.set_param(i - COMMON_PARAMS, p.default as f32);
     }
-    e.snap();
+    e.snap(&ProcessContext { tempo: 120.0 });
     e
 }
 
@@ -143,8 +146,14 @@ impl AudioEffect for Filter {
         }
     }
 
-    fn snap(&mut self) {
+    fn snap(&mut self, _ctx: &ProcessContext) {
         self.cutoff.value = self.cutoff_target;
+    }
+
+    fn reset(&mut self) {
+        for s in &mut self.svf {
+            s.reset();
+        }
     }
 }
 
@@ -198,7 +207,9 @@ impl Delay {
         } else {
             lerp_exp(0.001, MAX_DELAY_SECS, self.time)
         };
-        (secs * self.sr).clamp(1.0, (self.buf[0].len() - 2) as f32)
+        // At least 2 samples, so the read never reaches the slot being
+        // written.
+        (secs * self.sr).clamp(2.0, (self.buf[0].len() - 2) as f32)
     }
 }
 
@@ -245,8 +256,15 @@ impl AudioEffect for Delay {
         }
     }
 
-    fn snap(&mut self) {
-        self.delay.value = self.target(&ProcessContext { tempo: 120.0 });
+    fn snap(&mut self, ctx: &ProcessContext) {
+        self.delay.value = self.target(ctx);
+    }
+
+    fn reset(&mut self) {
+        for b in &mut self.buf {
+            b.fill(0.0);
+        }
+        self.lp = [0.0; 2];
     }
 }
 
@@ -329,6 +347,16 @@ impl AudioEffect for Reverb {
             1 => self.damping = value.clamp(0.0, 1.0),
             2 => self.width = value.clamp(0.0, 1.0),
             _ => {}
+        }
+    }
+
+    fn reset(&mut self) {
+        for c in self.combs.iter_mut().flatten() {
+            c.buf.fill(0.0);
+            c.store = 0.0;
+        }
+        for a in self.allpasses.iter_mut().flatten() {
+            a.buf.fill(0.0);
         }
     }
 

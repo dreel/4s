@@ -27,7 +27,6 @@ It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010)
   `channels` (`{n, name}`, in display order; a return bus has `"kind":
   "return"`, RFC 0010), and `routes`
   (`source -> channel number`, e.g. `"drums": 1`, `"drums.kick": 3`).
-  Effects come later.
 - Audio effects (RFC 0010) under `devices`, each chain in order: `{id,
   type, name, channel}` (channel 0 is the master). Their parameters are in
   `params` under their ids. Absent when there are none.

@@ -5,12 +5,32 @@
 // duplicated here), bypass, moving it earlier or later in its chain, and
 // removing it.
 
+import { useEffect, useState } from "react";
 import type { DeviceType } from "../generated/DeviceType";
 import { act, app, client, setParam, useApp } from "../store";
 import { Toggle } from "./controls";
 import { ParamKnob } from "./ParamKnob";
 
-const TYPES: DeviceType[] = ["filter", "delay", "reverb"];
+/** The registry's audio effect types, fetched once per connection and
+ * shared by every strip. */
+let effectTypes: Promise<DeviceType[]> | null = null;
+
+/** The audio effect types the daemon's registry offers (`device.types`). */
+function useEffectTypes(): DeviceType[] {
+  const [types, setTypes] = useState<DeviceType[]>([]);
+  const connected = useApp((s) => s.connection === "open");
+  useEffect(() => {
+    if (!connected) {
+      effectTypes = null;
+      return;
+    }
+    effectTypes ??= act(client.call("device.types", {})).then((r) =>
+      (r?.types ?? []).filter((t) => t.kind === "audio_effect").map((t) => t.type as DeviceType),
+    );
+    void effectTypes.then(setTypes);
+  }, [connected]);
+  return types;
+}
 
 /** Open (or close) a device's panel. */
 export function openDevice(id: string | null) {
@@ -22,6 +42,7 @@ export function Inserts({ n }: { n: number }) {
   const devices = useApp((s) => s.snapshot?.graph.devices);
   const params = useApp((s) => s.snapshot?.params);
   const open = useApp((s) => s.device);
+  const types = useEffectTypes();
   const here = (devices ?? []).filter((d) => d.channel === n);
   return (
     <div className="flex flex-col items-stretch gap-0.5 w-20" data-testid={`inserts-${n}`}>
@@ -55,7 +76,7 @@ export function Inserts({ n }: { n: number }) {
         }}
       >
         <option value="">+ fx</option>
-        {TYPES.map((t) => (
+        {types.map((t) => (
           <option key={t} value={t}>
             {t}
           </option>
