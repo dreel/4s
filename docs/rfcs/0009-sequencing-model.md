@@ -43,6 +43,9 @@ sit on top of the arrangement instead of beside it.
 
 ## Design
 
+Sections 1-4 are phase 1; sections 5-6 phase 2; section 7 phase 3, with
+its own RFC.
+
 ### 1. One transport
 
 - `song.mode` goes. Play always plays the arrangement from the locate
@@ -51,7 +54,8 @@ sit on top of the arrangement instead of beside it.
   `song.loop_end`, bars). The arrangement view's playhead and loop brace
   always apply.
 - An empty song plays on (silence, or launched clips) until stopped, as
-  today.
+  today. Playing from past a bar loop's end goes on without looping, as
+  today, so the stop rule below applies there too.
 - Playback without a loop stops at the song's end, unless recording (as
   today) or **any track is playing a launched clip** (a launched clip plays
   until stopped). A return to the arrangement that is still waiting for
@@ -81,7 +85,14 @@ clip**:
   (the next tick), 1 a beat, 2 a bar (default), 3 two bars, 4 four bars.
   `now: true` ignores it. While stopped it takes effect at once, and every
   launched clip starts from its beginning when the transport starts
-  (after any count-in).
+  (after any count-in). The boundary is counted on the song position:
+  a switch lands on the first tick whose song position is a multiple of
+  the quantum. Loops start and end on whole bars, so with beat or bar
+  quantize a wrap lands on a boundary; a two- or four-bar quantum with a
+  loop that is not a multiple of it lands on the next song position that
+  is (so it can take more than one pass, as in Ableton with a short loop).
+  A locate lands waiting switches on the first boundary at or after the
+  new position.
 - A launched clip loops at its own length, counted from the tick it
   started, whatever the arrangement does: a song loop wrapping or a locate
   does not move it. Coming back, the track picks up the arrangement where
@@ -129,9 +140,6 @@ target, as a locate does today.
   there. `step` is the song position in steps.
 
 ### 5. One step view (phase 2)
-
-Sections 1-4 are phase 1; sections 5-6 phase 2; section 7 phase 3, with
-its own RFC.
 
 
 - `DrumEditor` and `BassEditor` become one `StepView` over any clip: a
@@ -232,7 +240,9 @@ This RFC changes none of that; it only keeps instruments behind the
   clip length <steps>` (no `--follow`); `4s set sequencer.length` is gone.
 - **Journals**: recordings made before protocol 8 that set `song.mode` or
   `sequencer.length` no longer replay; the checked-in goldens are
-  re-recorded.
+  re-recorded. Parameters are saved, journaled, and bound (MIDI CC maps,
+  knob pages) by path, never by the engine's global index, so removing two
+  globals needs no other migration.
 
 ## Validation plan
 
