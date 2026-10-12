@@ -295,6 +295,21 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   (`Transport.tsx`); export them from the protocol with
   `LAUNCH_QUANTIZE_TICKS`, as for the record grids.
 
+- (2026-10-12, step view review) `4s step bass 3 C2 --clear accent` on a
+  rest places the note (`on` defaults to true); reject `--clear` on an
+  empty step or document it (`crates/cli/src/main.rs`, `Cmd::Step`).
+- (2026-10-12, step view review) `step.set` accepts steps past the clip's
+  length, writing events no step view shows; reject `step >= steps` in
+  `Core::edit_step`.
+- (2026-10-12, step view review) `step_grid` falls back to `tr808` when the
+  instrument is missing instead of failing (`crates/daemon/src/core/grid.rs`).
+- (2026-10-12, step view review) every engine step builds a full
+  `ControllerState` to compare with the last one sent
+  (`refresh_controller`); cache the rows and length, or compare only what
+  can change in a tick.
+- (2026-10-12, step view review) entering the Block's launch mode clamps
+  the step page to 0, so going back loses it; keep a separate steps page.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are
