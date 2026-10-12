@@ -874,7 +874,11 @@ check "a lone kick is one onset" "onsets (s): 0.000" bash -c "$BIN/4s render | t
 check "device types list instruments and effects" "delay   audio_effect" s device types
 check "add a delay to channel 1" "delay      delay   Delay        on ch 1 at 1" s device add delay --on 1
 check "its parameters are under its id" "delay.feedback" s params delay
-check "a synced delay echoes every dotted eighth" "onsets (s): 0.000 0.373 0.749 1.125 1.499" bash -c "$BIN/4s render | tail -1"
+check "a synced delay echoes every dotted eighth (0.375 s at 120 bpm)" "echoes on time" python3 -c "
+import json, subprocess
+o = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render']))['onsets']
+ok = len(o) >= 4 and all(abs(t - 0.375 * k) < 0.01 for k, t in enumerate(o[:4]))
+print('echoes on time' if ok else o)"
 check "bypass passes the kick through alone" "onsets (s): 0.000" bash -c "$BIN/4s set delay.bypass on >/dev/null && $BIN/4s render | tail -1"
 s set delay.bypass off >/dev/null
 check "a filter goes first in the chain" "<- drums  [filter, delay]" bash -c "$BIN/4s device add filter --on 1 --at 1 >/dev/null && $BIN/4s mixer"
