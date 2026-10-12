@@ -340,6 +340,13 @@ impl Click {
     }
 }
 
+/// Whether any track channel, or any return, is soloed.
+#[derive(Clone, Copy)]
+struct Solo {
+    tracks: bool,
+    returns: bool,
+}
+
 struct Channel {
     active: bool,
     /// A return bus: fed by sends, not silenced by another channel's solo.
@@ -376,17 +383,21 @@ impl Channel {
     }
 
     /// Targets: gain (with mute/solo), mono pan, balance.
-    fn targets(&self, any_solo: bool) -> [f32; 5] {
+    fn targets(&self, any_solo: Solo) -> [f32; 5] {
         let muted = self.params[CH_MUTE] >= 0.5;
         let soloed = self.params[CH_SOLO] >= 0.5;
-        let audible = !muted && (!any_solo || soloed || self.ret);
+        // Track solos gate the tracks, return solos the returns: soloing a
+        // track keeps the returns it feeds, soloing a return keeps the
+        // tracks that feed it.
+        let gate = if self.ret { any_solo.returns } else { any_solo.tracks };
+        let audible = !muted && (!gate || soloed);
         let gain = if audible { volume_to_gain(self.params[CH_VOLUME]) } else { 0.0 };
         let (ml, mr) = mono_pan(self.params[CH_PAN]);
         let (bl, br) = balance(self.params[CH_PAN]);
         [gain, ml, mr, bl, br]
     }
 
-    fn snap(&mut self, any_solo: bool) {
+    fn snap(&mut self, any_solo: Solo) {
         let [g, ml, mr, bl, br] = self.targets(any_solo);
         self.gain.value = g;
         self.mono_l.value = ml;
@@ -561,6 +572,7 @@ impl Engine {
         for ch in &mut self.channels {
             ch.snap(any_solo);
         }
+        self.sends_at = self.sends;
         self.master.value = volume_to_gain(self.globals[MASTER_VOLUME]);
         for slot in self.slots.iter_mut().flatten() {
             slot.instrument.snap();
@@ -572,8 +584,9 @@ impl Engine {
         }
     }
 
-    fn any_solo(&self) -> bool {
-        self.channels.iter().any(|c| c.active && c.params[CH_SOLO] >= 0.5)
+    fn any_solo(&self) -> Solo {
+        let soloed = |ret: bool| self.channels.iter().any(|c| c.active && c.ret == ret && c.params[CH_SOLO] >= 0.5);
+        Solo { tracks: soloed(false), returns: soloed(true) }
     }
 
     /// Apply a command. A removed instrument is handed back so the caller can

@@ -308,6 +308,11 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   keys only (`crates/daemon/src/journal.rs`, `plan`): undoing a device's
   add removes it even if another user edited its parameters since.
 
+- (2026-10-12, #42 review) a new effect settling at the engine's tempo
+  (`Command::AddEffect`) only matters live: offline renders snap every
+  effect at the render's tempo, so no render check can see it; a live check
+  would need the audio output (or engine feedback of the delay time).
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

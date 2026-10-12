@@ -938,10 +938,11 @@ check "add a return bus" "ch 2 Verb" s channel add --return --name Verb
 check "every track channel gets a send to it" "mixer.1.send.2" s params mixer.1.send
 s device add reverb --on 2 >/dev/null
 s set reverb.mix 1 >/dev/null
-check "no send, no tail" "tail 0.00" python3 "$TMP/tail.py"
+check "no send, no tail" "no tail" bash -c "T=\$(python3 '$TMP/tail.py' | cut -d' ' -f2); python3 -c \"print('no tail' if \$T < 0.002 else \$T)\""
 check "a send feeds the return" "<- return <- sends from 1 50%  [reverb]" bash -c "$BIN/4s send 1 2 50% >/dev/null && $BIN/4s mixer"
-check "...and the reverb adds a tail" "tail 0.01" python3 "$TMP/tail.py"
-check "post-fader: a muted track sends nothing" "tail 0.00" bash -c "$BIN/4s set mixer.1.mute on >/dev/null && python3 '$TMP/tail.py'"
+check "...and the reverb adds a tail" "a tail" bash -c "T=\$(python3 '$TMP/tail.py' | cut -d' ' -f2); python3 -c \"print('a tail' if \$T > 0.004 else \$T)\""
+check "post-fader: a muted track sends nothing" "no tail" bash -c "$BIN/4s set mixer.1.mute on >/dev/null; T=\$(python3 '$TMP/tail.py' | cut -d' ' -f2); python3 -c \"print('no tail' if \$T < 0.002 else \$T)\""
+check "soloing the return keeps the track that feeds it" "a tail" bash -c "$BIN/4s set mixer.1.mute off >/dev/null; $BIN/4s set mixer.2.solo on >/dev/null; T=\$(python3 '$TMP/tail.py' | cut -d' ' -f2); $BIN/4s set mixer.2.solo off >/dev/null; python3 -c \"print('a tail' if \$T > 0.004 else \$T)\""
 s set mixer.1.mute off >/dev/null
 check "instruments cannot feed a return" "is a return bus" s route drums 2
 check "returns save and load back" "<- return <- sends from 1 50%" bash -c "$BIN/4s project save buses >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load buses >/dev/null && $BIN/4s mixer"

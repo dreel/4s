@@ -1904,8 +1904,10 @@ impl Core {
     /// has other sources is not removed).
     fn apply_sets(&mut self, sets: &[(String, Value)], origin: &str) -> Result<Vec<String>, RpcError> {
         let mut channels: Vec<(u32, Option<String>)> = Vec::new();
-        // Channels that come back as returns.
+        // Channels that come back as returns, and every channel whose
+        // `return:` key the sets name (true or null).
         let mut returns: Vec<u32> = Vec::new();
+        let mut kinds_named: Vec<u32> = Vec::new();
         let mut instruments: Vec<(String, Option<(InstrumentType, String)>)> = Vec::new();
         let mut order: Option<Vec<u32>> = None;
         let mut routes: Vec<(String, Option<u32>)> = Vec::new();
@@ -1921,6 +1923,7 @@ impl Core {
                 // A channel's kind cannot change, so only a channel that
                 // comes back needs it.
                 "return" => rest.parse().ok().map(|n| {
+                    kinds_named.push(n);
                     if v.as_bool() == Some(true) {
                         returns.push(n)
                     }
@@ -2013,6 +2016,13 @@ impl Core {
         let mut graph = false;
         for (n, name) in &channels {
             let Some(name) = name else { continue };
+            // A channel number someone reused for the other kind since: it
+            // keeps its kind, and the undo says so.
+            let want = if returns.contains(n) { ChannelKind::Return } else { ChannelKind::Track };
+            if kinds_named.contains(n) && self.channels.iter().any(|c| c.n == *n && c.kind != want) {
+                skipped.push(format!("channel:{n}"));
+                continue;
+            }
             match self.channels.iter_mut().find(|c| c.n == *n) {
                 Some(c) => c.name = name.clone(),
                 None => {
