@@ -774,7 +774,7 @@ check "...and load back" 'song: clips *1, 2 "B"' bash -c "$BIN/4s project new >/
 check "a batch is one journal entry and one undo step" "undid: batch: param.set, clip.rename" bash -c "$BIN/4s batch '[{\"method\":\"param.set\",\"params\":{\"path\":\"transport.tempo\",\"value\":100}},{\"method\":\"clip.rename\",\"params\":{\"instrument\":\"song\",\"clip\":1,\"name\":\"Verse\"}}]' >/dev/null && $BIN/4s undo"
 check "...undoing all of it" "transport.tempo = 120" s get transport.tempo
 check "batches cannot nest" "cannot be in a batch" s batch '[{"method":"batch","params":{"requests":[]}}]'
-# Recording in song mode: notes go into the clip under them; with nothing
+# Recording into the arrangement: notes go into the clip under them; with nothing
 # under them, into a new clip made there.
 check "takes into the arrangement write into placements and make a clip past the end" "recorded song clip 3: 1 notes, length 16 steps" bash -c "$BIN/4s render --bars 4 --to song --input '0.25:39 4.25:39 6.5:39:0.1' | grep 'recorded song clip 3'"
 check "...the bar-3 note in clip 2 at its own tick" "48:D#2:24:100 96:D2:24:89 288:D2:24:89" bash -c "$BIN/4s render --bars 4 --to song --input '0.25:39 4.25:39 6.5:39:0.1' | grep -A4 'clip 2' | tail -1"
@@ -788,6 +788,7 @@ check "...so the song does not stop at its end" "transport: playing" bash -c "$B
 check "a launch while playing waits for the bar" "plays clip 2 (launched) (waiting for the boundary)" bash -c "$BIN/4s clip launch song 2 | grep '^song:'"
 check "...and lands on it (240 bpm: within a second)" "landed: song: clips *1, 2 \"B\"; plays clip 2 (launched)" bash -c "for i in \$(seq 40); do $BIN/4s clip list song | grep -q waiting || break; sleep 0.05; done; $BIN/4s clip list song | grep -q waiting || echo landed: \$($BIN/4s clip list song)"
 check "back to the arrangement for every track" "plays its arrangement" bash -c "$BIN/4s song back --now >/dev/null && sleep 0.2 && $BIN/4s clip list drums"
+check "with a one-bar loop and a two-bar quantum, a launch lands on the loop's wrap" "landed" bash -c "$BIN/4s stop >/dev/null; $BIN/4s set transport.launch_quantize 3 >/dev/null; $BIN/4s song loop 2 2 >/dev/null; $BIN/4s locate 2 >/dev/null; $BIN/4s play >/dev/null; $BIN/4s clip launch song 2 >/dev/null; sleep 1.5; $BIN/4s clip list song | grep -q waiting && echo still waiting || echo landed; $BIN/4s stop >/dev/null; $BIN/4s song back --now >/dev/null; $BIN/4s song loop off >/dev/null; $BIN/4s locate 1 >/dev/null; $BIN/4s set transport.launch_quantize 2 >/dev/null"
 check "with nothing launched, the song stops at its end" "transport: stopped" bash -c "$BIN/4s stop >/dev/null && $BIN/4s play >/dev/null && sleep 3.6 && $BIN/4s status | grep transport"
 s locate 3 >/dev/null
 s record --to song --count-in 0 >/dev/null

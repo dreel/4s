@@ -722,20 +722,23 @@ impl Engine {
         let looping = self.song_loop();
         // A range loops when the song reaches its end (playing from past it
         // goes on); the whole song, from anywhere past it.
+        let mut wrapped = false;
         if let Some((ls, le)) = looping
             && (self.song_pos == le || (self.globals[LOOP].round() as i32 == 1 && self.song_pos >= le))
         {
             self.release_arrangement_notes();
             self.song_pos = ls;
             self.wrapped_at = Some(tick);
+            wrapped = true;
         }
         let song_pos = self.song_pos;
         self.release_clip_notes(Some(tick));
-        // Launches and returns that land here.
+        // Launches and returns that land here: on a quantize boundary, or a
+        // loop's wrap (a loop shorter than the quantum may hold none).
         let quantize = LAUNCH_QUANTIZE_TICKS[(self.globals[LAUNCH_QUANTIZE].round().max(0.0) as usize).min(4)] as u64;
         for slot in 0..self.tracks.len() {
             if let Some((clip, now)) = self.tracks[slot].pending
-                && (now || quantize == 0 || song_pos % quantize == 0)
+                && (now || wrapped || quantize == 0 || song_pos % quantize == 0)
             {
                 self.switch(slot, clip, song, emit);
             }
@@ -1278,6 +1281,29 @@ pub(crate) mod tests {
         // Bar 4 is past the song's end: it ends as soon as the track is back.
         let end = fb.iter().find_map(|f| if let Feedback::SongEnd { time } = f { Some(*time) } else { None });
         assert!(end.is_some_and(|t| (t - 6.0).abs() < 1e-3), "{end:?}");
+    }
+
+    /// A waiting launch lands on a loop's wrap: a one-bar loop over bar 2
+    /// holds no multiple of a two-bar quantum (768 ticks), so without that
+    /// it would wait forever. Played from bar 2 (2 s at 120 bpm a bar), the
+    /// launch at 0.3 s lands when the loop comes round, at 2 s.
+    #[test]
+    fn a_launch_lands_on_a_loop_wrap() {
+        let mut e = drum_engine();
+        load_clip(&mut e, 2, drum_event(Voice::Kick, 0, STEP_ON));
+        let mut fb = vec![];
+        let mut apply = |c| {
+            let _ = e.apply(c, &mut |_| {});
+        };
+        for (g, v) in [(LOOP, 2.0), (LOOP_START, 1.0), (LOOP_END, 2.0), (LAUNCH_QUANTIZE, 3.0)] {
+            apply(Command::SetParam { target: ParamTarget::Global(g), value: v });
+        }
+        apply(Command::Locate { tick: 384 });
+        apply(Command::Play { count_in: 0 });
+        render_secs(&mut e, 0.3, &mut fb);
+        let _ = e.apply(Command::Launch { slot: 0, clip: Some(2), now: false }, &mut |_| {});
+        render_secs(&mut e, 2.0, &mut fb);
+        assert!(same_hits(&drum_hits(&fb), &[(0, 2.0)]), "{:?}", drum_hits(&fb));
     }
 
     /// Back to the arrangement mid-placement plays the placement from where
