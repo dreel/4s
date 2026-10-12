@@ -344,6 +344,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   is remembered by index (`AutomationLanes.tsx`, `onPointerUp`); a
   concurrent edit can make the release move another point. Remember its
   tick and look it up on release.
+- (2026-10-12, live values review) moving: `note_moved` scans the block's
+  list on each write (up to ~192x192 a block when routes and lanes are
+  full; bounded, no allocation); key it by route/lane slot if profiling
+  shows it. If the feedback ring drops some `Moved` but not `MovedDone`,
+  the daemon publishes a partial set for one period (markers flicker).
+  The CLI e2e checks for `moving` wait a fixed 0.3 s; poll instead if CI
+  gets flaky.
 - (2026-10-12, automation lanes review) lanes, engine cost: every
   `SetParam` scans all clips' lanes to update bases, and `automate`'s
   let-go loop is quadratic in `MAX_AUTOMATED` and routes. Bounded and
