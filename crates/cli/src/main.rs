@@ -696,7 +696,8 @@ enum ClipCmd {
     /// Launch a clip (default: the selected one): its track loops it
     /// instead of its arrangement, from the next launch quantize boundary
     /// while playing (`transport.launch_quantize`; `--now` the next tick).
-    /// `4s song back` returns.
+    /// `4s song back` returns. A number alone (`4s clip launch 2`) is a
+    /// clip of your focus.
     Launch {
         instrument: Option<String>,
         id: Option<u32>,
@@ -1338,6 +1339,11 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 Request::ClipSelect(ClipRefParams { instrument: Some(instrument), clip: Some(id) })
             }
             ClipCmd::Launch { instrument, id, now } => {
+                // `4s clip launch 2`: a clip of the focus.
+                let (instrument, id) = match (instrument.as_deref().map(str::parse::<u32>), id) {
+                    (Some(Ok(n)), None) => (None, Some(n)),
+                    _ => (instrument, id),
+                };
                 Request::ClipLaunch(ClipLaunchParams { instrument, clip: id.or(*clip), now: Some(now) })
             }
             ClipCmd::Set { instrument, events } => Request::ClipSet(ClipEventsParams {
@@ -1371,7 +1377,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 instrument: Some(instrument),
                 clip: *clip,
                 length: match steps {
-                    1..=64 => steps * TICKS_PER_STEP,
+                    s if (1..=MAX_STEPS as u32).contains(&s) => s * TICKS_PER_STEP,
                     _ => bail!("length is 1..{MAX_STEPS} steps"),
                 },
             }),

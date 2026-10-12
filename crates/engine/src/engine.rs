@@ -121,8 +121,9 @@ pub enum Feedback {
     /// half a step.
     Live { slot: u8, note: u8, velocity: f32, on: bool, gate: bool, tick: Option<f64>, pos: Option<f64>, time: f64 },
     /// A slot switched to a launched clip (or, `None`, back to its
-    /// arrangement) at `tick` from play; 0 when stopped or counting in.
-    Launched { slot: u8, clip: Option<u16>, tick: u64, time: f64 },
+    /// arrangement) at `tick` from play, song position `pos`; both 0 and
+    /// the start point when stopped or counting in.
+    Launched { slot: u8, clip: Option<u16>, tick: u64, pos: u64, time: f64 },
     /// Playing without a loop reached the song's end (with no launched
     /// clips).
     SongEnd { time: f64 },
@@ -695,7 +696,8 @@ impl Engine {
         let t = &mut self.tracks[slot];
         t.pending = None;
         t.launched = clip.map(|c| (c, tick));
-        emit(Feedback::Launched { slot: slot as u8, clip, tick, time: self.pos as f64 / self.sr as f64 });
+        let pos = if self.playing && self.tick >= self.count_in { self.song_pos } else { self.start_pos };
+        emit(Feedback::Launched { slot: slot as u8, clip, tick, pos, time: self.pos as f64 / self.sr as f64 });
     }
 
     /// Fire one tick: notes that end here are released, waiting launches
