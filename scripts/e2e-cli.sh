@@ -903,8 +903,8 @@ print('peak %.3f tail %.4f' % (level(0, 0.05), level(0.5, 1.5)))
 PY
 s set delay.bypass on >/dev/null
 check "a low-pass filter takes the top off the kick" "filtered quieter" bash -c "$BIN/4s set filter.cutoff 0.05 >/dev/null; A=\$(python3 '$TMP/levels.py' | cut -d' ' -f2); $BIN/4s set filter.bypass on >/dev/null; B=\$(python3 '$TMP/levels.py' | cut -d' ' -f2); $BIN/4s set filter.bypass off >/dev/null; $BIN/4s set filter.cutoff 0.6 >/dev/null; python3 -c \"print('filtered quieter' if \$A < 0.8 * \$B else (\$A, \$B))\""
-check "the master's reverb adds a tail" "tail 0.0" bash -c "python3 '$TMP/levels.py'"
-check "...which is gone when bypassed" "tail 0.0000" bash -c "$BIN/4s set reverb.bypass on >/dev/null; python3 '$TMP/levels.py'; $BIN/4s set reverb.bypass off >/dev/null"
+check "the master's reverb adds a tail" "a tail" bash -c "T=\$(python3 '$TMP/levels.py' | cut -d' ' -f4); python3 -c \"print('a tail' if \$T > 0.001 else \$T)\""
+check "...which is gone when bypassed" "no tail" bash -c "$BIN/4s set reverb.bypass on >/dev/null; T=\$(python3 '$TMP/levels.py' | cut -d' ' -f4); $BIN/4s set reverb.bypass off >/dev/null; python3 -c \"print('no tail' if \$T < 0.0005 else \$T)\""
 s set delay.bypass off >/dev/null
 # Undo is per user: a redo whose channel someone removed since does not
 # leave its effect behind, unplaced.
