@@ -368,6 +368,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   on recording the next pass (no "touch" mode that lets go while a knob is
   held). Moves on a track with nothing under the playhead are not
   recorded (no clip is made for them, unlike notes).
+- (2026-10-12, knob recording review) hardware CCs are handled as the
+  host user, so a remote user's take never records moves made on a
+  hardware controller, even one driving their seat. Resolve the acting
+  user from the seat the device plays in.
 - (2026-10-12, #46 review) moving: a report from before a graph change can
   land on the slot's new occupant for one meter period (tag reports with
   a graph generation); filter `moving` by the registry on rebuild;

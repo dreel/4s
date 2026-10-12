@@ -813,7 +813,12 @@ impl Core {
     fn move_requests(&self, t: &LiveTake) -> Vec<Request> {
         let mut out = Vec::new();
         for ((clip, path), moves) in &t.moves {
+            // Its clip or parameter may have gone during the take (a lane
+            // that cannot be set must not cost the pass its notes).
             let Some(c) = self.track(&t.instrument).clips.get(clip) else { continue };
+            if self.lane_target(path).is_err() {
+                continue;
+            }
             let lane = c.lanes.iter().find(|l| &l.path == path);
             if lane.is_none() && c.lanes.len() >= MAX_LANES {
                 tracing::warn!("recording {path} into clip {clip} of {}: it has {MAX_LANES} lanes", t.instrument);
