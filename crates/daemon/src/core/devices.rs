@@ -125,16 +125,16 @@ impl Core {
     }
 
     /// Fail before removing channels if their effects would overflow the
-    /// return ring or the command queue.
-    pub(super) fn check_teardown(&self, channels: &[u32]) -> Result<(), RpcError> {
+    /// return ring, or they and `commands` more the command queue.
+    pub(super) fn check_teardown(&self, channels: &[u32], commands: usize) -> Result<(), RpcError> {
         let n: usize = channels.iter().map(|c| self.inserts_on(*c)).sum();
         if self.in_flight + n > RETURN_CAPACITY {
             return Err(RpcError::failed(format!(
-                "{} removed devices are still waiting to be returned by the audio engine",
+                "{} removed instruments or devices are still waiting to be returned by the audio engine",
                 self.in_flight
             )));
         }
-        self.ensure_room(2 * n + 2)
+        self.ensure_room(2 * n + 2 + commands)
     }
 
     /// Remove every effect on a channel (it is going away).
@@ -220,7 +220,7 @@ impl Core {
         self.find_device(id)?;
         if self.in_flight >= RETURN_CAPACITY {
             return Err(RpcError::failed(format!(
-                "{} removed devices are still waiting to be returned by the audio engine",
+                "{} removed instruments or devices are still waiting to be returned by the audio engine",
                 self.in_flight
             )));
         }

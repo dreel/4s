@@ -11,15 +11,23 @@ import { act, app, client, setParam, useApp } from "../store";
 import { Toggle } from "./controls";
 import { ParamKnob } from "./ParamKnob";
 
+/** The registry's audio effect types, fetched once per connection and
+ * shared by every strip. */
+let effectTypes: Promise<DeviceType[]> | null = null;
+
 /** The audio effect types the daemon's registry offers (`device.types`). */
 function useEffectTypes(): DeviceType[] {
   const [types, setTypes] = useState<DeviceType[]>([]);
   const connected = useApp((s) => s.connection === "open");
   useEffect(() => {
-    if (!connected) return;
-    void act(client.call("device.types", {})).then(
-      (r) => r && setTypes(r.types.filter((t) => t.kind === "audio_effect").map((t) => t.type as DeviceType)),
+    if (!connected) {
+      effectTypes = null;
+      return;
+    }
+    effectTypes ??= act(client.call("device.types", {})).then((r) =>
+      (r?.types ?? []).filter((t) => t.kind === "audio_effect").map((t) => t.type as DeviceType),
     );
+    void effectTypes.then(setTypes);
   }, [connected]);
   return types;
 }

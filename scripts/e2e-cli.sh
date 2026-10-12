@@ -914,6 +914,12 @@ s --user alice undo >/dev/null
 s channel rm 2 >/dev/null
 s --user alice redo >/dev/null
 check "a redone effect whose channel went away is not left behind" "no device 'orphan'" s device mv orphan --on 1
+s --user alice instrument add tb303 --id twin --no-channel >/dev/null
+s --user alice undo >/dev/null
+s device add filter --on 1 --id twin >/dev/null
+check "a redone instrument whose id an effect took since stays undone" "skipped: instrument:twin" s --user alice redo
+check "...and the effect keeps its parameters" "twin.cutoff = 0.6" s get twin.cutoff
+s device rm twin >/dev/null
 check "a session with effects replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/fx.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/fx.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level

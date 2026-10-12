@@ -503,12 +503,12 @@ impl Core {
         }
         // The removal, plus deactivating every channel it may leave empty
         // (and their inserts).
-        self.ensure_room(1 + self.instruments[pos].outputs.len())?;
-        if !p.keep_channels {
-            let fed: Vec<u32> =
-                self.instruments[pos].outputs.iter().filter_map(|o| self.routes.get(&o.source).copied()).collect();
-            self.check_teardown(&fed)?;
-        }
+        let fed: Vec<u32> = if p.keep_channels {
+            Vec::new()
+        } else {
+            self.instruments[pos].outputs.iter().filter_map(|o| self.routes.get(&o.source).copied()).collect()
+        };
+        self.check_teardown(&fed, 1 + self.instruments[pos].outputs.len())?;
         let fed = self.teardown_instrument(pos, origin);
         if !p.keep_channels {
             for n in fed {
@@ -600,8 +600,7 @@ impl Core {
 
     pub fn channel_remove(&mut self, n: u32, origin: &str) -> Result<Graph, RpcError> {
         self.check_channel(n)?;
-        self.check_teardown(&[n])?;
-        self.ensure_room(MAX_OUTPUTS * MAX_INSTRUMENTS + 2)?;
+        self.check_teardown(&[n], MAX_OUTPUTS * MAX_INSTRUMENTS + 2)?;
         self.remove_channel_unchecked(n);
         self.graph_changed(origin);
         Ok(self.graph())
@@ -1865,9 +1864,15 @@ impl Core {
         if adding.len() + new_clips > self.free_clips() {
             return Err(RpcError::failed(format!("at most {MAX_CLIPS} clips in a project")));
         }
-        if self.in_flight + removing.len() + removing_devices.len() > RETURN_CAPACITY {
+        // Channels it removes take their inserts; devices it makes may be
+        // torn down again (`apply_device_sets`).
+        let channel_inserts: usize =
+            channels.iter().filter(|(_, v)| v.is_none()).map(|(n, _)| self.inserts_on(*n)).sum();
+        let made_devices = device_sets.devices.iter().filter(|(_, v)| v.is_some()).count();
+        let teardowns = removing.len() + removing_devices.len() + channel_inserts + made_devices;
+        if self.in_flight + teardowns > RETURN_CAPACITY {
             return Err(RpcError::failed(format!(
-                "{} removed instruments are still waiting to be returned by the audio engine",
+                "{} removed instruments or devices are still waiting to be returned by the audio engine",
                 self.in_flight
             )));
         }
@@ -1883,6 +1888,7 @@ impl Core {
                 + params.len()
                 + clip_sets.commands()
                 + device_sets.devices.len() * ADD_COMMANDS
+                + (channel_inserts + made_devices) * 2
                 + device_sets.chains.len() * 2,
         )?;
 
@@ -1899,8 +1905,16 @@ impl Core {
             graph = true;
         }
         let mut added = Vec::new();
+        // Instruments whose id a device took since: they (and their
+        // parameters) cannot come back.
+        let mut blocked: Vec<String> = Vec::new();
         for (id, v) in &instruments {
             let Some((kind, name)) = v else { continue };
+            if self.devices.iter().any(|d| &d.id == id) {
+                skipped.push(format!("instrument:{id}"));
+                blocked.push(id.clone());
+                continue;
+            }
             if let Some(i) = self.instruments.iter_mut().find(|i| &i.id == id) {
                 i.name = name.clone();
                 i.outputs = instrument::outputs(i.kind, id, name);
@@ -1946,6 +1960,10 @@ impl Core {
             graph = true;
         }
         for (path, v) in params {
+            if blocked.iter().any(|id| path.starts_with(&format!("{id}."))) {
+                skipped.push(format!("param:{path}"));
+                continue;
+            }
             match self.index.get(&path) {
                 Some(&i) => {
                     let value = v.unwrap_or(self.params[i].info.default);
@@ -1984,7 +2002,8 @@ impl Core {
             if name.is_some() || !self.channels.iter().any(|c| c.n == *n) {
                 continue;
             }
-            if self.routes.values().any(|c| c == n) {
+            // Someone routed to it or put an effect on it since: it stays.
+            if self.routes.values().any(|c| c == n) || self.inserts_on(*n) > 0 {
                 skipped.push(format!("channel:{n}"));
             } else {
                 self.remove_channel_unchecked(*n);

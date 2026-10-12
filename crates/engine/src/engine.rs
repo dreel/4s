@@ -170,6 +170,8 @@ struct EffectSlot {
     mix: f32,
     /// The wet share, smoothed toward `mix` (0 when bypassed).
     wet: Smoother,
+    /// Bypassed and faded out: it did not run, so it starts clean.
+    idle: bool,
 }
 
 /// Run an insert chain over `bus` (interleaved stereo, `n` frames), keeping
@@ -180,7 +182,13 @@ fn run_chain(effects: &mut [Option<EffectSlot>], chain: &[u8], bus: &mut [f32], 
         let target = if e.bypass { 0.0 } else { e.mix };
         if target == 0.0 && e.wet.value < 1e-4 {
             // Bypassed and faded out: the effect does not run.
+            e.idle = true;
             continue;
+        }
+        if e.idle {
+            // Back from a bypass: no echoes or tail from before it.
+            e.effect.reset();
+            e.idle = false;
         }
         dry[..n * 2].copy_from_slice(&bus[..n * 2]);
         e.effect.process(&mut bus[..n * 2], n, ctx);
@@ -552,7 +560,7 @@ impl Engine {
                 // Never drop an effect here: an invalid slot hands it back.
                 let Some(s) = self.effects.get_mut(slot as usize) else { return Some(Returned::Effect(effect)) };
                 let wet = Smoother::new(self.sr, 0.01, 0.0);
-                return s.replace(EffectSlot { effect, bypass: false, mix: 0.0, wet }).map(|e| Returned::Effect(e.effect));
+                return s.replace(EffectSlot { effect, bypass: false, mix: 0.0, wet, idle: false }).map(|e| Returned::Effect(e.effect));
             }
             Command::RemoveEffect { slot } => {
                 // Out of every chain first, so nothing runs a missing slot.
