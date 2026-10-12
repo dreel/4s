@@ -88,7 +88,7 @@ pub struct Core {
     /// Parameter registry index by engine target (for the engine's reports).
     by_target: HashMap<ParamTarget, usize>,
     /// Who the request being handled is from (a take records only its
-    /// recorder's knob moves).
+    /// recorder's knob moves); `None` outside a request (e.g. pitch bend).
     acting: Option<String>,
     /// Where modulation and automation have parameters (RFC 0010), as last
     /// reported, and the report being gathered.
@@ -2386,9 +2386,7 @@ impl Core {
         }
         let context = self.journal_context(client);
         let before = self.doc();
-        let acting = self.acting.replace(user.to_string());
         let result = f(self);
-        self.acting = acting;
         let changes = journal::diff(&before, &self.doc());
         let seq = self.journal.next_seq();
         if !changes.is_empty() {

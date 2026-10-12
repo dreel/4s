@@ -1048,6 +1048,14 @@ check "...which removes the lane" "no lane" bash -c "$BIN/4s clip show drums | g
 check "another player's moves meanwhile are not recorded, only the recorder's" "lane mixer.1.volume" bash -c "$BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s --user bob set mixer.1.pan 0.7 >/dev/null; $BIN/4s set mixer.1.volume 0.5 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || $BIN/4s clip show drums | grep lane"
 s clip lane drums mixer.1.volume --rm >/dev/null
 s set mixer.1.volume 1 >/dev/null
+check "a mapped CC's moves are recorded too" "lane mixer.1.pan: " bash -c "$BIN/4s cc map keys 21 mixer.1.pan >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s midi send keys B0 15 40 >/dev/null; sleep 0.15; $BIN/4s midi send keys B0 15 7F >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s cc unmap keys 21 >/dev/null; $BIN/4s clip show drums | grep 'lane mixer.1.pan'"
+s clip lane drums mixer.1.pan --rm >/dev/null
+s set mixer.1.pan 0 >/dev/null
+check "a clip with room for one more lane takes one, and the pass keeps its notes" "8 lanes, 1 notes" bash -c "$BIN/4s clip lane drums filter.cutoff --rm >/dev/null 2>&1; for k in kick snare clap closed_hat open_hat low_tom high_tom; do $BIN/4s clip lane drums drums.\$k.level 0:0.5 >/dev/null; done; $BIN/4s clip clear drums >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s set mixer.1.volume 0.5 >/dev/null; $BIN/4s set mixer.1.pan 0.5 >/dev/null; $BIN/4s key C2 --for 0.05 >/dev/null; sleep 0.3; $BIN/4s stop >/dev/null; echo \$($BIN/4s clip show drums | grep -c lane) lanes, \$($BIN/4s clip show drums | head -1 | grep -o '[0-9]* notes')"
+for k in kick snare clap closed_hat open_hat low_tom high_tom; do s clip lane drums drums.$k.level --rm >/dev/null; done
+s clip lane drums mixer.1.volume --rm >/dev/null 2>&1
+s set mixer.1.volume 1 >/dev/null
+s set mixer.1.pan 0 >/dev/null
 s clip length drums 16 >/dev/null
 s tempo 120 >/dev/null
 check "a session with lanes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/lanes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/lanes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"

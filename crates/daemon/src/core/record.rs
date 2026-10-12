@@ -812,6 +812,9 @@ impl Core {
     /// a clip with no room for another lane is skipped.
     fn move_requests(&self, t: &LiveTake) -> Vec<Request> {
         let mut out = Vec::new();
+        // New lanes this pass adds to each clip, so it never asks for more
+        // than a clip can hold.
+        let mut added: BTreeMap<u32, usize> = BTreeMap::new();
         for ((clip, path), moves) in &t.moves {
             // Its clip or parameter may have gone during the take (a lane
             // that cannot be set must not cost the pass its notes).
@@ -820,9 +823,13 @@ impl Core {
                 continue;
             }
             let lane = c.lanes.iter().find(|l| &l.path == path);
-            if lane.is_none() && c.lanes.len() >= MAX_LANES {
-                tracing::warn!("recording {path} into clip {clip} of {}: it has {MAX_LANES} lanes", t.instrument);
-                continue;
+            if lane.is_none() {
+                let n = added.entry(*clip).or_default();
+                if c.lanes.len() + *n >= MAX_LANES {
+                    tracing::warn!("recording {path} into clip {clip} of {}: it has {MAX_LANES} lanes", t.instrument);
+                    continue;
+                }
+                *n += 1;
             }
             let (lo, hi) = (*moves.keys().next().expect("not empty"), *moves.keys().next_back().expect("not empty") + MOVE_GRID);
             let mut keep: Vec<LanePoint> = lane.map(|l| l.points.iter().filter(|p| p.tick < lo || p.tick >= hi).copied().collect()).unwrap_or_default();
