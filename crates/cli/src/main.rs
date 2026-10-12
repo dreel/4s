@@ -117,8 +117,9 @@ enum Cmd {
     /// `4s step bass` shows its selected clip; `4s step bass 3 C2 --set
     /// accent` turns a note on at step 3 (1-based) with an accent; `--off`
     /// turns it off (on a mono instrument `4s step bass 3 --off` makes a
-    /// rest); `--clear slide` clears an expression. Notes are pitches
-    /// (`C2`), drum voices (`kick`), or MIDI numbers.
+    /// rest); `--clear slide` clears an expression (turning the note on if
+    /// it was not). Notes are pitches (`C2`), drum voices (`kick`), or MIDI
+    /// numbers. Without an instrument (`4s step 3 C2`), your focus.
     Step {
         instrument: Option<String>,
         step: Option<u32>,
@@ -1135,6 +1136,12 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             })],
         },
         Cmd::Step { instrument, step, note, off, set_expr, clear, res, clip } => {
+            // `4s step 3 C2`: a step of the focus.
+            let (instrument, step, note) = match (instrument.as_deref().map(str::parse::<u32>), step, note) {
+                (Some(Ok(s)), Some(n), None) => (&None, &Some(s), &Some(n.to_string())),
+                (Some(Ok(s)), None, None) => (&None, &Some(s), &None),
+                _ => (instrument, step, note),
+            };
             let resolution = res.as_deref().map(grid_arg).transpose()?.flatten();
             match step {
                 None => vec![Request::StepGet(StepGetParams { instrument: instrument.clone(), clip: *clip, resolution })],

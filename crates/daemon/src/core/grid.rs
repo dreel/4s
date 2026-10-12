@@ -16,18 +16,18 @@ const RESOLUTION: u32 = TICKS_PER_STEP;
 impl Core {
     // ---- step views -----------------------------------------------------------
 
-    pub(super) fn step_grid(&self, id: &str, n: u32, res: u32) -> StepGrid {
-        let kind = self.find_instrument(id).map(|i| i.kind).unwrap_or(InstrumentType::Tr808);
-        let layout = kind.layout();
-        let c = &self.track(id).clips[&n];
-        StepGrid {
+    /// A clip as steps. The caller resolved the instrument and clip.
+    pub(super) fn step_grid(&self, id: &str, n: u32, res: u32) -> Result<StepGrid, RpcError> {
+        let layout = self.find_instrument(id)?.kind.layout();
+        let c = self.track(id).clips.get(&n).ok_or_else(|| RpcError::invalid(format!("no clip {n} on '{id}'")))?;
+        Ok(StepGrid {
             instrument: id.to_string(),
             clip: n,
             resolution: res,
             steps: c.length.div_ceil(res),
             cells: step_cells(&layout, &c.events, res),
             layout,
-        }
+        })
     }
 
     /// Edit one step of a clip (see `fours_protocol::set_step`).
@@ -44,8 +44,12 @@ impl Core {
         origin: &str,
     ) -> Result<(), RpcError> {
         let layout = self.find_instrument(id)?.kind.layout();
-        let events = set_step(&layout, &self.track(id).clips[&n].events, res, step, note, on, expressions)
-            .map_err(RpcError::invalid)?;
+        let c = self.track(id).clips.get(&n).ok_or_else(|| RpcError::invalid(format!("no clip {n} on '{id}'")))?;
+        let steps = c.length.div_ceil(res);
+        if step >= steps {
+            return Err(RpcError::invalid(format!("step {} is past the clip's end ({steps} steps at this resolution)", step + 1)));
+        }
+        let events = set_step(&layout, &c.events, res, step, note, on, expressions).map_err(RpcError::invalid)?;
         self.edit_clip(id, n, events, None, origin)?;
         Ok(())
     }
@@ -60,7 +64,7 @@ impl Core {
             Request::StepGet(p) => (|| {
                 let id = self.clip_target(p.instrument.as_deref(), client)?;
                 let n = self.clip_id(&id, p.clip)?;
-                Ok(self.step_grid(&id, n, resolution(p.resolution)?))
+                self.step_grid(&id, n, resolution(p.resolution)?)
             })()
             .and_then(ok),
             Request::StepSet(p) => (|| {
@@ -68,7 +72,7 @@ impl Core {
                 let n = self.clip_id(&id, p.clip)?;
                 let res = resolution(p.resolution)?;
                 self.edit_step(&id, n, res, p.step, p.note, p.on.unwrap_or(true), &p.expressions, origin)?;
-                Ok(self.step_grid(&id, n, res))
+                self.step_grid(&id, n, res)
             })()
             .and_then(ok),
             other => return Err(other),
@@ -159,7 +163,8 @@ impl Core {
             GridMode::Steps => {
                 let Some((id, n)) = self.grid_target(&self.host_seat) else { return [[0; GRID]; GRID] };
                 let Ok(i) = self.find_instrument(&id) else { return [[0; GRID]; GRID] };
-                let cells = step_cells(&i.kind.layout(), &self.track(&id).clips[&n].events, RESOLUTION);
+                let Some(clip) = self.track(&id).clips.get(&n) else { return [[0; GRID]; GRID] };
+                let cells = step_cells(&i.kind.layout(), &clip.events, RESOLUTION);
                 let notes = self.grid_notes(&self.host_seat);
                 let on = |row: usize, step: u32| cells.iter().any(|x| x.step == step && Some(&x.note) == notes.get(row));
                 c.compute_leds(notes.len(), on, self.grid_length(), self.grid_playhead())
@@ -196,7 +201,8 @@ impl Core {
         if step >= self.grid_steps(&id, n) || !layout.shows(note) {
             return Ok(());
         }
-        let lit = step_cells(&layout, &self.track(&id).clips[&n].events, RESOLUTION)
+        let Some(clip) = self.track(&id).clips.get(&n) else { return Ok(()) };
+        let lit = step_cells(&layout, &clip.events, RESOLUTION)
             .iter()
             .any(|x| x.step == step && x.note == note);
         let none = BTreeMap::new();
