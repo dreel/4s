@@ -1045,6 +1045,9 @@ SH
 check "knob moves while recording become a lane, rising with the knob" "rising" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null 2>&1; bash '$TMP/autorec.sh'; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; v=[p[\"value\"] for p in l]; t=[p[\"tick\"] for p in l]; print(\"rising\" if len(v)>=3 and v==sorted(v) and all(x%24==0 for x in t) else l)'"
 check "...written with the pass, one undo step" "undid: clip.lane.set" s undo
 check "...which removes the lane" "no lane" bash -c "$BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || echo no lane"
+check "a pass across the loop point keeps the earlier pass's points" "kept" bash -c "$BIN/4s clip length drums 16 >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.15; for i in 1 2 3 4 5 6 7 8 9; do $BIN/4s set mixer.1.pan 0.\$i >/dev/null; sleep 0.07; done; sleep 0.3; for i in 1 2 3; do $BIN/4s set mixer.1.pan -0.5 >/dev/null; sleep 0.07; done; $BIN/4s stop >/dev/null; $BIN/4s clip length drums 32 >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; print(\"kept\" if any(p[\"tick\"]>=192 and p[\"value\"]>0 for p in l) and any(p[\"value\"]==-0.5 for p in l) else l)'"
+s clip lane drums mixer.1.pan --rm >/dev/null
+s set mixer.1.pan 0 >/dev/null
 check "another player's moves meanwhile are not recorded, only the recorder's" "lane mixer.1.volume" bash -c "$BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s --user bob set mixer.1.pan 0.7 >/dev/null; $BIN/4s set mixer.1.volume 0.5 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || $BIN/4s clip show drums | grep lane"
 s clip lane drums mixer.1.volume --rm >/dev/null
 s set mixer.1.volume 1 >/dev/null
@@ -1053,7 +1056,7 @@ s clip lane drums mixer.1.pan --rm >/dev/null
 s set mixer.1.pan 0 >/dev/null
 check "a clip with room for one more lane takes one, and the pass keeps its notes" "8 lanes, 1 notes" bash -c "$BIN/4s clip lane drums filter.cutoff --rm >/dev/null 2>&1; for k in kick snare clap closed_hat open_hat low_tom high_tom; do $BIN/4s clip lane drums drums.\$k.level 0:0.5 >/dev/null; done; $BIN/4s clip clear drums >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s set mixer.1.volume 0.5 >/dev/null; $BIN/4s set mixer.1.pan 0.5 >/dev/null; $BIN/4s key C2 --for 0.05 >/dev/null; sleep 0.3; $BIN/4s stop >/dev/null; echo \$($BIN/4s clip show drums | grep -c lane) lanes, \$($BIN/4s clip show drums | head -1 | grep -o '[0-9]* notes')"
 for k in kick snare clap closed_hat open_hat low_tom high_tom; do s clip lane drums drums.$k.level --rm >/dev/null; done
-s clip lane drums mixer.1.volume --rm >/dev/null 2>&1
+for p in mixer.1.volume mixer.1.pan; do $BIN/4s clip lane drums $p --rm >/dev/null 2>&1 || true; done
 s set mixer.1.volume 1 >/dev/null
 s set mixer.1.pan 0 >/dev/null
 s clip length drums 16 >/dev/null

@@ -578,8 +578,9 @@ pub(super) struct LiveTake {
     pub client: String,
     pub origin: String,
     /// Knob moves made by hand while recording (RFC 0010): (clip, path) ->
-    /// clip tick on the 1/16 grid -> value, written as lanes with each pass.
-    pub moves: BTreeMap<(u32, String), BTreeMap<u32, f64>>,
+    /// (clip tick on the 1/16 grid, value) in the order played, written as
+    /// lanes with each pass.
+    pub moves: BTreeMap<(u32, String), Vec<(u32, f64)>>,
 }
 
 /// Knob moves are recorded on this grid (a 16th): the longest clip then
@@ -802,13 +803,15 @@ impl Core {
         let Some(at) = self.track_playhead(&id) else { return };
         let tick = at.tick / MOVE_GRID * MOVE_GRID;
         if let Some(t) = self.take.as_mut() {
-            t.moves.entry((at.clip, path.to_string())).or_default().insert(tick, value);
+            t.moves.entry((at.clip, path.to_string())).or_default().push((tick, value));
         }
     }
 
-    /// The `clip.lane.set` requests that write a take's knob moves: each
-    /// lane's points where moves were recorded are replaced by them (a
-    /// lane full of other points gives up those farthest from the moves);
+    /// The `clip.lane.set` requests that write a take's knob moves. Moves
+    /// run forward through the clip until it loops (a pass can cross the
+    /// loop point); each run replaces the lane's points in the span it
+    /// covers, others stay (a lane full of other points gives up those
+    /// farthest from the runs);
     /// a clip with no room for another lane is skipped.
     fn move_requests(&self, t: &LiveTake) -> Vec<Request> {
         let mut out = Vec::new();
@@ -831,15 +834,26 @@ impl Core {
                 }
                 *n += 1;
             }
-            let (lo, hi) = (*moves.keys().next().expect("not empty"), *moves.keys().next_back().expect("not empty") + MOVE_GRID);
-            let mut keep: Vec<LanePoint> = lane.map(|l| l.points.iter().filter(|p| p.tick < lo || p.tick >= hi).copied().collect()).unwrap_or_default();
-            let room = MAX_LANE_POINTS.saturating_sub(moves.len());
+            // Runs (spans [lo, hi)) and the last value in each 16th.
+            let mut spans: Vec<(u32, u32)> = Vec::new();
+            let mut recorded: BTreeMap<u32, f64> = BTreeMap::new();
+            for (i, (tick, value)) in moves.iter().enumerate() {
+                match spans.last_mut() {
+                    Some(s) if i > 0 && *tick >= moves[i - 1].0 => s.1 = tick + MOVE_GRID,
+                    _ => spans.push((*tick, tick + MOVE_GRID)),
+                }
+                recorded.insert(*tick, *value);
+            }
+            let outside = |tick: u32| spans.iter().all(|(lo, hi)| tick < *lo || tick >= *hi);
+            let mut keep: Vec<LanePoint> = lane.map(|l| l.points.iter().filter(|p| outside(p.tick)).copied().collect()).unwrap_or_default();
+            let room = MAX_LANE_POINTS.saturating_sub(recorded.len());
+            let distance = |tick: u32| spans.iter().map(|(lo, hi)| lo.saturating_sub(tick).max(tick.saturating_sub(hi - 1))).min().unwrap_or(0);
             while keep.len() > room {
-                // Drop the kept point farthest from the recorded span.
-                let far = (0..keep.len()).max_by_key(|i| keep[*i].tick.abs_diff(lo).min(keep[*i].tick.abs_diff(hi))).expect("not empty");
+                // Drop the kept point farthest from the runs.
+                let far = (0..keep.len()).max_by_key(|i| distance(keep[*i].tick)).expect("not empty");
                 keep.remove(far);
             }
-            let mut points: Vec<LanePoint> = moves.iter().map(|(tick, value)| LanePoint { tick: *tick, value: *value }).chain(keep).collect();
+            let mut points: Vec<LanePoint> = recorded.iter().map(|(tick, value)| LanePoint { tick: *tick, value: *value }).chain(keep).collect();
             points.sort_by_key(|p| p.tick);
             out.push(Request::ClipLaneSet(LaneSetParams { instrument: Some(t.instrument.clone()), clip: Some(*clip), path: path.clone(), points }));
         }

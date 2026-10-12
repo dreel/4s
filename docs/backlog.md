@@ -368,6 +368,9 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   on recording the next pass (no "touch" mode that lets go while a knob is
   held). Moves on a track with nothing under the playhead are not
   recorded (no clip is made for them, unlike notes).
+- (2026-10-12, knob recording review) only requests record knob moves
+  (`acting` is unset otherwise): pitch bend, which is not a request, never
+  reaches a lane (it is not a parameter today).
 - (2026-10-12, knob recording review) hardware CCs are handled as the
   host user, so a remote user's take never records moves made on a
   hardware controller, even one driving their seat. Resolve the acting

@@ -438,8 +438,10 @@ instruments.
   longest clip fits a lane's 64 points). Each pass (and the take's end)
   writes them as `clip.lane.set` requests in the same journal entry as
   the pass's notes: one undo step, and a replay writes the same lanes.
-  Recorded points replace the lane's points in the span they cover;
-  other points stay (a full lane gives up those farthest from it).
+  Recorded moves run forward until the clip loops (a pass written one
+  step before the loop's end can cross it); each run replaces the lane's
+  points in the span it covers, and other points stay (a full lane gives
+  up those farthest from the runs).
 - The value set by hand follows the knob as usual; after the take the
   lane plays the recorded moves. Only the recorder's moves are recorded
   (the user of the request, as the journal has it); other players' moves
