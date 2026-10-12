@@ -63,4 +63,4 @@ decisions (before implementation).
 | [0007](0007-midi-bindings-and-clips.md) | MIDI bindings, seats, clips, and recording | accepted (phases 1-2 implemented; recording moved to 0008) |
 | [0008](0008-recording-and-arrangement.md) | Recording and the arrangement | accepted (phases A, B1, B2 implemented; C in progress) |
 | [0009](0009-sequencing-model.md) | One transport, clip launching, and a generic step view | accepted (phases 1 and 2 implemented) |
-| [0010](0010-devices.md) | Devices: effects, buses, modulators, a sampler, automation | accepted (phase 2 implemented) |
+| [0010](0010-devices.md) | Devices: effects, buses, modulators, a sampler, automation | accepted (phases 2 and 3 implemented) |

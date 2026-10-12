@@ -258,6 +258,9 @@ pub struct InstrumentRemoveParams {
 pub struct ChannelAddParams {
     #[serde(default)]
     pub name: Option<String>,
+    /// A return bus instead of a track channel (RFC 0010).
+    #[serde(default)]
+    pub kind: Option<ChannelKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]

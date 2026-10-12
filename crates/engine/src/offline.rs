@@ -50,6 +50,10 @@ pub struct RenderSpec {
     pub instruments: Vec<RenderInstrument>,
     pub clips: Vec<RenderClip>,
     pub effects: Vec<RenderEffect>,
+    /// Return channels (0-based) and the send levels into them (from, to,
+    /// level).
+    pub returns: Vec<u8>,
+    pub sends: Vec<(u8, u8, f32)>,
     /// Insert chains: engine chain index (`MASTER_CHAIN` for the master)
     /// -> effect slots in order.
     pub chains: Vec<(u8, Vec<u8>)>,
@@ -89,6 +93,12 @@ impl RenderSpec {
             for placement in &inst.placements {
                 let _ = e.apply(Command::AddPlacement { slot, placement: *placement }, &mut fb);
             }
+        }
+        for ch in &self.returns {
+            let _ = e.apply(Command::SetChannelReturn { ch: *ch, ret: true }, &mut fb);
+        }
+        for (ch, ret, v) in &self.sends {
+            let _ = e.apply(Command::SetParam { target: ParamTarget::Send { ch: *ch, ret: *ret }, value: *v }, &mut fb);
         }
         for fx in &self.effects {
             let _ = e.apply(Command::AddEffect { slot: fx.slot, effect: effect::make(fx.kind, sample_rate as f32) }, &mut fb);
@@ -311,6 +321,8 @@ mod tests {
             clips: vec![RenderClip { index: 0, length: fours_protocol::DEFAULT_CLIP_LENGTH, events }],
             effects: Vec::new(),
             chains: Vec::new(),
+            returns: Vec::new(),
+            sends: Vec::new(),
             start: 0,
         }
     }

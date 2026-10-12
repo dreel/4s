@@ -7,6 +7,7 @@ export * from "./CcMode";
 export * from "./Change";
 export * from "./ChannelAddParams";
 export * from "./ChannelInfo";
+export * from "./ChannelKind";
 export * from "./ChannelLevel";
 export * from "./ChannelMoveParams";
 export * from "./ChannelRemoveParams";

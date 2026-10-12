@@ -192,6 +192,14 @@ enum Cmd {
         #[command(subcommand)]
         cmd: InstrumentCmd,
     },
+    /// Set a track channel's send to a return bus, e.g. `4s send 1 3 40%`
+    /// (shorthand for `set mixer.1.send.3`).
+    Send {
+        from: u32,
+        to: u32,
+        #[arg(allow_hyphen_values = true)]
+        level: String,
+    },
     /// Audio effects in insert chains on channels and the master (RFC
     /// 0010), e.g. `4s device add delay --on 1`, `4s device add reverb --on
     /// master`. Their parameters are `<id>.*` (`4s params delay`).
@@ -466,10 +474,13 @@ fn chain_arg(s: &str) -> Result<u32> {
 
 #[derive(Subcommand, Debug, Clone)]
 enum ChannelCmd {
-    /// Add a channel (lowest free number).
+    /// Add a channel (lowest free number); `--return` for a return bus,
+    /// which the track channels feed with sends (`4s send 1 3 50%`).
     Add {
         #[arg(long)]
         name: Option<String>,
+        #[arg(long = "return")]
+        ret: bool,
     },
     /// Remove a channel; its sources become unrouted.
     Rm { n: u32 },
@@ -1270,6 +1281,9 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 keep_channels: *keep_channels,
             })],
         },
+        Cmd::Send { from, to, level } => {
+            vec![Request::ParamSet(ParamSetParams { path: format!("mixer.{from}.send.{to}"), value: parse_value(level)? })]
+        }
         Cmd::Device { cmd } => match cmd {
             DeviceCmd::Types => vec![Request::DeviceTypes(e)],
             DeviceCmd::List => vec![Request::DeviceList(e)],
@@ -1288,7 +1302,10 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             })],
         },
         Cmd::Channel { cmd } => match cmd {
-            ChannelCmd::Add { name } => vec![Request::ChannelAdd(ChannelAddParams { name: name.clone() })],
+            ChannelCmd::Add { name, ret } => vec![Request::ChannelAdd(ChannelAddParams {
+                name: name.clone(),
+                kind: ret.then_some(ChannelKind::Return),
+            })],
             ChannelCmd::Rm { n } => vec![Request::ChannelRemove(ChannelRemoveParams { n: *n })],
             ChannelCmd::Rename { n, name } => {
                 vec![Request::ChannelRename(ChannelRenameParams { n: *n, name: name.clone() })]
@@ -1751,12 +1768,26 @@ fn print_mixer(s: &Snapshot) {
         if p(&format!("mixer.{n}.solo")) >= 0.5 {
             flags.push_str(" S");
         }
+        // A return is fed by sends; a track lists the sends it makes.
+        let input = if c.kind == ChannelKind::Return {
+            let from: Vec<String> = s
+                .graph
+                .channels
+                .iter()
+                .filter(|t| p(&format!("mixer.{}.send.{n}", t.n)) > 0.0)
+                .map(|t| format!("{} {:.0}%", t.n, p(&format!("mixer.{}.send.{n}", t.n)) * 100.0))
+                .collect();
+            format!("return <- {}", if from.is_empty() { "(no sends)".into() } else { format!("sends from {}", from.join(", ")) })
+        } else if sources.is_empty() {
+            "(nothing)".to_string()
+        } else {
+            sources.join(", ")
+        };
         println!(
-            "ch {n:<2} {:<12} vol {:>3.0}%  pan {:<4}{flags:<5}  <- {}{}",
+            "ch {n:<2} {:<12} vol {:>3.0}%  pan {:<4}{flags:<5}  <- {input}{}",
             c.name,
             p(&format!("mixer.{n}.volume")) * 100.0,
             fmt_pan(p(&format!("mixer.{n}.pan"))),
-            if sources.is_empty() { "(nothing)".to_string() } else { sources.join(", ") },
             inserts(&s.graph.devices, n)
         );
     }
@@ -2072,7 +2103,7 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
                 println!("{:<24} {:>8}{unit:<6}  [{range}]", info.path, p["value"]);
             }
         }
-        Cmd::Get { .. } | Cmd::Set { .. } | Cmd::Tempo { .. } => {
+        Cmd::Get { .. } | Cmd::Set { .. } | Cmd::Tempo { .. } | Cmd::Send { .. } => {
             let v: ParamValue = serde_json::from_value(last)?;
             println!("{} = {}", v.path, v.value);
         }
@@ -2697,7 +2728,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
+            "send 1 2 50%", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",

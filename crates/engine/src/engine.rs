@@ -53,6 +53,8 @@ pub enum ParamTarget {
     Channel { ch: u8, index: u8 },
     /// An audio effect's parameter (`bypass`, `mix`, then its own).
     Effect { slot: u8, index: u16 },
+    /// A track channel's send level to a return channel (0-based indexes).
+    Send { ch: u8, ret: u8 },
 }
 
 /// The insert chain index of the master (channels are 0..MAX_CHANNELS).
@@ -71,6 +73,9 @@ pub enum Command {
     RemoveInstrument { slot: u8 },
     SetRoute { slot: u8, output: u8, channel: Option<u8> },
     SetChannelActive { ch: u8, active: bool },
+    /// Make a channel a return bus (fed by sends, mixed after the track
+    /// channels) or a track channel.
+    SetChannelReturn { ch: u8, ret: bool },
     /// Put an audio effect in an effect slot (replacing any there).
     AddEffect { slot: u8, effect: Box<dyn AudioEffect> },
     RemoveEffect { slot: u8 },
@@ -111,6 +116,7 @@ impl std::fmt::Debug for Command {
             Command::RemoveInstrument { slot } => write!(f, "RemoveInstrument({slot})"),
             Command::SetRoute { slot, output, channel } => write!(f, "SetRoute({slot}, {output}, {channel:?})"),
             Command::SetChannelActive { ch, active } => write!(f, "SetChannelActive({ch}, {active})"),
+            Command::SetChannelReturn { ch, ret } => write!(f, "SetChannelReturn({ch}, {ret})"),
             Command::AddEffect { slot, .. } => write!(f, "AddEffect({slot})"),
             Command::RemoveEffect { slot } => write!(f, "RemoveEffect({slot})"),
             Command::SetChain { ch, slots, len } => write!(f, "SetChain({ch}, {:?})", &slots[..(*len as usize).min(MAX_INSERTS)]),
@@ -301,6 +307,8 @@ impl Click {
 
 struct Channel {
     active: bool,
+    /// A return bus: fed by sends, not silenced by another channel's solo.
+    ret: bool,
     params: [f32; CHANNEL_PARAMS],
     gain: Smoother,
     mono_l: Smoother,
@@ -319,6 +327,7 @@ impl Channel {
         let (ml, mr) = mono_pan(0.0);
         Self {
             active: false,
+            ret: false,
             params: channel_defaults(),
             gain: Smoother::new(sr, 0.01, 0.0),
             mono_l: Smoother::new(sr, 0.01, ml),
@@ -335,7 +344,7 @@ impl Channel {
     fn targets(&self, any_solo: bool) -> [f32; 5] {
         let muted = self.params[CH_MUTE] >= 0.5;
         let soloed = self.params[CH_SOLO] >= 0.5;
-        let audible = !muted && (!any_solo || soloed);
+        let audible = !muted && (!any_solo || soloed || self.ret);
         let gain = if audible { volume_to_gain(self.params[CH_VOLUME]) } else { 0.0 };
         let (ml, mr) = mono_pan(self.params[CH_PAN]);
         let (bl, br) = balance(self.params[CH_PAN]);
@@ -365,6 +374,12 @@ pub struct Engine {
     chain_len: [u8; MAX_CHANNELS + 1],
     /// Scratch for the dry signal of the effect running.
     dry: Vec<f32>,
+    /// Send levels, track channel -> return channel, and the levels the last
+    /// block ended at (each block ramps between them).
+    sends: [[f32; MAX_CHANNELS]; MAX_CHANNELS],
+    sends_at: [[f32; MAX_CHANNELS]; MAX_CHANNELS],
+    /// Scratch for a track channel's post-fader signal.
+    post: Vec<f32>,
     master: Smoother,
     master_bus: Vec<f32>,
     master_peak: [f32; 2],
@@ -412,6 +427,9 @@ impl Engine {
             chains: [[0; MAX_INSERTS]; MAX_CHANNELS + 1],
             chain_len: [0; MAX_CHANNELS + 1],
             dry: vec![0.0; MAX_BLOCK * 2],
+            sends: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
+            sends_at: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
+            post: vec![0.0; MAX_BLOCK * 2],
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
             master_peak: [0.0; 2],
@@ -537,6 +555,11 @@ impl Engine {
                         c.params[index as usize] = value;
                     }
                 }
+                ParamTarget::Send { ch, ret } => {
+                    if (ch as usize) < MAX_CHANNELS && (ret as usize) < MAX_CHANNELS {
+                        self.sends[ch as usize][ret as usize] = value.clamp(0.0, 1.0);
+                    }
+                }
                 ParamTarget::Effect { slot, index } => {
                     if let Some(Some(e)) = self.effects.get_mut(slot as usize) {
                         match index as usize {
@@ -595,9 +618,23 @@ impl Engine {
                     s.instrument.set_routed(output as usize, s.routes[output as usize].is_some());
                 }
             }
+            Command::SetChannelReturn { ch, ret } => {
+                if let Some(c) = self.channels.get_mut(ch as usize) {
+                    c.ret = ret;
+                }
+            }
             Command::SetChannelActive { ch, active } => {
                 let any_solo = self.any_solo();
+                // A reused channel number starts as a track with no sends.
+                if (ch as usize) < MAX_CHANNELS {
+                    for row in self.sends.iter_mut().chain(self.sends_at.iter_mut()) {
+                        row[ch as usize] = 0.0;
+                    }
+                    self.sends[ch as usize] = [0.0; MAX_CHANNELS];
+                    self.sends_at[ch as usize] = [0.0; MAX_CHANNELS];
+                }
                 if let Some(c) = self.channels.get_mut(ch as usize) {
+                    c.ret = false;
                     c.active = active;
                     c.params = channel_defaults();
                     c.peak = [0.0; 2];
@@ -975,24 +1012,50 @@ impl Engine {
         }
 
         let ctx = ProcessContext { tempo: self.globals[TEMPO].clamp(20.0, 300.0) };
-        for (i, ch) in self.channels.iter_mut().enumerate().filter(|(_, c)| c.active) {
-            let len = self.chain_len[i] as usize;
-            if len > 0 {
-                run_chain(&mut self.effects, &self.chains[i][..len], &mut ch.bus, &mut self.dry, n, &ctx);
-            }
-        }
-
         let master = &mut self.master_bus[..n * 2];
         master.fill(0.0);
-        for ch in self.channels.iter_mut().filter(|c| c.active) {
-            for f in 0..n {
-                let g = ch.coef[f][0];
-                let l = ch.bus[f * 2] * g;
-                let r = ch.bus[f * 2 + 1] * g;
-                ch.peak[0] = ch.peak[0].max(l.abs());
-                ch.peak[1] = ch.peak[1].max(r.abs());
-                master[f * 2] += l;
-                master[f * 2 + 1] += r;
+        // Track channels first (their sends feed the returns), then the
+        // returns: inserts, then the fader, into the master.
+        for returns in [false, true] {
+            for i in 0..MAX_CHANNELS {
+                let ch = &mut self.channels[i];
+                if !ch.active || ch.ret != returns {
+                    continue;
+                }
+                let len = self.chain_len[i] as usize;
+                if len > 0 {
+                    run_chain(&mut self.effects, &self.chains[i][..len], &mut ch.bus, &mut self.dry, n, &ctx);
+                }
+                for f in 0..n {
+                    let g = ch.coef[f][0];
+                    let l = ch.bus[f * 2] * g;
+                    let r = ch.bus[f * 2 + 1] * g;
+                    ch.peak[0] = ch.peak[0].max(l.abs());
+                    ch.peak[1] = ch.peak[1].max(r.abs());
+                    self.master_bus[f * 2] += l;
+                    self.master_bus[f * 2 + 1] += r;
+                    self.post[f * 2] = l;
+                    self.post[f * 2 + 1] = r;
+                }
+                if returns {
+                    continue;
+                }
+                // Post-fader sends, ramped across the block, into each
+                // return's bus through its balance.
+                for j in 0..MAX_CHANNELS {
+                    let (from, to) = (self.sends_at[i][j], self.sends[i][j]);
+                    self.sends_at[i][j] = to;
+                    let rc = &mut self.channels[j];
+                    if (from == 0.0 && to == 0.0) || !rc.active || !rc.ret {
+                        continue;
+                    }
+                    for f in 0..n {
+                        let s = from + (to - from) * (f + 1) as f32 / n as f32;
+                        let k = &rc.coef[f];
+                        rc.bus[f * 2] += self.post[f * 2] * s * k[3];
+                        rc.bus[f * 2 + 1] += self.post[f * 2 + 1] * s * k[4];
+                    }
+                }
             }
         }
 
@@ -1398,6 +1461,31 @@ pub(crate) mod tests {
         // Bar 4 is past the song's end: it ends as soon as the track is back.
         let end = fb.iter().find_map(|f| if let Feedback::SongEnd { time } = f { Some(*time) } else { None });
         assert!(end.is_some_and(|t| (t - 6.0).abs() < 1e-3), "{end:?}");
+    }
+
+    /// A send feeds its return after the fader: the kick on channel 0 sent
+    /// to a return on channel 1 shows on the return's meter, and not when
+    /// the track is muted (post-fader) or the send is at zero.
+    #[test]
+    fn sends_feed_returns_after_the_fader() {
+        let return_peak = |send: f32, mute: f32| {
+            let mut e = drum_engine();
+            let mut fb = vec![];
+            let mut apply = |c| {
+                let _ = e.apply(c, &mut |_| {});
+            };
+            apply(Command::SetChannelActive { ch: 1, active: true });
+            apply(Command::SetChannelReturn { ch: 1, ret: true });
+            apply(Command::SetParam { target: ParamTarget::Send { ch: 0, ret: 1 }, value: send });
+            apply(Command::SetParam { target: ParamTarget::Channel { ch: 0, index: CH_MUTE as u8 }, value: mute });
+            e.snap();
+            let _ = e.apply(Command::NoteOn { slot: 0, note: 36, velocity: 1.0, gate: false }, &mut |_| {});
+            render_secs(&mut e, 0.2, &mut fb);
+            fb.iter().filter_map(|f| if let Feedback::Meters { channels, .. } = f { Some(channels[1][0]) } else { None }).fold(0.0f32, f32::max)
+        };
+        assert!(return_peak(1.0, 0.0) > 0.05, "{}", return_peak(1.0, 0.0));
+        assert!(return_peak(1.0, 1.0) < 1e-4, "muted: {}", return_peak(1.0, 1.0));
+        assert!(return_peak(0.0, 0.0) < 1e-4, "no send: {}", return_peak(0.0, 0.0));
     }
 
     /// A waiting launch lands on a loop's wrap: a one-bar loop over bar 2

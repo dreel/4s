@@ -112,8 +112,23 @@ function StripInput({ n }: { n: number }) {
   );
 }
 
+/** A track channel's sends, a knob per return bus (RFC 0010). */
+function Sends({ n }: { n: number }) {
+  const returns = useApp((s) => s.snapshot?.graph.channels);
+  const here = (returns ?? []).filter((c) => c.kind === "return");
+  if (!here.length) return null;
+  return (
+    <div className="flex flex-wrap justify-center gap-1 w-20" data-testid={`sends-${n}`}>
+      {here.map((r) => (
+        <ParamKnob key={r.n} path={`mixer.${n}.send.${r.n}`} label={`> ${r.name}`} format={pct} size={24} />
+      ))}
+    </div>
+  );
+}
+
 function Strip({ channel, index, count }: { channel: ChannelInfo; index: number; count: number }) {
   const n = channel.n;
+  const isReturn = channel.kind === "return";
   const sources = useApp((s) =>
     Object.entries(s.snapshot?.graph.routes ?? {})
       .filter(([, c]) => c === n)
@@ -163,7 +178,13 @@ function Strip({ channel, index, count }: { channel: ChannelInfo; index: number;
         </button>
       </div>
       <ChannelName channel={channel} />
-      <StripInput n={n} />
+      {isReturn ? (
+        <div className="text-[10px] text-sky-400" data-testid={`return-${n}`} title="a return bus: the track channels' sends feed it">
+          return
+        </div>
+      ) : (
+        <StripInput n={n} />
+      )}
       <button
         className="max-w-20 truncate text-[10px] text-amber-400/80 hover:text-amber-300 disabled:text-zinc-600"
         disabled={!instrument}
@@ -174,6 +195,7 @@ function Strip({ channel, index, count }: { channel: ChannelInfo; index: number;
         {sources || "(empty)"}
       </button>
       <Inserts n={n} />
+      {!isReturn && <Sends n={n} />}
       <ParamKnob path={`mixer.${n}.pan`} label="pan" format={pan} />
       <div className="flex items-end gap-1">
         <Fader
@@ -233,8 +255,16 @@ function AddControls() {
       <button className={btn} onClick={() => void add()} data-testid="add-instrument">
         + instrument
       </button>
-      <button className={btn} onClick={() => void act(client.call("channel.add", { name: null }))} data-testid="add-channel">
+      <button className={btn} onClick={() => void act(client.call("channel.add", { name: null, kind: null }))} data-testid="add-channel">
         + channel
+      </button>
+      <button
+        className={btn}
+        title="a return bus, fed by the track channels' sends"
+        onClick={() => void act(client.call("channel.add", { name: null, kind: "return" }))}
+        data-testid="add-return"
+      >
+        + return
       </button>
     </div>
   );
