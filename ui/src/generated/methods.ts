@@ -49,6 +49,9 @@ import type { MidiModelsResult } from "./MidiModelsResult";
 import type { MidiPortsResult } from "./MidiPortsResult";
 import type { MidiRenameParams } from "./MidiRenameParams";
 import type { MidiSetSeatParams } from "./MidiSetSeatParams";
+import type { ModRouteParams } from "./ModRouteParams";
+import type { ModRoutesResult } from "./ModRoutesResult";
+import type { ModUnrouteParams } from "./ModUnrouteParams";
 import type { NoteParams } from "./NoteParams";
 import type { NoteSetParams } from "./NoteSetParams";
 import type { NotesGetParams } from "./NotesGetParams";
@@ -128,6 +131,8 @@ export interface Methods {
   "device.add": { params: DeviceAddParams; result: DeviceInfo };
   "device.remove": { params: DeviceRefParams; result: Graph };
   "device.move": { params: DeviceMoveParams; result: Graph };
+  "mod.route": { params: ModRouteParams; result: ModRoutesResult };
+  "mod.unroute": { params: ModUnrouteParams; result: ModRoutesResult };
   "channel.add": { params: ChannelAddParams; result: ChannelInfo };
   "channel.remove": { params: ChannelRemoveParams; result: Graph };
   "channel.rename": { params: ChannelRenameParams; result: ChannelInfo };
@@ -230,6 +235,8 @@ export const METHODS: MethodName[] = [
   "device.add",
   "device.remove",
   "device.move",
+  "mod.route",
+  "mod.unroute",
   "channel.add",
   "channel.remove",
   "channel.rename",

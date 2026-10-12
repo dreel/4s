@@ -1197,6 +1197,33 @@ test("returns: a return bus with a reverb, fed by a send knob on a track strip",
   await expect(rpc("route.set", { source: "drums", channel: 2, swap: false })).rejects.toThrow("return bus");
 });
 
+test("modulators: an LFO from the rack, mapped onto a knob by pressing it, depth and unroute", async () => {
+  const { page, rpc } = h;
+  const routes = async () => (await rpc("state.get", {})).graph.mod_routes;
+  await page.getByTestId("add-lfo").click();
+  await expect(page.getByTestId("rack-lfo")).toBeVisible();
+  await expect(page.getByTestId("device-panel-lfo")).toBeVisible();
+  await expect(page.getByTestId("knob-lfo.1.rate")).toBeVisible();
+  // Map mode: press an output, then a knob (the master volume).
+  await page.getByTestId("map-lfo.2").click();
+  await expect(page.getByTestId("mapping")).toContainText("lfo.2");
+  await page.getByTestId("fader-master").scrollIntoViewIfNeeded();
+  await page.getByTestId("knob-mixer.1.pan").click();
+  await expect.poll(routes).toEqual([{ source: "lfo.2", target: "mixer.1.pan", depth: 0.5 }]);
+  await expect(page.getByTestId("mapping")).toHaveCount(0);
+  // The knob was not turned, only routed.
+  expect((await rpc("param.get", { path: "mixer.1.pan" })).value).toBe(0);
+  // Depth from the route's slider, then remove it.
+  await page.getByTestId("depth-lfo.2-mixer.1.pan").fill("-25");
+  await expect.poll(async () => (await routes())[0]?.depth).toBe(-0.25);
+  await page.getByTestId("unroute-lfo.2-mixer.1.pan").click();
+  await expect.poll(routes).toEqual([]);
+  // Escape cancels map mode.
+  await page.getByTestId("map-lfo.1").click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("mapping")).toHaveCount(0);
+});
+
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
   const { page, rpc } = h;
   // Pad row 1 (snare), column 3 -> snare step 2.

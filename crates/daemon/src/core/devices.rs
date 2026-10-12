@@ -1,12 +1,15 @@
 //! Devices (RFC 0010): audio effects in insert chains on mixer channels and
-//! the master. An effect is a node like an instrument: an id from the same
-//! namespace (its parameters are `<id>.*`), an engine slot of its own
-//! (`effect_used`), and a place in one chain (`chains`: channel number, 0
-//! for the master, -> effect ids in order). Effects are built here, sent to
-//! the engine, and handed back by the audio thread to be dropped here.
+//! the master, and modulators routed to parameters. A device is a node like
+//! an instrument: an id from the same namespace (its parameters are
+//! `<id>.*`) and an engine slot of its own (`effect_used`, `mod_used`). An
+//! effect has a place in one chain (`chains`: channel number, 0 for the
+//! master, -> effect ids in order); a modulator sits in the rack and its
+//! outputs (`<id>.<k>`) move parameters through modulation routes
+//! (`mod_routes`). Devices are built here, sent to the engine, and handed
+//! back by the audio thread to be dropped here.
 
 use super::*;
-use fours_engine::effect;
+use fours_engine::{effect, modulator};
 
 pub(super) struct DeviceState {
     pub id: String,
@@ -41,17 +44,19 @@ impl Core {
         self.chains.iter().find_map(|(n, ids)| ids.iter().position(|d| d == id).map(|p| (*n, p as u32)))
     }
 
-    /// Every effect, by chain (the master first) and place.
+    /// Every effect, by chain (the master first) and place, then the
+    /// modulators in the rack.
     pub(super) fn device_infos(&self) -> Vec<DeviceInfo> {
-        self.chains
-            .iter()
-            .flat_map(|(n, ids)| {
-                ids.iter().enumerate().filter_map(move |(p, id)| {
-                    let d = self.devices.iter().find(|d| &d.id == id)?;
-                    Some(DeviceInfo { id: d.id.clone(), kind: d.kind, name: d.name.clone(), channel: *n, position: p as u32 })
-                })
+        let chained = self.chains.iter().flat_map(|(n, ids)| {
+            ids.iter().enumerate().filter_map(move |(p, id)| {
+                let d = self.devices.iter().find(|d| &d.id == id)?;
+                Some(DeviceInfo { id: d.id.clone(), kind: d.kind, name: d.name.clone(), channel: Some(*n), position: p as u32 })
             })
-            .collect()
+        });
+        let rack = self.devices.iter().filter(|d| d.kind.kind() == DeviceKind::Modulator).enumerate().map(|(p, d)| {
+            DeviceInfo { id: d.id.clone(), kind: d.kind, name: d.name.clone(), channel: None, position: p as u32 }
+        });
+        chained.chain(rack).collect()
     }
 
     fn check_chain(&self, n: u32) -> Result<(), RpcError> {
@@ -64,20 +69,51 @@ impl Core {
     /// Build an effect in a free engine slot (the caller checked there is
     /// one, and queue room), not in any chain yet.
     pub(super) fn add_device_unchecked(&mut self, id: &str, kind: DeviceType, name: &str) {
-        let slot = self.effect_used.iter().position(|u| !u).expect("checked by the caller") as u8;
-        self.effect_used[slot as usize] = true;
-        let effect = effect::make(kind, self.sample_rate as f32);
-        self.send(Command::AddEffect { slot, effect });
+        let slot = if kind.kind() == DeviceKind::Modulator {
+            let slot = self.mod_used.iter().position(|u| !u).expect("checked by the caller") as u8;
+            self.mod_used[slot as usize] = true;
+            self.send(Command::AddModulator { slot, modulator: modulator::make(kind) });
+            slot
+        } else {
+            let slot = self.effect_used.iter().position(|u| !u).expect("checked by the caller") as u8;
+            self.effect_used[slot as usize] = true;
+            let effect = effect::make(kind, self.sample_rate as f32);
+            self.send(Command::AddEffect { slot, effect });
+            slot
+        };
         self.devices.push(DeviceState { id: id.to_string(), kind, name: name.to_string(), slot });
+    }
+
+    /// Whether the engine has a free slot for a device of this kind.
+    pub(super) fn has_room_for(&self, kind: DeviceType) -> bool {
+        if kind.kind() == DeviceKind::Modulator {
+            self.mod_used.iter().any(|u| !u)
+        } else {
+            self.effect_used.iter().any(|u| !u)
+        }
+    }
+
+    /// The engine target of a device's parameter `index`.
+    pub(super) fn device_target(d: &DeviceState, index: usize) -> ParamTarget {
+        if d.kind.kind() == DeviceKind::Modulator {
+            ParamTarget::Modulator { slot: d.slot, index: index as u16 }
+        } else {
+            ParamTarget::Effect { slot: d.slot, index: index as u16 }
+        }
     }
 
     /// Send every parameter of a device to the engine.
     pub(super) fn push_device_params(&mut self, id: &str) {
-        let Some(slot) = self.devices.iter().find(|d| d.id == id).map(|d| d.slot) else { return };
+        let Some(d) = self.devices.iter().find(|d| d.id == id) else { return };
+        let own = Self::device_target(d, 0);
         let cmds: Vec<Command> = self
             .params
             .iter()
-            .filter(|p| matches!(p.target, ParamTarget::Effect { slot: s, .. } if s == slot))
+            .filter(|p| match (p.target, own) {
+                (ParamTarget::Effect { slot: a, .. }, ParamTarget::Effect { slot: b, .. }) => a == b,
+                (ParamTarget::Modulator { slot: a, .. }, ParamTarget::Modulator { slot: b, .. }) => a == b,
+                _ => false,
+            })
             .map(|p| Command::SetParam { target: p.target, value: p.value as f32 })
             .collect();
         for c in cmds {
@@ -113,10 +149,17 @@ impl Core {
         }
         if let Some(pos) = self.devices.iter().position(|d| d.id == id) {
             let d = self.devices.remove(pos);
-            self.send(Command::RemoveEffect { slot: d.slot });
-            self.effect_used[d.slot as usize] = false;
+            if d.kind.kind() == DeviceKind::Modulator {
+                // The engine drops its routes with it.
+                self.send(Command::RemoveModulator { slot: d.slot });
+                self.mod_used[d.slot as usize] = false;
+            } else {
+                self.send(Command::RemoveEffect { slot: d.slot });
+                self.effect_used[d.slot as usize] = false;
+            }
             self.in_flight += 1;
         }
+        self.prune_routes();
     }
 
     /// Effects on a channel: what removing it takes with it.
@@ -174,8 +217,8 @@ impl Core {
             label: k.label().into(),
             default_id: k.default_id().into(),
             ports: k.ports(),
-            params: effect::params(*k, k.default_id()),
-            knob_pages: effect::knob_pages(*k, k.default_id()),
+            params: fours_engine::device_params(*k, k.default_id()),
+            knob_pages: fours_engine::device_knob_pages(*k, k.default_id()),
             layout: None,
         }));
         DeviceTypesResult { types }
@@ -190,13 +233,25 @@ impl Core {
         if self.id_taken(&id) {
             return Err(RpcError::invalid(format!("'{id}' is already an instrument or device id")));
         }
-        self.check_chain(p.channel)?;
-        let mut ids = self.chains.get(&p.channel).cloned().unwrap_or_default();
-        if ids.len() >= MAX_INSERTS {
-            return Err(RpcError::invalid(format!("at most {MAX_INSERTS} inserts on a channel")));
+        let modulator = p.kind.kind() == DeviceKind::Modulator;
+        let channel = match (modulator, p.channel) {
+            (true, None) => None,
+            (true, Some(_)) => return Err(RpcError::invalid("a modulator sits in the rack, not on a channel: leave out `channel`")),
+            (false, Some(n)) => Some(n),
+            (false, None) => return Err(RpcError::invalid("an audio effect needs a `channel` (0 for the master)")),
+        };
+        if let Some(n) = channel {
+            self.check_chain(n)?;
+            if self.inserts_on(n) >= MAX_INSERTS {
+                return Err(RpcError::invalid(format!("at most {MAX_INSERTS} inserts on a channel")));
+            }
         }
-        if !self.effect_used.iter().any(|u| !u) {
-            return Err(RpcError::invalid(format!("at most {MAX_EFFECTS} effects")));
+        if !self.has_room_for(p.kind) {
+            return Err(RpcError::invalid(if modulator {
+                format!("at most {MAX_MODULATORS} modulators")
+            } else {
+                format!("at most {MAX_EFFECTS} effects")
+            }));
         }
         let name = match check_name(p.name)? {
             Some(n) => n,
@@ -209,9 +264,12 @@ impl Core {
         self.add_device_unchecked(&id, p.kind, &name);
         self.rebuild_params();
         self.push_device_params(&id);
-        let at = p.position.map_or(ids.len(), |p| (p as usize).min(ids.len()));
-        ids.insert(at, id.clone());
-        self.set_chain_unchecked(p.channel, ids);
+        if let Some(n) = channel {
+            let mut ids = self.chains.get(&n).cloned().unwrap_or_default();
+            let at = p.position.map_or(ids.len(), |p| (p as usize).min(ids.len()));
+            ids.insert(at, id.clone());
+            self.set_chain_unchecked(n, ids);
+        }
         self.graph_changed(origin);
         Ok(self.device_infos().into_iter().find(|d| d.id == id).expect("just added"))
     }
@@ -231,7 +289,9 @@ impl Core {
     }
 
     fn device_move(&mut self, p: DeviceMoveParams, origin: &str) -> Result<Graph, RpcError> {
-        self.find_device(&p.id)?;
+        if self.find_device(&p.id)?.kind.kind() == DeviceKind::Modulator {
+            return Err(RpcError::invalid(format!("'{}' is a modulator: it has no place in a chain", p.id)));
+        }
         let (from, _) = self.device_place(&p.id).ok_or_else(|| RpcError::failed(format!("'{}' is in no chain", p.id)))?;
         let channel = p.channel.unwrap_or(from);
         self.check_chain(channel)?;
@@ -260,6 +320,8 @@ impl Core {
             Request::DeviceAdd(p) => self.device_add(p, origin).and_then(ok),
             Request::DeviceRemove(p) => self.device_remove(&p.id, origin).and_then(ok),
             Request::DeviceMove(p) => self.device_move(p, origin).and_then(ok),
+            Request::ModRoute(p) => self.mod_route(p, origin).and_then(ok),
+            Request::ModUnroute(p) => self.mod_unroute(p, origin).and_then(ok),
             other => return Err(other),
         })
     }
@@ -275,6 +337,117 @@ impl Core {
         for (n, ids) in &self.chains {
             d.insert(format!("chain:{n}"), json!(ids));
         }
+        for r in &self.mod_routes {
+            d.insert(format!("mod:{}>{}", r.source, r.target), json!(r.depth));
+        }
+    }
+
+    // ---- modulation routes -----------------------------------------------------
+
+    /// A modulator output (`lfo.2`): its engine slot and output index.
+    fn mod_source(&self, source: &str) -> Option<(u8, u8)> {
+        let (id, k) = source.rsplit_once('.')?;
+        let d = self.devices.iter().find(|d| d.id == id && d.kind.kind() == DeviceKind::Modulator)?;
+        let k: usize = k.parse().ok()?;
+        (1..=modulator::outputs(d.kind, id).len()).contains(&k).then_some((d.slot, (k - 1) as u8))
+    }
+
+    /// A route's target: a continuous parameter, and its range.
+    fn mod_target(&self, path: &str) -> Result<(ParamTarget, f32, f32), RpcError> {
+        let p = &self.params[self.param_id(path)?];
+        match p.info.kind {
+            ParamKind::Continuous { min, max } => Ok((p.target, min as f32, max as f32)),
+            _ => Err(RpcError::invalid(format!("'{path}' is not continuous: only continuous parameters take modulation"))),
+        }
+    }
+
+    /// The engine's route table: each route with its target's value now as
+    /// its base.
+    pub(super) fn engine_routes(&self) -> Vec<fours_engine::ModRoute> {
+        self.mod_routes
+            .iter()
+            .filter_map(|r| {
+                let (source, output) = self.mod_source(&r.source)?;
+                let (target, min, max) = self.mod_target(&r.target).ok()?;
+                let base = self.params[self.param_id(&r.target).ok()?].value as f32;
+                Some(fours_engine::ModRoute { source, output, target, depth: r.depth, min, max, base })
+            })
+            .collect()
+    }
+
+    /// Send the whole route table to the engine (at most `MAX_MOD_ROUTES`).
+    pub(super) fn sync_routes(&mut self) {
+        let routes = self.engine_routes();
+        for i in 0..MAX_MOD_ROUTES {
+            self.send(Command::SetModRoute { index: i as u8, route: routes.get(i).copied() });
+        }
+    }
+
+    /// Drop routes whose source or target went away, telling the engine.
+    pub(super) fn prune_routes(&mut self) {
+        let before = self.mod_routes.len();
+        let keep: Vec<ModRoute> = self
+            .mod_routes
+            .iter()
+            .filter(|r| self.mod_source(&r.source).is_some() && self.mod_target(&r.target).is_ok())
+            .cloned()
+            .collect();
+        if keep.len() != before {
+            self.mod_routes = keep;
+            self.sync_routes();
+        }
+    }
+
+    pub(super) fn set_mod_route_unchecked(&mut self, source: &str, target: &str, depth: Option<f32>) {
+        let at = self.mod_routes.iter().position(|r| r.source == source && r.target == target);
+        match (at, depth) {
+            (Some(i), Some(d)) => self.mod_routes[i].depth = d,
+            (None, Some(d)) => self.mod_routes.push(ModRoute { source: source.into(), target: target.into(), depth: d }),
+            (Some(i), None) => {
+                self.mod_routes.remove(i);
+            }
+            (None, None) => {}
+        }
+    }
+
+    fn mod_route(&mut self, p: ModRouteParams, origin: &str) -> Result<ModRoutesResult, RpcError> {
+        if self.mod_source(&p.source).is_none() {
+            let outs: Vec<String> = self
+                .devices
+                .iter()
+                .filter(|d| d.kind.kind() == DeviceKind::Modulator)
+                .flat_map(|d| modulator::outputs(d.kind, &d.id))
+                .collect();
+            return Err(RpcError::invalid(format!(
+                "no modulator output '{}' (outputs: {})",
+                p.source,
+                if outs.is_empty() { "none; add an lfo".into() } else { outs.join(", ") }
+            )));
+        }
+        self.mod_target(&p.target)?;
+        if !p.depth.is_finite() || !(-1.0..=1.0).contains(&p.depth) {
+            return Err(RpcError::invalid("depth must be -1..1"));
+        }
+        let exists = self.mod_routes.iter().any(|r| r.source == p.source && r.target == p.target);
+        if !exists && self.mod_routes.len() >= MAX_MOD_ROUTES {
+            return Err(RpcError::invalid(format!("at most {MAX_MOD_ROUTES} modulation routes")));
+        }
+        self.ensure_room(MAX_MOD_ROUTES)?;
+        self.set_mod_route_unchecked(&p.source, &p.target, Some(p.depth));
+        self.sync_routes();
+        self.graph_changed(origin);
+        Ok(ModRoutesResult { routes: self.mod_routes.clone() })
+    }
+
+    fn mod_unroute(&mut self, p: ModUnrouteParams, origin: &str) -> Result<ModRoutesResult, RpcError> {
+        if !self.mod_routes.iter().any(|r| r.source == p.source && r.target == p.target) {
+            return Err(RpcError::invalid(format!("no route from '{}' to '{}'", p.source, p.target)));
+        }
+        self.ensure_room(MAX_MOD_ROUTES)?;
+        self.set_mod_route_unchecked(&p.source, &p.target, None);
+        self.sync_routes();
+        self.graph_changed(origin);
+        Ok(ModRoutesResult { routes: self.mod_routes.clone() })
     }
 }
 
@@ -285,6 +458,8 @@ pub(super) struct DeviceSets {
     pub devices: Vec<(String, Option<(DeviceType, String)>)>,
     /// `chain:<n>`: the ids in order (`[]` when it went away).
     pub chains: Vec<(u32, Vec<String>)>,
+    /// `mod:<source>><target>`: the depth, or `None` to remove the route.
+    pub routes: Vec<(String, String, Option<f32>)>,
 }
 
 impl DeviceSets {
@@ -296,6 +471,10 @@ impl DeviceSets {
                     v => Some((DeviceType::parse(v.get("type")?.as_str()?)?, v.get("name")?.as_str()?.to_string())),
                 };
                 self.devices.push((rest.to_string(), value));
+            }
+            "mod" => {
+                let (source, target) = rest.split_once('>')?;
+                self.routes.push((source.to_string(), target.to_string(), v.as_f64().map(|d| d as f32)));
             }
             "chain" => {
                 let ids = match v {
@@ -321,7 +500,7 @@ impl Core {
             let Some((kind, name)) = v else { continue };
             if let Some(d) = self.devices.iter_mut().find(|d| &d.id == id) {
                 d.name = name.clone();
-            } else if self.instruments.iter().any(|i| &i.id == id) || !self.effect_used.iter().any(|u| !u) {
+            } else if self.instruments.iter().any(|i| &i.id == id) || !self.has_room_for(*kind) {
                 skipped.push(format!("device:{id}"));
             } else {
                 self.add_device_unchecked(id, *kind, name);
@@ -358,11 +537,28 @@ impl Core {
         // A device made here whose chain could not be restored (its channel
         // went away since) does not stay behind, unplaced.
         for id in added {
-            if self.device_place(&id).is_none() {
+            let effect = self.devices.iter().any(|d| d.id == id && d.kind.kind() == DeviceKind::AudioEffect);
+            if effect && self.device_place(&id).is_none() {
                 self.teardown_device(&id);
                 skipped.push(format!("device:{id}"));
             }
         }
+        skipped
+    }
+
+    /// Apply undo sets of `mod:` keys (after parameters, so sources and
+    /// targets exist). Returns keys that could not be set.
+    pub(super) fn apply_route_sets(&mut self, routes: Vec<(String, String, Option<f32>)>) -> Vec<String> {
+        let mut skipped = Vec::new();
+        for (source, target, depth) in routes {
+            let ok = depth.is_none() || (self.mod_source(&source).is_some() && self.mod_target(&target).is_ok());
+            if ok {
+                self.set_mod_route_unchecked(&source, &target, depth);
+            } else {
+                skipped.push(format!("mod:{source}>{target}"));
+            }
+        }
+        self.sync_routes();
         skipped
     }
 }

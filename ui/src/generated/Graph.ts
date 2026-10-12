@@ -2,6 +2,7 @@
 import type { ChannelInfo } from "./ChannelInfo";
 import type { DeviceInfo } from "./DeviceInfo";
 import type { InstrumentInfo } from "./InstrumentInfo";
+import type { ModRoute } from "./ModRoute";
 
 /**
  * Instruments, mixer channels, and the routes between them.
@@ -23,4 +24,8 @@ routes: { [key in string]: number },
  * Audio effects (RFC 0010), by channel (the master, 0, first) and
  * their place in its insert chain.
  */
-devices: Array<DeviceInfo>, };
+devices: Array<DeviceInfo>, 
+/**
+ * Modulation routes, in the order they were made.
+ */
+mod_routes: Array<ModRoute>, };

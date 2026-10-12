@@ -12,6 +12,10 @@ use ts_rs::TS;
 
 /// Most audio effects in a project.
 pub const MAX_EFFECTS: usize = 64;
+/// Most modulators in a project.
+pub const MAX_MODULATORS: usize = 8;
+/// Most modulation routes in a project.
+pub const MAX_MOD_ROUTES: usize = 64;
 /// Most inserts on one channel (or the master).
 pub const MAX_INSERTS: usize = 8;
 /// The channel number that means the master bus in a device placement.
@@ -39,16 +43,19 @@ pub enum DeviceType {
     Delay,
     /// A small Freeverb-style room.
     Reverb,
+    /// Four LFOs, free or synced to the transport (a modulator).
+    Lfo,
 }
 
 impl DeviceType {
-    pub const ALL: [DeviceType; 3] = [DeviceType::Filter, DeviceType::Delay, DeviceType::Reverb];
+    pub const ALL: [DeviceType; 4] = [DeviceType::Filter, DeviceType::Delay, DeviceType::Reverb, DeviceType::Lfo];
 
     pub fn id(self) -> &'static str {
         match self {
             DeviceType::Filter => "filter",
             DeviceType::Delay => "delay",
             DeviceType::Reverb => "reverb",
+            DeviceType::Lfo => "lfo",
         }
     }
 
@@ -57,6 +64,7 @@ impl DeviceType {
             DeviceType::Filter => "Filter",
             DeviceType::Delay => "Delay",
             DeviceType::Reverb => "Reverb",
+            DeviceType::Lfo => "LFO",
         }
     }
 
@@ -66,7 +74,10 @@ impl DeviceType {
     }
 
     pub fn kind(self) -> DeviceKind {
-        DeviceKind::AudioEffect
+        match self {
+            DeviceType::Lfo => DeviceKind::Modulator,
+            _ => DeviceKind::AudioEffect,
+        }
     }
 
     pub fn parse(s: &str) -> Option<DeviceType> {
@@ -74,13 +85,20 @@ impl DeviceType {
             "filter" | "svf" => Some(DeviceType::Filter),
             "delay" | "echo" => Some(DeviceType::Delay),
             "reverb" | "verb" => Some(DeviceType::Reverb),
+            "lfo" => Some(DeviceType::Lfo),
             _ => None,
         }
     }
 
-    /// Its ports: audio effects are stereo in, stereo out.
+    /// Its ports: audio effects are stereo in, stereo out; an LFO bank has
+    /// four modulation outputs.
     pub fn ports(self) -> Vec<PortInfo> {
-        vec![PortInfo::audio("in", PortDirection::In), PortInfo::audio("out", PortDirection::Out)]
+        match self.kind() {
+            DeviceKind::Modulator => (1..=4)
+                .map(|k| PortInfo { id: k.to_string(), kind: PortKind::Modulation, direction: PortDirection::Out, width: None })
+                .collect(),
+            _ => vec![PortInfo::audio("in", PortDirection::In), PortInfo::audio("out", PortDirection::Out)],
+        }
     }
 }
 
@@ -132,10 +150,23 @@ pub struct DeviceInfo {
     pub kind: DeviceType,
     pub name: String,
     /// Audio effects: the channel whose insert chain holds it (0 = the
-    /// master).
-    pub channel: u32,
-    /// Its place in that chain, from 0.
+    /// master); modulators: none.
+    pub channel: Option<u32>,
+    /// Its place in that chain (or, a modulator, in the modulator rack),
+    /// from 0.
     pub position: u32,
+}
+
+/// A modulation route (RFC 0010): a modulator output moving a continuous
+/// parameter by `depth` of its range around the value it is set to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ModRoute {
+    /// A modulator output, `<id>.<k>` (`lfo.1`).
+    pub source: String,
+    /// A parameter path.
+    pub target: String,
+    /// -1..1.
+    pub depth: f32,
 }
 
 /// One entry of the device registry (`device.types`).

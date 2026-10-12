@@ -93,6 +93,22 @@ smoothed).
 | `delay` | `sync` (on), `division` (1/32, 1/16, 1/8t, 1/8, 1/8d (default), 1/4, 1/4d, 1/2, 1 bar), `time` (free: 1 ms..2 s), `feedback` (0..0.95), `pingpong`, `damping` (a low-pass in the feedback path) | 0.35 |
 | `reverb` | `size`, `damping`, `width` (Freeverb's eight combs and four all-passes per side) | 0.3 |
 
+## Modulators
+
+Modulators (`crates/engine/src/modulator.rs`, RFC 0010) sit in
+`MAX_MODULATORS` = 8 slots, built and dropped on the control side like
+effects. At the start of every rendered block each one advances, and every
+**modulation route** (`MAX_MOD_ROUTES` = 64, set by `SetModRoute`) moves its
+target to its **base** (the value last set on it with `SetParam`) plus the
+sum of its routes' `depth x range x output`, clamped to its range, through
+the same `set_param` path as any change. Clearing a route (or removing its
+modulator) puts the target back at its base.
+
+- `lfo`: four LFOs (`<id>.<k>.shape`: sine, triangle, saw up, saw down,
+  square, sample and hold; `sync` (on) with `division` (1/16 .. 4 bars,
+  default a bar) on a beat clock that runs from play, or a free `rate`
+  (0.01..20 Hz); `phase`). Outputs `<id>.1` .. `<id>.4`, -1..1.
+
 ## Instruments
 
 ### `tr808` (default id `drums`)

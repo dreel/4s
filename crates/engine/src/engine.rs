@@ -31,10 +31,11 @@
 use crate::dsp::{Smoother, soft_clip};
 use crate::effect::{AudioEffect, COMMON_PARAMS, ProcessContext};
 use crate::instrument::{Instrument, MAX_BLOCK, MAX_OUTPUTS};
+use crate::modulator::{ModContext, Modulator};
 use crate::params::*;
 use fours_protocol::{
     ClipEvent, DEFAULT_CLIP_LENGTH, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_CLIPS, MAX_EFFECTS, MAX_EVENTS, MAX_INSERTS,
-    MAX_INSTRUMENTS, MAX_PLACEMENTS, OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
+    MAX_INSTRUMENTS, MAX_MOD_ROUTES, MAX_MODULATORS, MAX_PLACEMENTS, OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
 };
 use std::f32::consts::TAU;
 
@@ -55,6 +56,22 @@ pub enum ParamTarget {
     Effect { slot: u8, index: u16 },
     /// A track channel's send level to a return channel (0-based indexes).
     Send { ch: u8, ret: u8 },
+    /// A modulator's parameter.
+    Modulator { slot: u8, index: u16 },
+}
+
+/// A modulation route as the engine runs it: a modulator output moving a
+/// target by `depth` of its range (`min..max`) around `base`, the value
+/// last set on it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModRoute {
+    pub source: u8,
+    pub output: u8,
+    pub target: ParamTarget,
+    pub depth: f32,
+    pub min: f32,
+    pub max: f32,
+    pub base: f32,
 }
 
 /// The insert chain index of the master (channels are 0..MAX_CHANNELS).
@@ -64,6 +81,7 @@ pub const MASTER_CHAIN: u8 = MAX_CHANNELS as u8;
 pub enum Returned {
     Instrument(Box<dyn Instrument>),
     Effect(Box<dyn AudioEffect>),
+    Modulator(Box<dyn Modulator>),
 }
 
 /// Control messages into the engine. Channel fields are 0-based indexes.
@@ -82,6 +100,12 @@ pub enum Command {
     /// A channel's (or, `MASTER_CHAIN`, the master's) insert chain: the
     /// first `len` effect slots of `slots`, in order.
     SetChain { ch: u8, slots: [u8; MAX_INSERTS], len: u8 },
+    /// Put a modulator in a modulator slot (replacing any there).
+    AddModulator { slot: u8, modulator: Box<dyn Modulator> },
+    RemoveModulator { slot: u8 },
+    /// Set modulation route `index` (its target's current value is its
+    /// base), or (`None`) clear it, putting its target back at its base.
+    SetModRoute { index: u8, route: Option<ModRoute> },
     /// Remove every event from a clip (an index in the clip table).
     ClearClip { clip: u16 },
     /// Add an event (replacing one at the same tick and note).
@@ -120,6 +144,9 @@ impl std::fmt::Debug for Command {
             Command::AddEffect { slot, .. } => write!(f, "AddEffect({slot})"),
             Command::RemoveEffect { slot } => write!(f, "RemoveEffect({slot})"),
             Command::SetChain { ch, slots, len } => write!(f, "SetChain({ch}, {:?})", &slots[..(*len as usize).min(MAX_INSERTS)]),
+            Command::AddModulator { slot, .. } => write!(f, "AddModulator({slot})"),
+            Command::RemoveModulator { slot } => write!(f, "RemoveModulator({slot})"),
+            Command::SetModRoute { index, route } => write!(f, "SetModRoute({index}, {route:?})"),
             Command::ClearClip { clip } => write!(f, "ClearClip({clip})"),
             Command::AddEvent { clip, event } => write!(f, "AddEvent({clip}, {event:?})"),
             Command::RemoveEvent { clip, tick, note } => write!(f, "RemoveEvent({clip}, {tick}, {note})"),
@@ -388,6 +415,11 @@ pub struct Engine {
     sends_at: [[f32; MAX_CHANNELS]; MAX_CHANNELS],
     /// Scratch for a track channel's post-fader signal.
     post: Vec<f32>,
+    modulators: Vec<Option<Box<dyn Modulator>>>,
+    routes: [Option<ModRoute>; MAX_MOD_ROUTES],
+    /// Beats since the song's tick 0, advanced every block (synced LFOs
+    /// follow it; it runs while stopped too).
+    beat: f64,
     master: Smoother,
     master_bus: Vec<f32>,
     master_peak: [f32; 2],
@@ -438,6 +470,9 @@ impl Engine {
             sends: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
             sends_at: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
             post: vec![0.0; MAX_BLOCK * 2],
+            modulators: (0..MAX_MODULATORS).map(|_| None).collect(),
+            routes: [None; MAX_MOD_ROUTES],
+            beat: 0.0,
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
             master_peak: [0.0; 2],
@@ -546,39 +581,35 @@ impl Engine {
     #[must_use]
     pub fn apply(&mut self, cmd: Command, emit: &mut impl FnMut(Feedback)) -> Option<Returned> {
         match cmd {
-            Command::SetParam { target, value } => match target {
-                ParamTarget::Global(i) => {
-                    if let Some(g) = self.globals.get_mut(i) {
-                        *g = value;
+            Command::SetParam { target, value } => {
+                // A modulated target's routes move around the new value.
+                for r in self.routes.iter_mut().flatten().filter(|r| r.target == target) {
+                    r.base = value;
+                }
+                self.write_param(target, value);
+            }
+            Command::AddModulator { slot, modulator } => {
+                let Some(s) = self.modulators.get_mut(slot as usize) else { return Some(Returned::Modulator(modulator)) };
+                return s.replace(modulator).map(Returned::Modulator);
+            }
+            Command::RemoveModulator { slot } => {
+                // Its routes go first, their targets back at their bases.
+                for i in 0..MAX_MOD_ROUTES {
+                    if let Some(r) = self.routes[i].filter(|r| r.source == slot) {
+                        self.routes[i] = None;
+                        self.write_param(r.target, r.base);
                     }
                 }
-                ParamTarget::Instrument { slot, index } => {
-                    if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
-                        s.instrument.set_param(index as usize, value);
+                return self.modulators.get_mut(slot as usize)?.take().map(Returned::Modulator);
+            }
+            Command::SetModRoute { index, route } => {
+                if let Some(cell) = self.routes.get_mut(index as usize) {
+                    let old = std::mem::replace(cell, route);
+                    if let Some(o) = old.filter(|o| route.is_none_or(|r| r.target != o.target)) {
+                        self.write_param(o.target, o.base);
                     }
                 }
-                ParamTarget::Channel { ch, index } => {
-                    if let Some(c) = self.channels.get_mut(ch as usize)
-                        && (index as usize) < CHANNEL_PARAMS
-                    {
-                        c.params[index as usize] = value;
-                    }
-                }
-                ParamTarget::Send { ch, ret } => {
-                    if (ch as usize) < MAX_CHANNELS && (ret as usize) < MAX_CHANNELS {
-                        self.sends[ch as usize][ret as usize] = value.clamp(0.0, 1.0);
-                    }
-                }
-                ParamTarget::Effect { slot, index } => {
-                    if let Some(Some(e)) = self.effects.get_mut(slot as usize) {
-                        match index as usize {
-                            0 => e.bypass = value >= 0.5,
-                            1 => e.mix = value.clamp(0.0, 1.0),
-                            i => e.effect.set_param(i - COMMON_PARAMS, value),
-                        }
-                    }
-                }
-            },
+            }
             Command::AddEffect { slot, effect } => {
                 // Never drop an effect here: an invalid slot hands it back.
                 let Some(s) = self.effects.get_mut(slot as usize) else { return Some(Returned::Effect(effect)) };
@@ -765,6 +796,9 @@ impl Engine {
                 // Whole bars, so swing pairs and beats line up with the song.
                 self.count_in = (count_in as u64).div_ceil(TICKS_PER_BAR as u64) * TICKS_PER_BAR as u64;
                 self.song_pos = self.start_pos;
+                // Synced modulators count from the song's start (the
+                // count-in is before it).
+                self.beat = (self.start_pos as f64 - self.count_in as f64) / PPQ as f64;
                 self.ended = false;
                 self.wrapped_at = None;
                 self.next_tick_at = self.pos as f64;
@@ -787,6 +821,75 @@ impl Engine {
             }
         }
         None
+    }
+
+    /// Set a parameter in the engine (no base update: modulation uses it
+    /// too).
+    fn write_param(&mut self, target: ParamTarget, value: f32) {
+        match target {
+            ParamTarget::Global(i) => {
+                if let Some(g) = self.globals.get_mut(i) {
+                    *g = value;
+                }
+            }
+            ParamTarget::Instrument { slot, index } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.set_param(index as usize, value);
+                }
+            }
+            ParamTarget::Channel { ch, index } => {
+                if let Some(c) = self.channels.get_mut(ch as usize)
+                    && (index as usize) < CHANNEL_PARAMS
+                {
+                    c.params[index as usize] = value;
+                }
+            }
+            ParamTarget::Send { ch, ret } => {
+                if (ch as usize) < MAX_CHANNELS && (ret as usize) < MAX_CHANNELS {
+                    self.sends[ch as usize][ret as usize] = value.clamp(0.0, 1.0);
+                }
+            }
+            ParamTarget::Effect { slot, index } => {
+                if let Some(Some(e)) = self.effects.get_mut(slot as usize) {
+                    match index as usize {
+                        0 => e.bypass = value >= 0.5,
+                        1 => e.mix = value.clamp(0.0, 1.0),
+                        i => e.effect.set_param(i - COMMON_PARAMS, value),
+                    }
+                }
+            }
+            ParamTarget::Modulator { slot, index } => {
+                if let Some(Some(m)) = self.modulators.get_mut(slot as usize) {
+                    m.set_param(index as usize, value);
+                }
+            }
+        }
+    }
+
+    /// Advance the modulators by `n` frames and move every modulated target
+    /// to its base plus its routes' sum.
+    fn modulate(&mut self, n: usize) {
+        let ctx = ModContext { sr: self.sr, tempo: self.globals[TEMPO].clamp(20.0, 300.0), beat: self.beat };
+        self.beat += n as f64 / self.sr as f64 * ctx.tempo as f64 / 60.0;
+        if self.routes.iter().all(Option::is_none) {
+            return;
+        }
+        for m in self.modulators.iter_mut().flatten() {
+            m.advance(n, &ctx);
+        }
+        for i in 0..MAX_MOD_ROUTES {
+            let Some(r) = self.routes[i] else { continue };
+            // Each target once: at its first route.
+            if self.routes[..i].iter().flatten().any(|q| q.target == r.target) {
+                continue;
+            }
+            let mut v = r.base;
+            for q in self.routes[i..].iter().flatten().filter(|q| q.target == r.target) {
+                let out = self.modulators.get(q.source as usize).and_then(|m| m.as_ref()).map_or(0.0, |m| m.output(q.output as usize));
+                v += q.depth * (q.max - q.min) * out;
+            }
+            self.write_param(r.target, v.clamp(r.min, r.max));
+        }
     }
 
     fn sixteenth(&self) -> f64 {
@@ -982,6 +1085,7 @@ impl Engine {
     }
 
     fn render_block(&mut self, out: &mut [f32], channels: usize, n: usize) {
+        self.modulate(n);
         for s in self.slots.iter_mut().flatten() {
             s.instrument.render(n);
         }
@@ -1498,6 +1602,34 @@ pub(crate) mod tests {
         assert!(return_peak(1.0, 0.0) > 0.05, "{}", return_peak(1.0, 0.0));
         assert!(return_peak(1.0, 1.0) < 1e-4, "muted: {}", return_peak(1.0, 1.0));
         assert!(return_peak(0.0, 0.0) < 1e-4, "no send: {}", return_peak(0.0, 0.0));
+    }
+
+    /// A modulation route moves its target around the value set on it: an
+    /// LFO on channel 0's pan swings the kick between the sides; clearing
+    /// the route puts the pan back where it was set.
+    #[test]
+    fn a_route_modulates_around_the_base() {
+        let mut e = drum_engine();
+        let pan = ParamTarget::Channel { ch: 0, index: CH_PAN as u8 };
+        let mut apply = |e: &mut Engine, c| {
+            let _ = e.apply(c, &mut |_| {});
+        };
+        apply(&mut e, Command::AddModulator { slot: 0, modulator: crate::modulator::make(fours_protocol::DeviceType::Lfo) });
+        apply(&mut e, Command::SetParam { target: pan, value: 0.2 });
+        let route = ModRoute { source: 0, output: 0, target: pan, depth: 0.5, min: -1.0, max: 1.0, base: 0.2 };
+        apply(&mut e, Command::SetModRoute { index: 0, route: Some(route) });
+        apply(&mut e, Command::Play { count_in: 0 });
+        // One bar's sine at 120 bpm: a beat in (0.5 s) it is at its top.
+        render_secs(&mut e, 0.5, &mut vec![]);
+        let top = e.channels[0].params[CH_PAN];
+        assert!((top - 1.0).abs() < 0.05, "base 0.2 + 0.5 x range 2: {top}");
+        render_secs(&mut e, 1.0, &mut vec![]);
+        let bottom = e.channels[0].params[CH_PAN];
+        assert!((bottom + 0.8).abs() < 0.05, "0.2 - 1.0 three beats in: {bottom}");
+        // Setting the pan moves the base; clearing the route goes back to it.
+        apply(&mut e, Command::SetParam { target: pan, value: -0.3 });
+        apply(&mut e, Command::SetModRoute { index: 0, route: None });
+        assert_eq!(e.channels[0].params[CH_PAN], -0.3);
     }
 
     /// A waiting launch lands on a loop's wrap: a one-bar loop over bar 2

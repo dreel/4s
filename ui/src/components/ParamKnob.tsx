@@ -2,7 +2,7 @@
 // come from the parameter registry, never duplicated in the UI.
 
 import type { ParamInfo } from "../generated/ParamInfo";
-import { setParam, useApp } from "../store";
+import { act, app, client, setParam, useApp } from "../store";
 import { Knob } from "./controls";
 
 function range(info: ParamInfo | undefined): [number, number] {
@@ -24,8 +24,13 @@ export function ParamKnob({
 }) {
   const value = useApp((s) => s.snapshot?.params[path] ?? 0);
   const info = useApp((s) => s.registry.find((p) => p.path === path));
+  const mapping = useApp((s) => s.mapping);
+  const routed = useApp((s) => s.snapshot?.graph.mod_routes.some((r) => r.target === path) ?? false);
   const [min, max] = range(info);
-  return (
+  // Map mode (RFC 0010): a press on a continuous knob routes the waiting
+  // modulator output to it instead of turning it.
+  const mappable = mapping !== null && info?.kind === "continuous";
+  const knob = (
     <Knob
       label={label}
       value={value}
@@ -37,6 +42,25 @@ export function ParamKnob({
       testId={`knob-${path}`}
       size={size}
     />
+  );
+  return (
+    <div
+      className={`rounded ${mappable ? "outline outline-1 outline-sky-400 cursor-crosshair" : ""} ${routed ? "shadow-[0_0_0_1px_rgba(56,189,248,0.5)]" : ""}`}
+      data-routed={routed}
+      onPointerDownCapture={
+        mappable
+          ? (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              const source = mapping!;
+              app.set({ mapping: null });
+              void act(client.call("mod.route", { source, target: path, depth: 0.5 }));
+            }
+          : undefined
+      }
+    >
+      {knob}
+    </div>
   );
 }
 

@@ -7,10 +7,11 @@ import type { DeviceType } from "./DeviceType";
 export type DeviceInfo = { id: string, type: DeviceType, name: string, 
 /**
  * Audio effects: the channel whose insert chain holds it (0 = the
- * master).
+ * master); modulators: none.
  */
-channel: number, 
+channel: number | null, 
 /**
- * Its place in that chain, from 0.
+ * Its place in that chain (or, a modulator, in the modulator rack),
+ * from 0.
  */
 position: number, };

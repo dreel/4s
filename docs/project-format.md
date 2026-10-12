@@ -27,9 +27,11 @@ It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010)
   `channels` (`{n, name}`, in display order; a return bus has `"kind":
   "return"`, RFC 0010), and `routes`
   (`source -> channel number`, e.g. `"drums": 1`, `"drums.kick": 3`).
-- Audio effects (RFC 0010) under `devices`, each chain in order: `{id,
-  type, name, channel}` (channel 0 is the master). Their parameters are in
-  `params` under their ids. Absent when there are none.
+- Audio effects and modulators (RFC 0010) under `devices`, each chain in
+  order: `{id, type, name, channel}` (channel 0 is the master; a modulator
+  has none). Their parameters are in `params` under their ids. Modulation
+  routes under `mod_routes`: `{source, target, depth}`. Both absent when
+  empty.
 - Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,
   `"bass.cutoff": 0.3`).
 - Each instrument's track (RFC 0008, RFC 0009) under `tracks`: its clip

@@ -2,7 +2,7 @@
 //! on this thread while `RtEngine::process` runs, with instruments being
 //! added, routed, played, and removed through the command ring.
 
-use fours_engine::effect;
+use fours_engine::{effect, modulator, ModRoute};
 use fours_engine::instrument::{self, MAX_BLOCK};
 use fours_engine::{Command, Engine, ParamTarget, Placement, RtEngine, params};
 use fours_protocol::{ClipEvent, DeviceType, InstrumentType, MAX_EVENTS, NoteStep, STEP_ON, Voice, drum_event, note_event};
@@ -88,6 +88,11 @@ fn process_never_allocates() {
             Command::SetParam { target: ParamTarget::Effect { slot: 0, index: 3 }, value: 0.3 },
             Command::SetChain { ch: 0, slots: [0, 1, 0, 0, 0, 0, 0, 0], len: 2 },
             Command::SetChain { ch: fours_engine::MASTER_CHAIN, slots: [2, 0, 0, 0, 0, 0, 0, 0], len: 1 },
+            // An LFO (RFC 0010) moving the filter's cutoff and channel 1's pan.
+            Command::AddModulator { slot: 0, modulator: modulator::make(DeviceType::Lfo) },
+            Command::SetParam { target: ParamTarget::Modulator { slot: 0, index: 2 }, value: 0.8 },
+            Command::SetModRoute { index: 0, route: Some(ModRoute { source: 0, output: 0, target: ParamTarget::Effect { slot: 0, index: 3 }, depth: 0.3, min: 0.0, max: 1.0, base: 0.3 }) },
+            Command::SetModRoute { index: 1, route: Some(ModRoute { source: 0, output: 1, target: ParamTarget::Channel { ch: 0, index: 1 }, depth: -0.5, min: -1.0, max: 1.0, base: 0.0 }) },
             Command::ClearClip { clip: 0 },
             Command::AddEvent { clip: 0, event: kicks[0] },
             Command::AddEvent { clip: 0, event: kicks[1] },
@@ -173,6 +178,8 @@ fn process_never_allocates() {
             Command::SetRoute { slot: 0, output: 1, channel: None },
             Command::RemoveInstrument { slot: 0 },
             Command::RemoveInstrument { slot: 1 },
+            Command::SetModRoute { index: 1, route: None },
+            Command::RemoveModulator { slot: 0 },
             Command::RemoveEffect { slot: 0 },
             Command::RemoveEffect { slot: 1 },
             Command::RemoveEffect { slot: 2 },
@@ -184,7 +191,7 @@ fn process_never_allocates() {
         assert_eq!(n, 0, "round {round}: {n} heap operations while removing");
         // The removed instruments and effects came back to be dropped here,
         // off the audio thread.
-        assert_eq!(link.returns.slots(), 5);
+        assert_eq!(link.returns.slots(), 6);
         while let Ok(b) = link.returns.pop() {
             drop(b);
         }

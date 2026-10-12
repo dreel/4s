@@ -1,4 +1,4 @@
-import { DevicePanel } from "./components/Devices";
+import { DevicePanel, Modulators } from "./components/Devices";
 import { Arrangement } from "./components/Arrangement";
 import { Console } from "./components/Console";
 import { Editor } from "./components/Editor";
@@ -105,6 +105,7 @@ export function App() {
           <SeatChooser />
           <Console />
           <DevicePanel />
+          <Modulators />
           <Arrangement />
           <Editor />
           <div className="grid grid-cols-3 gap-3">

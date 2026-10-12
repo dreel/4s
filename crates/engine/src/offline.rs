@@ -2,7 +2,8 @@
 //! for exports and for agent-driven validation of what the engine produces.
 
 use crate::effect;
-use crate::engine::{Command, Engine, Feedback, ParamTarget, Placement};
+use crate::engine::{Command, Engine, Feedback, ModRoute, ParamTarget, Placement};
+use crate::modulator;
 use crate::instrument;
 use crate::params::{NUM_GLOBALS, TEMPO};
 use fours_protocol::{ClipEvent, DeviceType, InstrumentType, MAX_INSERTS, RenderTrigger, Voice};
@@ -54,6 +55,10 @@ pub struct RenderSpec {
     /// level).
     pub returns: Vec<u8>,
     pub sends: Vec<(u8, u8, f32)>,
+    /// Modulators (as effects: slot, kind, parameter values) and the
+    /// modulation routes by index.
+    pub modulators: Vec<RenderEffect>,
+    pub routes: Vec<ModRoute>,
     /// Insert chains: engine chain index (`MASTER_CHAIN` for the master)
     /// -> effect slots in order.
     pub chains: Vec<(u8, Vec<u8>)>,
@@ -106,6 +111,16 @@ impl RenderSpec {
                 let target = ParamTarget::Effect { slot: fx.slot, index: i as u16 };
                 let _ = e.apply(Command::SetParam { target, value: *v }, &mut fb);
             }
+        }
+        for m in &self.modulators {
+            let _ = e.apply(Command::AddModulator { slot: m.slot, modulator: modulator::make(m.kind) }, &mut fb);
+            for (i, v) in m.params.iter().enumerate() {
+                let target = ParamTarget::Modulator { slot: m.slot, index: i as u16 };
+                let _ = e.apply(Command::SetParam { target, value: *v }, &mut fb);
+            }
+        }
+        for (i, r) in self.routes.iter().enumerate() {
+            let _ = e.apply(Command::SetModRoute { index: i as u8, route: Some(*r) }, &mut fb);
         }
         for (ch, chain) in &self.chains {
             let mut slots = [0u8; MAX_INSERTS];
@@ -323,6 +338,8 @@ mod tests {
             chains: Vec::new(),
             returns: Vec::new(),
             sends: Vec::new(),
+            modulators: Vec::new(),
+            routes: Vec::new(),
             start: 0,
         }
     }

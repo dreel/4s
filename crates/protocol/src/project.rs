@@ -30,6 +30,9 @@ pub struct ProjectFile {
     /// master). Their parameters are in `params` under their ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub devices: Vec<ProjectDevice>,
+    /// Modulation routes (RFC 0010).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mod_routes: Vec<crate::device::ModRoute>,
     /// Parameter values by path. Unknown paths are ignored on load; missing
     /// paths take their defaults.
     pub params: BTreeMap<String, f64>,
@@ -62,8 +65,10 @@ pub struct ProjectDevice {
     #[ts(rename = "type")]
     pub kind: crate::device::DeviceType,
     pub name: String,
-    /// Whose insert chain: a channel number, or 0 for the master.
-    pub channel: u32,
+    /// Whose insert chain: a channel number, or 0 for the master; absent
+    /// for a modulator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]

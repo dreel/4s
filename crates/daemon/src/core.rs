@@ -97,6 +97,11 @@ pub struct Core {
     chains: BTreeMap<u32, Vec<String>>,
     /// Effect slots of the engine in use.
     effect_used: [bool; MAX_EFFECTS],
+    /// Modulator slots of the engine in use.
+    mod_used: [bool; MAX_MODULATORS],
+    /// Modulation routes, in the order they were made (the engine's route
+    /// table by index).
+    mod_routes: Vec<ModRoute>,
     /// Where play starts from (`transport.locate`).
     locate: u32,
     /// The song tick of the last step, while playing.
@@ -181,6 +186,8 @@ impl Core {
             devices: Vec::new(),
             chains: BTreeMap::new(),
             effect_used: [false; MAX_EFFECTS],
+            mod_used: [false; MAX_MODULATORS],
+            mod_routes: Vec::new(),
             locate: 0,
             song_pos: None,
             slot_used: [false; MAX_INSTRUMENTS],
@@ -302,6 +309,7 @@ impl Core {
             channels: self.channels.clone(),
             routes: self.routes.clone(),
             devices: self.device_infos(),
+            mod_routes: self.mod_routes.clone(),
         }
     }
 
@@ -311,6 +319,8 @@ impl Core {
 
     fn graph_changed(&mut self, origin: &str) {
         self.rebuild_params();
+        // Routes whose source or target went with the change go too.
+        self.prune_routes();
         let graph = self.graph();
         self.emit(origin, Event::Graph { graph });
         self.mark_dirty(origin);
@@ -342,8 +352,8 @@ impl Core {
             }
         }
         for d in &self.devices {
-            for (i, info) in fours_engine::effect::params(d.kind, &d.id).into_iter().enumerate() {
-                entries.push((info, ParamTarget::Effect { slot: d.slot, index: i as u16 }));
+            for (i, info) in fours_engine::device_params(d.kind, &d.id).into_iter().enumerate() {
+                entries.push((info, Self::device_target(d, i)));
             }
         }
         self.params = entries
@@ -893,9 +903,29 @@ impl Core {
             .flat_map(|t| t.clips.values())
             .map(|c| RenderClip { index: c.engine, length: c.length, events: c.events.clone() })
             .collect();
+        let device_params = |d: &DeviceState| -> RenderEffect {
+            let own = Self::device_target(d, 0);
+            RenderEffect {
+                slot: d.slot,
+                kind: d.kind,
+                params: self
+                    .params
+                    .iter()
+                    .filter(|p| match (p.target, own) {
+                        (ParamTarget::Effect { slot: a, .. }, ParamTarget::Effect { slot: b, .. }) => a == b,
+                        (ParamTarget::Modulator { slot: a, .. }, ParamTarget::Modulator { slot: b, .. }) => a == b,
+                        _ => false,
+                    })
+                    .map(|p| p.value as f32)
+                    .collect(),
+            }
+        };
+        let modulators = self.devices.iter().filter(|d| d.kind.kind() == DeviceKind::Modulator).map(device_params).collect();
+        let routes = self.engine_routes();
         let effects = self
             .devices
             .iter()
+            .filter(|d| d.kind.kind() == DeviceKind::AudioEffect)
             .map(|d| RenderEffect {
                 slot: d.slot,
                 kind: d.kind,
@@ -924,7 +954,7 @@ impl Core {
                 _ => None,
             })
             .collect();
-        RenderSpec { globals, channels, instruments, clips, effects, chains, returns, sends, start: self.locate }
+        RenderSpec { globals, channels, instruments, clips, effects, chains, returns, sends, modulators, routes, start: self.locate }
     }
 
     // ---- parameters --------------------------------------------------------
@@ -1425,6 +1455,7 @@ impl Core {
                 .into_iter()
                 .map(|d| ProjectDevice { id: d.id, kind: d.kind, name: d.name, channel: d.channel })
                 .collect(),
+            mod_routes: self.mod_routes.clone(),
             params: self.params.iter().map(|p| (p.info.path.clone(), p.value)).collect(),
             tracks,
             controller: ProjectController { follow: self.controller.follow },
@@ -1467,14 +1498,24 @@ impl Core {
                 return Err(RpcError::invalid(format!("duplicate instrument or device id '{}'", d.id)));
             }
             check_name(Some(d.name.clone()))?;
-            if d.channel != MASTER && !file.channels.iter().any(|c| c.n == d.channel) {
-                return Err(RpcError::invalid(format!("device '{}' is on channel {}, which is not in the project", d.id, d.channel)));
+            match (d.kind.kind() == DeviceKind::Modulator, d.channel) {
+                (true, None) => {}
+                (false, Some(ch)) => {
+                    if ch != MASTER && !file.channels.iter().any(|c| c.n == ch) {
+                        return Err(RpcError::invalid(format!("device '{}' is on channel {ch}, which is not in the project", d.id)));
+                    }
+                    let n = per_chain.entry(ch).or_default();
+                    *n += 1;
+                    if *n > MAX_INSERTS {
+                        return Err(RpcError::invalid(format!("at most {MAX_INSERTS} inserts on a channel")));
+                    }
+                }
+                (true, Some(_)) => return Err(RpcError::invalid(format!("modulator '{}' cannot be on a channel", d.id))),
+                (false, None) => return Err(RpcError::invalid(format!("effect '{}' needs a channel", d.id))),
             }
-            let n = per_chain.entry(d.channel).or_default();
-            *n += 1;
-            if *n > MAX_INSERTS {
-                return Err(RpcError::invalid(format!("at most {MAX_INSERTS} inserts on a channel")));
-            }
+        }
+        if file.devices.iter().filter(|d| d.kind.kind() == DeviceKind::Modulator).count() > MAX_MODULATORS {
+            return Err(RpcError::invalid(format!("project has more than {MAX_MODULATORS} modulators")));
         }
         for (name, seat) in &file.seats {
             validate_name("seat", name).map_err(RpcError::invalid)?;
@@ -1547,11 +1588,20 @@ impl Core {
         for n in self.chains.keys().copied().collect::<Vec<_>>() {
             self.set_chain_unchecked(n, Vec::new());
         }
+        self.mod_routes.clear();
+        for i in 0..MAX_MOD_ROUTES {
+            self.send(Command::SetModRoute { index: i as u8, route: None });
+        }
         for d in std::mem::take(&mut self.devices) {
-            self.send(Command::RemoveEffect { slot: d.slot });
+            if d.kind.kind() == DeviceKind::Modulator {
+                self.send(Command::RemoveModulator { slot: d.slot });
+            } else {
+                self.send(Command::RemoveEffect { slot: d.slot });
+            }
             self.in_flight += 1;
         }
         self.effect_used = [false; MAX_EFFECTS];
+        self.mod_used = [false; MAX_MODULATORS];
         for c in std::mem::take(&mut self.channels) {
             self.send(Command::SetChannelActive { ch: (c.n - 1) as u8, active: false });
         }
@@ -1574,7 +1624,9 @@ impl Core {
         let mut chains: BTreeMap<u32, Vec<String>> = BTreeMap::new();
         for d in &file.devices {
             self.add_device_unchecked(&d.id, d.kind, d.name.trim());
-            chains.entry(d.channel).or_default().push(d.id.clone());
+            if let Some(n) = d.channel {
+                chains.entry(n).or_default().push(d.id.clone());
+            }
         }
         for (source, n) in &file.routes {
             match (self.find_source(source), self.channels.iter().any(|c| c.n == *n && c.kind == ChannelKind::Track)) {
@@ -1596,6 +1648,21 @@ impl Core {
         }
         for (n, ids) in chains {
             self.set_chain_unchecked(n, ids);
+        }
+        // Routes after the parameters: each starts from its target's value.
+        for r in &file.mod_routes {
+            let ok = self.mod_routes.len() < MAX_MOD_ROUTES && !self.mod_routes.iter().any(|q| q.source == r.source && q.target == r.target);
+            if ok && r.depth.is_finite() && (-1.0..=1.0).contains(&r.depth) {
+                self.mod_routes.push(r.clone());
+            } else {
+                warnings.push(format!("ignored the modulation route {} -> {}", r.source, r.target));
+            }
+        }
+        let before = self.mod_routes.len();
+        self.sync_routes();
+        self.prune_routes();
+        if self.mod_routes.len() < before {
+            warnings.push("ignored modulation routes whose source or target is not in the project".into());
         }
         for id in file.tracks.keys() {
             if !self.tracks.contains_key(id) {
@@ -1871,7 +1938,7 @@ impl Core {
                 "route" => Some(routes.push((rest.to_string(), v.as_u64().map(|n| n as u32)))),
                 "param" => Some(params.push((rest.to_string(), v.as_f64()))),
                 "clip" | "event" | "selected" | "place" | "launched" => clip_sets.parse(kind, rest, v),
-                "device" | "chain" => device_sets.parse(kind, rest, v),
+                "device" | "chain" | "mod" => device_sets.parse(kind, rest, v),
                 "seat" => match v {
                     Value::Null => Some(seats.push((rest.to_string(), SeatConfig::default()))),
                     v => serde_json::from_value(v.clone()).ok().map(|c| seats.push((rest.to_string(), c))),
@@ -1939,6 +2006,7 @@ impl Core {
                 + clip_sets.commands()
                 + device_sets.devices.len() * ADD_COMMANDS
                 + (channel_inserts + made_devices) * 2
+                + if device_sets.routes.is_empty() { 0 } else { MAX_MOD_ROUTES }
                 + device_sets.chains.len() * 2,
         )?;
 
@@ -1993,6 +2061,7 @@ impl Core {
         }
         // Devices after channels (their chains need them), before the
         // parameters (theirs among them).
+        let route_sets = std::mem::take(&mut device_sets.routes);
         let device_change = !device_sets.devices.is_empty() || !device_sets.chains.is_empty();
         skipped.extend(self.apply_device_sets(device_sets));
         graph |= device_change;
@@ -2025,6 +2094,10 @@ impl Core {
             }
         }
         skipped.extend(self.apply_clip_sets(clip_sets, &added, origin));
+        if !route_sets.is_empty() {
+            skipped.extend(self.apply_route_sets(route_sets));
+            graph = true;
+        }
         if !seats.is_empty() {
             for (name, config) in seats {
                 // A session-only seat of the same name is someone else's:
@@ -2419,7 +2492,9 @@ impl Core {
             | Request::DeviceList(_)
             | Request::DeviceAdd(_)
             | Request::DeviceRemove(_)
-            | Request::DeviceMove(_) => unreachable!("handled by handle_device"),
+            | Request::DeviceMove(_)
+            | Request::ModRoute(_)
+            | Request::ModUnroute(_) => unreachable!("handled by handle_device"),
             Request::ClipNew(_)
             | Request::ClipDuplicate(_)
             | Request::ClipRename(_)
@@ -2489,7 +2564,7 @@ fn read_only(req: &Request) -> bool {
         | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
         | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
         | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) => false,
+        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) => false,
     }
 }
 
@@ -2555,6 +2630,7 @@ fn default_project() -> ProjectFile {
         channels: vec![ChannelInfo { n: 1, name: "Drums".into(), kind: ChannelKind::Track }],
         routes: BTreeMap::from([("drums".to_string(), 1)]),
         devices: Vec::new(),
+        mod_routes: Vec::new(),
         params: BTreeMap::new(),
         tracks: BTreeMap::from([("drums".to_string(), drums)]),
         controller: ProjectController { follow: true },

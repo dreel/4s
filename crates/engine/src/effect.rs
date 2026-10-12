@@ -40,6 +40,7 @@ pub fn params(kind: DeviceType, id: &str) -> Vec<ParamInfo> {
         DeviceType::Filter => 1.0,
         DeviceType::Delay => 0.35,
         DeviceType::Reverb => 0.3,
+        DeviceType::Lfo => return Vec::new(),
     };
     let mut out = vec![toggle(format!("{id}.bypass"), "Bypass".into()), cont(format!("{id}.mix"), "Mix".into(), 0.0, 1.0, mix, None)];
     let int = |name: &str, label: &str, max: i32, default: f64| ParamInfo {
@@ -68,6 +69,7 @@ pub fn params(kind: DeviceType, id: &str) -> Vec<ParamInfo> {
             cont(format!("{id}.damping"), "Damping".into(), 0.0, 1.0, 0.5, None),
             cont(format!("{id}.width"), "Width".into(), 0.0, 1.0, 1.0, None),
         ]),
+        DeviceType::Lfo => {}
     }
     // A delay is synced to the transport by default.
     if kind == DeviceType::Delay {
@@ -87,6 +89,8 @@ pub fn make(kind: DeviceType, sample_rate: f32) -> Box<dyn AudioEffect> {
         DeviceType::Filter => Box::new(Filter::new(sample_rate)),
         DeviceType::Delay => Box::new(Delay::new(sample_rate)),
         DeviceType::Reverb => Box::new(Reverb::new(sample_rate)),
+        // Not an effect: the daemon never builds one here.
+        DeviceType::Lfo => Box::new(Filter::new(sample_rate)),
     };
     for (i, p) in params(kind, "x").iter().enumerate().skip(COMMON_PARAMS) {
         e.set_param(i - COMMON_PARAMS, p.default as f32);
@@ -411,7 +415,7 @@ mod tests {
     /// to silence.
     #[test]
     fn effects_stay_in_range_and_decay() {
-        for kind in DeviceType::ALL {
+        for kind in DeviceType::ALL.into_iter().filter(|k| k.kind() == fours_protocol::DeviceKind::AudioEffect) {
             let mut e = make(kind, SR);
             let out = impulse(e.as_mut(), 8.0);
             assert!(peak(&out) <= 1.0, "{kind:?} peak {}", peak(&out));

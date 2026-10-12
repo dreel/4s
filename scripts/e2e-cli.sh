@@ -946,6 +946,25 @@ s set mixer.1.mute off >/dev/null
 check "instruments cannot feed a return" "is a return bus" s route drums 2
 check "returns save and load back" "<- return <- sends from 1 50%" bash -c "$BIN/4s project save buses >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load buses >/dev/null && $BIN/4s mixer"
 check "removing a return removes its sends, and undo brings them back" "mixer.1.send.2 = 0.5" bash -c "$BIN/4s channel rm 2 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s get mixer.1.send.2"
+# Modulators (RFC 0010): an LFO moving a filter's cutoff around its value.
+s project new >/dev/null
+s pattern set closed_hat "xxxxxxxxxxxxxxxx" >/dev/null
+s device add filter --on 1 >/dev/null
+s set filter.cutoff 0.5 >/dev/null
+RMS() { "$BIN/4s" --json render | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])"; }
+export -f RMS
+check "add an LFO bank to the rack" "lfo        lfo     LFO          in the modulator rack" s device add lfo
+check "its parameters are per LFO" "lfo.1.rate" s params lfo.1
+check "route LFO 1 to the cutoff" "lfo.1 -> filter.cutoff depth +40%" s mod route lfo.1 filter.cutoff 40%
+check "only continuous parameters take modulation" "not continuous" s mod route lfo.1 filter.mode 50%
+check "unknown outputs are refused" "no modulator output 'lfo.9'" s mod route lfo.9 filter.cutoff 50%
+check "the LFO opens the filter on the hats (renders differ with and without it)" "modulated" bash -c "A=\$(RMS); $BIN/4s mod unroute lfo.1 filter.cutoff >/dev/null; B=\$(RMS); python3 -c \"print('modulated' if abs(\$A - \$B) > 0.3 * \$B else (\$A, \$B))\""
+check "param get shows the value set by hand, not the modulated one" "filter.cutoff = 0.5" bash -c "$BIN/4s mod route lfo.1 filter.cutoff -40% >/dev/null && $BIN/4s get filter.cutoff"
+check "removing the LFO drops its routes" "(no modulation routes)" bash -c "$BIN/4s device rm lfo >/dev/null && $BIN/4s mod"
+check "...and undo brings them back" "lfo.1 -> filter.cutoff depth -40%" bash -c "$BIN/4s undo >/dev/null && $BIN/4s mod"
+check "routes save and load back" "lfo.1 -> filter.cutoff depth -40%" bash -c "$BIN/4s project save mods >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load mods >/dev/null && $BIN/4s mod"
+check "removing the target drops the route" "(no modulation routes)" bash -c "$BIN/4s device rm filter >/dev/null && $BIN/4s mod"
+check "a session with modulation replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/mods.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/mods.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status

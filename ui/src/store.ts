@@ -30,6 +30,8 @@ export type AppState = {
   history: History;
   /** The device whose panel is open (view state only). */
   device: string | null;
+  /** A modulator output waiting for a knob to map it to (view state). */
+  mapping: string | null;
 };
 
 export type History = {
@@ -93,6 +95,7 @@ export const app = new Store<AppState>({
   choosingSeat: false,
   history: NO_HISTORY,
   device: null,
+  mapping: null,
 });
 export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {} });
 

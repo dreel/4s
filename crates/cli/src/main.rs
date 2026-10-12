@@ -192,6 +192,13 @@ enum Cmd {
         #[command(subcommand)]
         cmd: InstrumentCmd,
     },
+    /// Modulation routes (RFC 0010): `4s mod` lists them; `4s mod route
+    /// lfo.1 bass.cutoff 40%` moves `bass.cutoff` by 40% of its range with
+    /// LFO 1 of the `lfo` device (negative depths invert it).
+    Mod {
+        #[command(subcommand)]
+        cmd: Option<ModCmd>,
+    },
     /// Set a track channel's send to a return bus, e.g. `4s send 1 3 40%`
     /// (shorthand for `set mixer.1.send.3`).
     Send {
@@ -439,12 +446,13 @@ enum DeviceCmd {
     /// Effects and where they sit.
     List,
     /// Add an effect to a channel's insert chain (`--on master` for the
-    /// master's), at the end unless `--at` (1-based).
+    /// master's), at the end unless `--at` (1-based), or a modulator (`lfo`,
+    /// no `--on`) to the rack.
     Add {
-        /// filter, delay, or reverb.
+        /// filter, delay, reverb, or lfo.
         kind: String,
         #[arg(long)]
-        on: String,
+        on: Option<String>,
         #[arg(long)]
         at: Option<u32>,
         #[arg(long)]
@@ -463,6 +471,20 @@ enum DeviceCmd {
         #[arg(long)]
         at: Option<u32>,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ModCmd {
+    /// Route a modulator output to a continuous parameter (or change the
+    /// depth of an existing route): depth -1..1 or a percentage.
+    Route {
+        source: String,
+        target: String,
+        #[arg(allow_hyphen_values = true)]
+        depth: String,
+    },
+    /// Remove a route.
+    Unroute { source: String, target: String },
 }
 
 /// A chain: a channel number, or `master` (0).
@@ -1282,6 +1304,17 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 keep_channels: *keep_channels,
             })],
         },
+        Cmd::Mod { cmd } => match cmd {
+            None => vec![Request::StateGet(e)],
+            Some(ModCmd::Route { source, target, depth }) => vec![Request::ModRoute(ModRouteParams {
+                source: source.clone(),
+                target: target.clone(),
+                depth: parse_value(depth)? as f32,
+            })],
+            Some(ModCmd::Unroute { source, target }) => {
+                vec![Request::ModUnroute(ModUnrouteParams { source: source.clone(), target: target.clone() })]
+            }
+        },
         Cmd::Send { from, to, level } => {
             vec![Request::ParamSet(ParamSetParams { path: format!("mixer.{from}.send.{to}"), value: parse_value(level)? })]
         }
@@ -1289,10 +1322,10 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             DeviceCmd::Types => vec![Request::DeviceTypes(e)],
             DeviceCmd::List => vec![Request::DeviceList(e)],
             DeviceCmd::Add { kind, on, at, id, name } => vec![Request::DeviceAdd(DeviceAddParams {
-                kind: DeviceType::parse(kind).ok_or_else(|| anyhow!("unknown device type '{kind}' (filter, delay, reverb)"))?,
+                kind: DeviceType::parse(kind).ok_or_else(|| anyhow!("unknown device type '{kind}' (filter, delay, reverb, lfo)"))?,
                 id: id.clone(),
                 name: name.clone(),
-                channel: chain_arg(on)?,
+                channel: on.as_deref().map(chain_arg).transpose()?,
                 position: at.map(|a| one_based(a, "position")).transpose()?,
             })],
             DeviceCmd::Rm { id } => vec![Request::DeviceRemove(DeviceRefParams { id: id.clone() })],
@@ -1795,18 +1828,30 @@ fn print_mixer(s: &Snapshot) {
     println!("master        vol {:>3.0}%{}", p("mixer.master.volume") * 100.0, inserts(&s.graph.devices, MASTER));
 }
 
+fn print_routes(routes: &[ModRoute]) {
+    if routes.is_empty() {
+        println!("(no modulation routes)");
+    }
+    for r in routes {
+        println!("{} -> {} depth {:+.0}%", r.source, r.target, r.depth * 100.0);
+    }
+}
+
 /// Where a device sits, by the channel's number or `master`.
 fn chain_name(n: u32) -> String {
     if n == MASTER { "master".into() } else { format!("ch {n}") }
 }
 
 fn print_device(d: &DeviceInfo) {
-    println!("{:<10} {:<7} {:<12} on {} at {}", d.id, d.kind.id(), d.name, chain_name(d.channel), d.position + 1);
+    match d.channel {
+        Some(n) => println!("{:<10} {:<7} {:<12} on {} at {}", d.id, d.kind.id(), d.name, chain_name(n), d.position + 1),
+        None => println!("{:<10} {:<7} {:<12} in the modulator rack", d.id, d.kind.id(), d.name),
+    }
 }
 
 /// A chain's inserts, ` [filter, delay]`, or nothing.
 fn inserts(devices: &[DeviceInfo], n: u32) -> String {
-    let ids: Vec<&str> = devices.iter().filter(|d| d.channel == n).map(|d| d.id.as_str()).collect();
+    let ids: Vec<&str> = devices.iter().filter(|d| d.channel == Some(n)).map(|d| d.id.as_str()).collect();
     if ids.is_empty() { String::new() } else { format!("  [{}]", ids.join(", ")) }
 }
 
@@ -1831,7 +1876,7 @@ fn print_graph(g: &Graph) {
     if !unrouted.is_empty() {
         println!("unrouted main outs: {}", unrouted.join(", "));
     }
-    if g.devices.iter().any(|d| d.channel == MASTER) {
+    if g.devices.iter().any(|d| d.channel == Some(MASTER)) {
         println!("master{}", inserts(&g.devices, MASTER));
     }
 }
@@ -2188,6 +2233,11 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             }
         }
         Cmd::Device { cmd: DeviceCmd::Add { .. } } => print_device(&serde_json::from_value(last)?),
+        Cmd::Mod { cmd: None } => {
+            let s: Snapshot = serde_json::from_value(last)?;
+            print_routes(&s.graph.mod_routes);
+        }
+        Cmd::Mod { .. } => print_routes(&serde_json::from_value::<ModRoutesResult>(last)?.routes),
         Cmd::Device { .. } => print_graph(&serde_json::from_value(last)?),
         Cmd::Instrument { .. }
         | Cmd::Route { .. }
@@ -2729,7 +2779,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "send 1 2 50%", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
+            "send 1 2 50%", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",

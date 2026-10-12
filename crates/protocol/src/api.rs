@@ -223,8 +223,10 @@ pub struct DeviceAddParams {
     pub id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
-    /// The channel whose chain gets it; 0 is the master.
-    pub channel: u32,
+    /// An audio effect: the channel whose chain gets it (0 is the master).
+    /// A modulator: none.
+    #[serde(default)]
+    pub channel: Option<u32>,
     /// Its place in the chain from 0 (default: the end).
     #[serde(default)]
     pub position: Option<u32>,
@@ -245,6 +247,27 @@ pub struct DeviceMoveParams {
     /// Default: the end.
     #[serde(default)]
     pub position: Option<u32>,
+}
+
+/// Route a modulator output to a parameter (or set an existing route's
+/// depth).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ModRouteParams {
+    pub source: String,
+    pub target: String,
+    /// -1..1.
+    pub depth: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ModUnrouteParams {
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ModRoutesResult {
+    pub routes: Vec<crate::device::ModRoute>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -1173,6 +1196,11 @@ api! {
     DeviceRemove = "device.remove" (DeviceRefParams) -> Graph;
     /// Move an audio effect within its chain or to another channel's.
     DeviceMove = "device.move" (DeviceMoveParams) -> Graph;
+    /// Route a modulator output to a continuous parameter, with a depth
+    /// (or change an existing route's depth).
+    ModRoute = "mod.route" (ModRouteParams) -> ModRoutesResult;
+    /// Remove a modulation route (its target goes back to its value).
+    ModUnroute = "mod.unroute" (ModUnrouteParams) -> ModRoutesResult;
     /// Add a mixer channel (lowest free number).
     ChannelAdd = "channel.add" (ChannelAddParams) -> ChannelInfo;
     /// Remove a mixer channel; sources routed to it are unrouted.

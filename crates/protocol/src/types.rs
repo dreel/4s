@@ -274,6 +274,8 @@ pub struct Graph {
     /// Audio effects (RFC 0010), by channel (the master, 0, first) and
     /// their place in its insert chain.
     pub devices: Vec<crate::device::DeviceInfo>,
+    /// Modulation routes, in the order they were made.
+    pub mod_routes: Vec<crate::device::ModRoute>,
 }
 
 // ---------------------------------------------------------------------------

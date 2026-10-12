@@ -1,6 +1,6 @@
 # RFC 0010: Devices: effects, buses, modulators, a sampler, automation
 
-- Status: accepted (phases 2 and 3 implemented; Sam asked to keep building and
+- Status: accepted (phases 2, 3, and 4 implemented; Sam asked to keep building and
   review the stack later, so the choices marked "default" are reversible
   and open to review; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
@@ -323,4 +323,30 @@ instruments.
   mixer` shows each return's sends.
 - UI: "+ return" on the console; a return strip shows `return` instead of
   an input; every track strip has a send knob per return.
+
+## Implementation notes (phase 4: modulators and routes)
+
+- `DeviceType::Lfo` (kind `modulator`); `device.add { type: "lfo" }` with
+  no `channel` puts it in the rack (`DeviceInfo.channel` is null for
+  modulators, `position` its place in the rack). Its parameters are
+  `<id>.<k>.shape|sync|rate|division|phase`, a knob page per LFO.
+- `mod.route { source, target, depth }` and `mod.unroute`; the graph's
+  `mod_routes`. Targets must be continuous parameters; routes go when
+  their modulator or target goes (in the same change, so undo brings them
+  back; undo key `mod:<source>><target>` -> depth). A route's depth is
+  graph state, not a parameter (the RFC's default).
+- The engine holds each route's base: a `SetParam` on a modulated target
+  moves the base, and the daemon's value stays the one set by hand
+  (`param.get`, saving, the journal).
+- Synced LFOs follow a beat clock that restarts with play (at the start
+  point, minus any count-in) and keeps running while stopped, so renders
+  are deterministic.
+- Project files carry `mod_routes`; format stays 7 and protocol 9 within
+  this unreleased stack (both were bumped in phase 2).
+- CLI: `4s device add lfo`, `4s mod`, `4s mod route|unroute`.
+- UI: a modulator rack under the device panel ("+ lfo", a "map" button per
+  output: press it, then any continuous knob; Escape cancels), routes with
+  a depth slider and a remove button; routed knobs get a ring.
+- Not yet: `state.get` showing live modulated values; modulating a
+  route's depth.
 
