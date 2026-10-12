@@ -386,6 +386,8 @@ impl Core {
             .collect();
         self.index = self.params.iter().enumerate().map(|(i, p)| (p.info.path.clone(), i)).collect();
         self.by_target = self.params.iter().enumerate().map(|(i, p)| (p.target, i)).collect();
+        // A report in flight may name slots the change gave to others.
+        self.moving_next.clear();
     }
 
     fn find_instrument(&self, id: &str) -> Result<&InstrumentState, RpcError> {

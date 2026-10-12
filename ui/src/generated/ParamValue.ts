@@ -7,6 +7,6 @@ export type ParamValue = { path: string,
 value: number, 
 /**
  * Where modulation or automation has it now, if either moves it
- * (RFC 0010).
+ * (RFC 0010): the engine's last report, up to a meter period old.
  */
 moving: number | null, };

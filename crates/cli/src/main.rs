@@ -66,7 +66,8 @@ enum Cmd {
     State,
     /// List parameters with current values.
     Params { prefix: Option<String> },
-    /// Read a parameter, e.g. `4s get drums.kick.level`.
+    /// Read a parameter, e.g. `4s get drums.kick.level`: the value set by
+    /// hand, and `(now <value> ...)` while modulation or automation moves it.
     Get { path: String },
     /// Set a parameter, e.g. `4s set mixer.1.volume 35%`. Accepts numbers,
     /// percentages, and on/off.

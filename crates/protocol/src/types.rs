@@ -333,7 +333,7 @@ pub struct ParamValue {
     /// The value set by hand: what is saved and undone.
     pub value: f64,
     /// Where modulation or automation has it now, if either moves it
-    /// (RFC 0010).
+    /// (RFC 0010): the engine's last report, up to a meter period old.
     #[serde(default)]
     pub moving: Option<f64>,
 }
