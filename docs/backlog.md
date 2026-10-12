@@ -326,6 +326,12 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   writes the old base into the new parameter (`graph_changed`,
   `prune_routes`). Prune right after teardowns, or re-push the parameters.
 
+- (2026-10-12, sampler) a pad keeps the path it was loaded from until the
+  project is reloaded, even after a save copied it into the bundle (the
+  undo doc must not change on save); if that original is deleted, an undo
+  that reloads the pad fails (skipped). Point undo at the bundle copy, or
+  keep decoded samples by content.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are
