@@ -92,6 +92,8 @@ Everything that is a value is a parameter with a stable path, e.g.
   integer / toggle) with range, default, unit.
 - `param.get {path}`
 - `param.set {path, value}` -- clamped to range; returns the applied value.
+  While the caller records a take, the move also goes into the playing
+  clip's automation lane (RFC 0010).
 
 Clients build their controls from the registry, so new parameters appear in
 the UI and CLI without client changes. See [engine.md](engine.md) for the

@@ -441,4 +441,6 @@ instruments.
   Recorded points replace the lane's points in the span they cover;
   other points stay (a full lane gives up those farthest from it).
 - The value set by hand follows the knob as usual; after the take the
-  lane plays the recorded moves.
+  lane plays the recorded moves. Only the recorder's moves are recorded
+  (the user of the request, as the journal has it); other players' moves
+  only change the value set by hand.

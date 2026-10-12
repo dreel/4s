@@ -1036,6 +1036,7 @@ check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip 
 # (on the 1/16 grid), written with the pass: one undo step.
 cat > "$TMP/autorec.sh" <<SH
 $BIN/4s tempo 240 >/dev/null
+$BIN/4s clip length drums 32 >/dev/null
 $BIN/4s record --count-in 0 >/dev/null
 sleep 0.2
 for v in -1 -0.5 0 0.5 1; do $BIN/4s set mixer.1.pan \$v >/dev/null; sleep 0.15; done
@@ -1044,6 +1045,8 @@ SH
 check "knob moves while recording become a lane, rising with the knob" "rising" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null 2>&1; bash '$TMP/autorec.sh'; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; v=[p[\"value\"] for p in l]; t=[p[\"tick\"] for p in l]; print(\"rising\" if len(v)>=3 and v==sorted(v) and all(x%24==0 for x in t) else l)'"
 check "...written with the pass, one undo step" "undid: clip.lane.set" s undo
 check "...which removes the lane" "no lane" bash -c "$BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || echo no lane"
+check "another player's moves meanwhile are not recorded" "no lane" bash -c "$BIN/4s record --count-in 0 >/dev/null; sleep 0.2; $BIN/4s --user bob set mixer.1.pan 0.7 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || echo no lane"
+s clip length drums 16 >/dev/null
 s tempo 120 >/dev/null
 check "a session with lanes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/lanes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/lanes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null

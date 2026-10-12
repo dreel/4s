@@ -788,11 +788,14 @@ impl Core {
     }
 
     /// A parameter set by hand (a knob, a CC, `param.set`): while a take
-    /// records and its track plays a clip, the move goes into that clip's
-    /// lane for the parameter at the playhead (on the 1/16 grid; the last
-    /// move in a 16th wins). Parameters lanes cannot take are not recorded.
+    /// records and its track plays a clip, the recorder's move goes into
+    /// that clip's lane for the parameter at the playhead (on the 1/16 grid;
+    /// the last move in a 16th wins). Other people's moves, and parameters
+    /// lanes cannot take, are not recorded.
     pub(super) fn record_move(&mut self, path: &str, value: f64) {
-        let Some(id) = self.take.as_ref().map(|t| t.instrument.clone()) else { return };
+        let Some(id) = self.take.as_ref().filter(|t| self.acting.as_deref() == Some(t.user.as_str())).map(|t| t.instrument.clone()) else {
+            return;
+        };
         if self.lane_target(path).is_err() {
             return;
         }
@@ -848,8 +851,12 @@ impl Core {
             // Journaled as the requests that make the same change (one
             // `clip.update`, or a `batch`), so a replay writes the same
             // notes and lanes, and a pass is one undo step.
-            let mut requests = if writes.is_empty() { Vec::new() } else { write_requests(&id, &writes, &existing) };
-            requests.extend(moves);
+            // Lanes first: setting one again gives the same lane, so if the
+            // notes then fail and are written next pass, nothing doubles.
+            let mut requests = moves;
+            if !writes.is_empty() {
+                requests.extend(write_requests(&id, &writes, &existing));
+            }
             let (method, params) = if requests.len() == 1 {
                 let r = requests.remove(0);
                 let method = r.method();

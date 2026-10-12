@@ -87,6 +87,9 @@ pub struct Core {
     index: HashMap<String, usize>,
     /// Parameter registry index by engine target (for the engine's reports).
     by_target: HashMap<ParamTarget, usize>,
+    /// Who the request being handled is from (a take records only its
+    /// recorder's knob moves).
+    acting: Option<String>,
     /// Where modulation and automation have parameters (RFC 0010), as last
     /// reported, and the report being gathered.
     moving: BTreeMap<String, f64>,
@@ -193,6 +196,7 @@ impl Core {
             params: Vec::new(),
             index: HashMap::new(),
             by_target: HashMap::new(),
+            acting: None,
             moving: BTreeMap::new(),
             moving_next: BTreeMap::new(),
             instruments: Vec::new(),
@@ -2259,6 +2263,13 @@ impl Core {
     /// the change in the undo history (None: the host user).
     pub fn handle(&mut self, req: Request, origin: &str, client: &str, user: Option<&str>) -> RpcResult {
         let user = user.unwrap_or(&self.host_user).to_string();
+        let acting = self.acting.replace(user.clone());
+        let result = self.handle_as(req, origin, client, user);
+        self.acting = acting;
+        result
+    }
+
+    fn handle_as(&mut self, req: Request, origin: &str, client: &str, user: String) -> RpcResult {
         match &req {
             Request::HistoryUndo(_) => return ok(self.history_step(&user, origin, client, false)?),
             Request::HistoryRedo(_) => return ok(self.history_step(&user, origin, client, true)?),
@@ -2375,7 +2386,9 @@ impl Core {
         }
         let context = self.journal_context(client);
         let before = self.doc();
+        let acting = self.acting.replace(user.to_string());
         let result = f(self);
+        self.acting = acting;
         let changes = journal::diff(&before, &self.doc());
         let seq = self.journal.next_seq();
         if !changes.is_empty() {

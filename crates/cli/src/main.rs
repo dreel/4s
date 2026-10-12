@@ -82,7 +82,9 @@ enum Cmd {
     Stop,
     /// Record live notes into an instrument's clip (RFC 0008): `4s record`
     /// starts (playing after the count-in if stopped), `4s record --off`
-    /// ends it, keeping what was played. Settings stay for the next take.
+    /// ends it, keeping what was played. Your knob moves meanwhile (`4s set`,
+    /// CCs, the UI) go into the clip's automation lanes (RFC 0010).
+    /// Settings stay for the next take.
     Record {
         /// End the take.
         #[arg(long, conflicts_with = "show")]
