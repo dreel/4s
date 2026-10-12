@@ -1492,7 +1492,7 @@ impl Core {
         for i in &file.instruments {
             check_name(Some(i.name.clone()))?;
         }
-        if file.devices.len() > MAX_EFFECTS {
+        if file.devices.iter().filter(|d| d.kind.kind() == DeviceKind::AudioEffect).count() > MAX_EFFECTS {
             return Err(RpcError::invalid(format!("project has more than {MAX_EFFECTS} effects")));
         }
         let mut per_chain: BTreeMap<u32, usize> = BTreeMap::new();
@@ -1561,12 +1561,13 @@ impl Core {
         if clip_count > MAX_CLIPS {
             return Err(RpcError::invalid(format!("project has more than {MAX_CLIPS} clips")));
         }
-        let effect_params: usize = file.devices.iter().map(|d| fours_engine::effect::params(d.kind, &d.id).len()).sum();
+        let effect_params: usize = file.devices.iter().map(|d| fours_engine::device_params(d.kind, &d.id).len()).sum();
         let needed = self.instruments.len()
             + self.devices.len() * 2
             + self.chains.len()
             + file.devices.len() * 2
             + effect_params
+            + 2 * MAX_MOD_ROUTES
             + MAX_CHANNELS
             + self.channels.len()
             + file.channels.len() * (1 + CHANNEL_PARAMS)
@@ -2018,6 +2019,7 @@ impl Core {
         )?;
 
         let mut graph = false;
+        let mut reused: Vec<u32> = Vec::new();
         for (n, name) in &channels {
             let Some(name) = name else { continue };
             // A channel number someone reused for the other kind since: it
@@ -2025,6 +2027,7 @@ impl Core {
             let want = if returns.contains(n) { ChannelKind::Return } else { ChannelKind::Track };
             if kinds_named.contains(n) && self.channels.iter().any(|c| c.n == *n && c.kind != want) {
                 skipped.push(format!("channel:{n}"));
+                reused.push(*n);
                 continue;
             }
             match self.channels.iter_mut().find(|c| c.n == *n) {
@@ -2093,7 +2096,10 @@ impl Core {
             graph = true;
         }
         for (path, v) in params {
-            if blocked.iter().any(|id| path.starts_with(&format!("{id}."))) {
+            // A channel number reused for the other kind keeps its own
+            // parameters.
+            let reused_channel = reused.iter().any(|n| path.starts_with(&format!("mixer.{n}.")));
+            if reused_channel || blocked.iter().any(|id| path.starts_with(&format!("{id}."))) {
                 skipped.push(format!("param:{path}"));
                 continue;
             }

@@ -159,7 +159,9 @@ impl Core {
             }
             self.in_flight += 1;
         }
-        self.prune_routes();
+        // Routes from a removed modulator: the engine dropped them; the
+        // daemon's list follows in `graph_changed` (one prune for the
+        // whole change).
     }
 
     /// Effects on a channel: what removing it takes with it.

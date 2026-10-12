@@ -426,6 +426,9 @@ pub struct Engine {
     sends_at: [[f32; MAX_CHANNELS]; MAX_CHANNELS],
     /// Scratch for a track channel's post-fader signal.
     post: Vec<f32>,
+    /// How much of the tracks' dry signal reaches the master (0 while only
+    /// returns are soloed), as the last block ended.
+    dry_to_master: f32,
     modulators: Vec<Option<Box<dyn Modulator>>>,
     routes: [Option<ModRoute>; MAX_MOD_ROUTES],
     /// Beats since the song's tick 0, advanced every block (synced LFOs
@@ -481,6 +484,7 @@ impl Engine {
             sends: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
             sends_at: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
             post: vec![0.0; MAX_BLOCK * 2],
+            dry_to_master: 1.0,
             modulators: (0..MAX_MODULATORS).map(|_| None).collect(),
             routes: [None; MAX_MOD_ROUTES],
             beat: 0.0,
@@ -573,6 +577,7 @@ impl Engine {
             ch.snap(any_solo);
         }
         self.sends_at = self.sends;
+        self.dry_to_master = if any_solo.returns && !any_solo.tracks { 0.0 } else { 1.0 };
         self.master.value = volume_to_gain(self.globals[MASTER_VOLUME]);
         for slot in self.slots.iter_mut().flatten() {
             slot.instrument.snap();
@@ -884,11 +889,13 @@ impl Engine {
     fn modulate(&mut self, n: usize) {
         let ctx = ModContext { sr: self.sr, tempo: self.globals[TEMPO].clamp(20.0, 300.0), beat: self.beat };
         self.beat += n as f64 / self.sr as f64 * ctx.tempo as f64 / 60.0;
-        if self.routes.iter().all(Option::is_none) {
-            return;
-        }
+        // Modulators run whether routed or not, so a free LFO's phase does
+        // not depend on when it was first routed.
         for m in self.modulators.iter_mut().flatten() {
             m.advance(n, &ctx);
+        }
+        if self.routes.iter().all(Option::is_none) {
+            return;
         }
         for i in 0..MAX_MOD_ROUTES {
             let Some(r) = self.routes[i] else { continue };
@@ -1148,7 +1155,10 @@ impl Engine {
         // returns hears just them: the tracks still send, but their dry
         // signal leaves the master.
         let solo = self.any_solo();
-        let dry_to_master = if solo.returns && !solo.tracks { 0.0 } else { 1.0 };
+        // Ramped across the block, so toggling a return's solo does not click.
+        let dry_from = self.dry_to_master;
+        let dry_to = if solo.returns && !solo.tracks { 0.0 } else { 1.0 };
+        self.dry_to_master = dry_to;
         for returns in [false, true] {
             for i in 0..MAX_CHANNELS {
                 let ch = &mut self.channels[i];
@@ -1165,7 +1175,7 @@ impl Engine {
                     let r = ch.bus[f * 2 + 1] * g;
                     ch.peak[0] = ch.peak[0].max(l.abs());
                     ch.peak[1] = ch.peak[1].max(r.abs());
-                    let to_master = if returns { 1.0 } else { dry_to_master };
+                    let to_master = if returns { 1.0 } else { dry_from + (dry_to - dry_from) * (f + 1) as f32 / n as f32 };
                     self.master_bus[f * 2] += l * to_master;
                     self.master_bus[f * 2 + 1] += r * to_master;
                     self.post[f * 2] = l;
