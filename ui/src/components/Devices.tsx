@@ -76,10 +76,21 @@ export function Modulators() {
             type="range"
             min={-100}
             max={100}
-            value={Math.round(r.depth * 100)}
+            key={`${r.source}>${r.target}:${r.depth}`}
+            defaultValue={Math.round(r.depth * 100)}
             title="depth"
             data-testid={`depth-${r.source}-${r.target}`}
-            onChange={(e) => void act(client.call("mod.route", { source: r.source, target: r.target, depth: Number(e.target.value) / 100 }))}
+            // Sent once, on release (one route change, one journal entry).
+            onChange={(e) => {
+              if (e.target.dataset.dragging !== "1") {
+                void act(client.call("mod.route", { source: r.source, target: r.target, depth: Number(e.target.value) / 100 }));
+              }
+            }}
+            onPointerDown={(e) => (e.currentTarget.dataset.dragging = "1")}
+            onPointerUp={(e) => {
+              e.currentTarget.dataset.dragging = "0";
+              void act(client.call("mod.route", { source: r.source, target: r.target, depth: Number(e.currentTarget.value) / 100 }));
+            }}
           />
           <span className="w-10 text-zinc-500 tabular-nums">{Math.round(r.depth * 100)}%</span>
           <button className="text-zinc-600 hover:text-red-400" data-testid={`unroute-${r.source}-${r.target}`} onClick={() => void act(client.call("mod.unroute", { source: r.source, target: r.target }))}>

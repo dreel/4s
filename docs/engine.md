@@ -62,8 +62,10 @@ Per block of up to 256 frames (blocks also split at step boundaries):
 4. Track channels send post-fader to **return** channels
    (`mixer.<n>.send.<m>`, ramped per block, through the return's balance);
    returns then run their chains and faders like any channel, after every
-   track (so a send never feeds itself). Another channel's solo does not
-   silence a return.
+   track (so a send never feeds itself). Track solos gate the tracks and
+   return solos the returns: soloing a track keeps the returns (its sends
+   reach them); soloing only returns plays just them, the tracks still
+   sending but their dry signal leaving the master.
 5. Channels sum into the master, which runs its own insert chain, then
    applies its fader and a soft clipper above 0.8.
 

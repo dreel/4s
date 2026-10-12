@@ -946,6 +946,9 @@ check "soloing the return keeps the track that feeds it" "a tail" bash -c "$BIN/
 s set mixer.1.mute off >/dev/null
 check "instruments cannot feed a return" "is a return bus" s route drums 2
 check "returns save and load back" "<- return <- sends from 1 50%" bash -c "$BIN/4s project save buses >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load buses >/dev/null && $BIN/4s mixer"
+check "an undo does not turn a channel number reused as a return back into a track" "skipped: channel:3" bash -c "$BIN/4s channel add --name Three >/dev/null; $BIN/4s --user alice channel rm 3 >/dev/null; $BIN/4s channel add --return --name R3 >/dev/null; $BIN/4s --user alice undo"
+check "...which stays a return" "ch 3  R3           vol 100%  pan C          <- return" s mixer
+s channel rm 3 >/dev/null
 check "removing a return removes its sends, and undo brings them back" "mixer.1.send.2 = 0.5" bash -c "$BIN/4s channel rm 2 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s get mixer.1.send.2"
 # Modulators (RFC 0010): an LFO moving a filter's cutoff around its value.
 s project new >/dev/null

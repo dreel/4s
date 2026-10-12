@@ -1144,7 +1144,11 @@ impl Engine {
         let master = &mut self.master_bus[..n * 2];
         master.fill(0.0);
         // Track channels first (their sends feed the returns), then the
-        // returns: inserts, then the fader, into the master.
+        // returns: inserts, then the fader, into the master. Soloing only
+        // returns hears just them: the tracks still send, but their dry
+        // signal leaves the master.
+        let solo = self.any_solo();
+        let dry_to_master = if solo.returns && !solo.tracks { 0.0 } else { 1.0 };
         for returns in [false, true] {
             for i in 0..MAX_CHANNELS {
                 let ch = &mut self.channels[i];
@@ -1161,8 +1165,9 @@ impl Engine {
                     let r = ch.bus[f * 2 + 1] * g;
                     ch.peak[0] = ch.peak[0].max(l.abs());
                     ch.peak[1] = ch.peak[1].max(r.abs());
-                    self.master_bus[f * 2] += l;
-                    self.master_bus[f * 2 + 1] += r;
+                    let to_master = if returns { 1.0 } else { dry_to_master };
+                    self.master_bus[f * 2] += l * to_master;
+                    self.master_bus[f * 2 + 1] += r * to_master;
                     self.post[f * 2] = l;
                     self.post[f * 2 + 1] = r;
                 }

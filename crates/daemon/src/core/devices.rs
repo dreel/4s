@@ -177,7 +177,7 @@ impl Core {
                 self.in_flight
             )));
         }
-        self.ensure_room(2 * n + 2 + commands)
+        self.ensure_room(2 * n + 2 + commands + self.route_commands())
     }
 
     /// Remove every effect on a channel (it is going away).
@@ -240,6 +240,9 @@ impl Core {
             (false, Some(n)) => Some(n),
             (false, None) => return Err(RpcError::invalid("an audio effect needs a `channel` (0 for the master)")),
         };
+        if modulator && p.position.is_some() {
+            return Err(RpcError::invalid("a modulator has no place in a chain: leave out `position`"));
+        }
         if let Some(n) = channel {
             self.check_chain(n)?;
             if self.inserts_on(n) >= MAX_INSERTS {
@@ -282,7 +285,7 @@ impl Core {
                 self.in_flight
             )));
         }
-        self.ensure_room(2)?;
+        self.ensure_room(2 + self.route_commands())?;
         self.teardown_device(id);
         self.graph_changed(origin);
         Ok(self.graph())
@@ -352,8 +355,12 @@ impl Core {
         (1..=modulator::outputs(d.kind, id).len()).contains(&k).then_some((d.slot, (k - 1) as u8))
     }
 
-    /// A route's target: a continuous parameter, and its range.
+    /// A route's target: a continuous parameter, and its range. Not the
+    /// transport's (the daemon counts time by them).
     fn mod_target(&self, path: &str) -> Result<(ParamTarget, f32, f32), RpcError> {
+        if path.starts_with("transport.") {
+            return Err(RpcError::invalid(format!("'{path}' is the transport's: it takes no modulation")));
+        }
         let p = &self.params[self.param_id(path)?];
         match p.info.kind {
             ParamKind::Continuous { min, max } => Ok((p.target, min as f32, max as f32)),
@@ -375,12 +382,28 @@ impl Core {
             .collect()
     }
 
-    /// Send the whole route table to the engine (at most `MAX_MOD_ROUTES`).
+    /// Send the route table entries that changed to the engine (at most
+    /// one command per route; a route's base is not compared, since the
+    /// engine keeps it up to date itself).
     pub(super) fn sync_routes(&mut self) {
         let routes = self.engine_routes();
+        let same = |a: &Option<fours_engine::ModRoute>, b: &Option<fours_engine::ModRoute>| match (a, b) {
+            (Some(a), Some(b)) => fours_engine::ModRoute { base: 0.0, ..*a } == fours_engine::ModRoute { base: 0.0, ..*b },
+            (None, None) => true,
+            _ => false,
+        };
         for i in 0..MAX_MOD_ROUTES {
-            self.send(Command::SetModRoute { index: i as u8, route: routes.get(i).copied() });
+            let route = routes.get(i).copied();
+            if !same(&route, &self.routes_sent[i]) {
+                self.send(Command::SetModRoute { index: i as u8, route });
+                self.routes_sent[i] = route;
+            }
         }
+    }
+
+    /// Commands a route table change can take at most.
+    pub(super) fn route_commands(&self) -> usize {
+        self.mod_routes.len() + 1
     }
 
     /// Drop routes whose source or target went away, telling the engine.
@@ -432,7 +455,7 @@ impl Core {
         if !exists && self.mod_routes.len() >= MAX_MOD_ROUTES {
             return Err(RpcError::invalid(format!("at most {MAX_MOD_ROUTES} modulation routes")));
         }
-        self.ensure_room(MAX_MOD_ROUTES)?;
+        self.ensure_room(self.route_commands() + 1)?;
         self.set_mod_route_unchecked(&p.source, &p.target, Some(p.depth));
         self.sync_routes();
         self.graph_changed(origin);
@@ -443,7 +466,7 @@ impl Core {
         if !self.mod_routes.iter().any(|r| r.source == p.source && r.target == p.target) {
             return Err(RpcError::invalid(format!("no route from '{}' to '{}'", p.source, p.target)));
         }
-        self.ensure_room(MAX_MOD_ROUTES)?;
+        self.ensure_room(self.route_commands())?;
         self.set_mod_route_unchecked(&p.source, &p.target, None);
         self.sync_routes();
         self.graph_changed(origin);
@@ -551,7 +574,9 @@ impl Core {
     pub(super) fn apply_route_sets(&mut self, routes: Vec<(String, String, Option<f32>)>) -> Vec<String> {
         let mut skipped = Vec::new();
         for (source, target, depth) in routes {
-            let ok = depth.is_none() || (self.mod_source(&source).is_some() && self.mod_target(&target).is_ok());
+            let new = !self.mod_routes.iter().any(|r| r.source == source && r.target == target);
+            let room = depth.is_none() || !new || self.mod_routes.len() < MAX_MOD_ROUTES;
+            let ok = room && (depth.is_none() || (self.mod_source(&source).is_some() && self.mod_target(&target).is_ok()));
             if ok {
                 self.set_mod_route_unchecked(&source, &target, depth);
             } else {

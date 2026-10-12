@@ -99,7 +99,8 @@ instruments.
   itself; returns do not send (no return-to-return routing in this phase).
   A return has its own insert chain (the reverb usually lives there),
   fader, pan, mute, and solo. Solo on a track keeps the returns audible,
-  as consoles do.
+  as consoles do; soloing a return plays just that return (the tracks keep
+  sending, their dry signal leaves the master).
 
 ### 4. Modulators and modulation routes
 

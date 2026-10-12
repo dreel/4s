@@ -89,8 +89,7 @@ pub fn make(kind: DeviceType, sample_rate: f32) -> Box<dyn AudioEffect> {
         DeviceType::Filter => Box::new(Filter::new(sample_rate)),
         DeviceType::Delay => Box::new(Delay::new(sample_rate)),
         DeviceType::Reverb => Box::new(Reverb::new(sample_rate)),
-        // Not an effect: the daemon never builds one here.
-        DeviceType::Lfo => Box::new(Filter::new(sample_rate)),
+        DeviceType::Lfo => unreachable!("an lfo is a modulator (modulator::make)"),
     };
     for (i, p) in params(kind, "x").iter().enumerate().skip(COMMON_PARAMS) {
         e.set_param(i - COMMON_PARAMS, p.default as f32);

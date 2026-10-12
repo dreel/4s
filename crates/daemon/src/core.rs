@@ -102,6 +102,9 @@ pub struct Core {
     /// Modulation routes, in the order they were made (the engine's route
     /// table by index).
     mod_routes: Vec<ModRoute>,
+    /// The route table as last sent to the engine (bases aside), so only
+    /// changed entries are sent.
+    routes_sent: [Option<fours_engine::ModRoute>; MAX_MOD_ROUTES],
     /// Where play starts from (`transport.locate`).
     locate: u32,
     /// The song tick of the last step, while playing.
@@ -188,6 +191,7 @@ impl Core {
             effect_used: [false; MAX_EFFECTS],
             mod_used: [false; MAX_MODULATORS],
             mod_routes: Vec::new(),
+            routes_sent: [None; MAX_MOD_ROUTES],
             locate: 0,
             song_pos: None,
             slot_used: [false; MAX_INSTRUMENTS],
@@ -1592,6 +1596,7 @@ impl Core {
         for i in 0..MAX_MOD_ROUTES {
             self.send(Command::SetModRoute { index: i as u8, route: None });
         }
+        self.routes_sent = [None; MAX_MOD_ROUTES];
         for d in std::mem::take(&mut self.devices) {
             if d.kind.kind() == DeviceKind::Modulator {
                 self.send(Command::RemoveModulator { slot: d.slot });
@@ -1794,9 +1799,8 @@ impl Core {
         self.device_doc(&mut d);
         for c in &self.channels {
             d.insert(format!("channel:{}", c.n), json!(c.name));
-            if c.kind == ChannelKind::Return {
-                d.insert(format!("return:{}", c.n), json!(true));
-            }
+            // The kind, for every channel: an undo can tell a reused number.
+            d.insert(format!("return:{}", c.n), json!(c.kind == ChannelKind::Return));
         }
         d.insert("channels:order".into(), json!(self.channels.iter().map(|c| c.n).collect::<Vec<_>>()));
         for (source, n) in &self.routes {
@@ -2077,7 +2081,7 @@ impl Core {
         graph |= device_change;
         for (source, n) in routes {
             match (self.find_source(&source), n) {
-                (Some((id, o)), Some(n)) if self.channels.iter().any(|c| c.n == n) => {
+                (Some((id, o)), Some(n)) if self.channels.iter().any(|c| c.n == n && c.kind == ChannelKind::Track) => {
                     self.set_route_unchecked(&id, o, Some(n))
                 }
                 (Some((id, o)), None) => self.set_route_unchecked(&id, o, None),
