@@ -504,8 +504,9 @@ impl Engine {
         for slot in self.slots.iter_mut().flatten() {
             slot.instrument.snap();
         }
+        let ctx = ProcessContext { tempo: self.globals[TEMPO].clamp(20.0, 300.0) };
         for e in self.effects.iter_mut().flatten() {
-            e.effect.snap();
+            e.effect.snap(&ctx);
             e.wet.value = if e.bypass { 0.0 } else { e.mix };
         }
     }

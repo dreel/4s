@@ -892,6 +892,28 @@ check "effects save with the project and load back" "delay      delay   Delay   
 check "...with their parameters" "delay.feedback = 0.6" s get delay.feedback
 check "removing a channel removes its inserts" "reverb     reverb" bash -c "$BIN/4s channel rm 1 >/dev/null; $BIN/4s device list"
 check "...and undo brings them back" "delay      delay   Delay        on ch 1 at 2" bash -c "$BIN/4s undo >/dev/null && $BIN/4s device list"
+cat > "$TMP/levels.py" <<PY
+import array, json, struct, subprocess, sys
+def level(lo, hi):
+    r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--out', 'renders/lv.wav']))
+    b = open(r['path'], 'rb').read(); i = b.index(b'data'); n = struct.unpack('<I', b[i + 4:i + 8])[0]
+    a = array.array('f'); a.frombytes(b[i + 8:i + 8 + n]); sr = r['sample_rate']
+    return max(abs(x) for x in a[int(lo * sr) * 2:int(hi * sr) * 2])
+print('peak %.3f tail %.4f' % (level(0, 0.05), level(0.5, 1.5)))
+PY
+s set delay.bypass on >/dev/null
+check "a low-pass filter takes the top off the kick" "filtered quieter" bash -c "$BIN/4s set filter.cutoff 0.05 >/dev/null; A=\$(python3 '$TMP/levels.py' | cut -d' ' -f2); $BIN/4s set filter.bypass on >/dev/null; B=\$(python3 '$TMP/levels.py' | cut -d' ' -f2); $BIN/4s set filter.bypass off >/dev/null; $BIN/4s set filter.cutoff 0.6 >/dev/null; python3 -c \"print('filtered quieter' if \$A < 0.8 * \$B else (\$A, \$B))\""
+check "the master's reverb adds a tail" "tail 0.0" bash -c "python3 '$TMP/levels.py'"
+check "...which is gone when bypassed" "tail 0.0000" bash -c "$BIN/4s set reverb.bypass on >/dev/null; python3 '$TMP/levels.py'; $BIN/4s set reverb.bypass off >/dev/null"
+s set delay.bypass off >/dev/null
+# Undo is per user: a redo whose channel someone removed since does not
+# leave its effect behind, unplaced.
+s channel add --name Two >/dev/null
+s --user alice device add filter --on 2 --id orphan >/dev/null
+s --user alice undo >/dev/null
+s channel rm 2 >/dev/null
+s --user alice redo >/dev/null
+check "a redone effect whose channel went away is not left behind" "no device 'orphan'" s device mv orphan --on 1
 check "a session with effects replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/fx.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/fx.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level

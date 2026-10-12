@@ -119,6 +119,24 @@ impl Core {
         }
     }
 
+    /// Effects on a channel: what removing it takes with it.
+    pub(super) fn inserts_on(&self, n: u32) -> usize {
+        self.chains.get(&n).map_or(0, Vec::len)
+    }
+
+    /// Fail before removing channels if their effects would overflow the
+    /// return ring or the command queue.
+    pub(super) fn check_teardown(&self, channels: &[u32]) -> Result<(), RpcError> {
+        let n: usize = channels.iter().map(|c| self.inserts_on(*c)).sum();
+        if self.in_flight + n > RETURN_CAPACITY {
+            return Err(RpcError::failed(format!(
+                "{} removed devices are still waiting to be returned by the audio engine",
+                self.in_flight
+            )));
+        }
+        self.ensure_room(2 * n + 2)
+    }
+
     /// Remove every effect on a channel (it is going away).
     pub(super) fn teardown_chain(&mut self, n: u32) {
         for id in self.chains.get(&n).cloned().unwrap_or_default() {
@@ -215,7 +233,7 @@ impl Core {
     fn device_move(&mut self, p: DeviceMoveParams, origin: &str) -> Result<Graph, RpcError> {
         self.find_device(&p.id)?;
         self.check_chain(p.channel)?;
-        let (from, _) = self.device_place(&p.id).expect("every device is in a chain");
+        let (from, _) = self.device_place(&p.id).ok_or_else(|| RpcError::failed(format!("'{}' is in no chain", p.id)))?;
         let mut target = self.chains.get(&p.channel).cloned().unwrap_or_default();
         target.retain(|d| d != &p.id);
         if target.len() >= MAX_INSERTS {
@@ -334,6 +352,14 @@ impl Core {
         for (id, v) in &sets.devices {
             if v.is_none() && self.devices.iter().any(|d| &d.id == id) {
                 self.teardown_device(id);
+            }
+        }
+        // A device made here whose chain could not be restored (its channel
+        // went away since) does not stay behind, unplaced.
+        for id in added {
+            if self.device_place(&id).is_none() {
+                self.teardown_device(&id);
+                skipped.push(format!("device:{id}"));
             }
         }
         skipped

@@ -501,8 +501,14 @@ impl Core {
                 self.in_flight
             )));
         }
-        // The removal, plus deactivating every channel it may leave empty.
+        // The removal, plus deactivating every channel it may leave empty
+        // (and their inserts).
         self.ensure_room(1 + self.instruments[pos].outputs.len())?;
+        if !p.keep_channels {
+            let fed: Vec<u32> =
+                self.instruments[pos].outputs.iter().filter_map(|o| self.routes.get(&o.source).copied()).collect();
+            self.check_teardown(&fed)?;
+        }
         let fed = self.teardown_instrument(pos, origin);
         if !p.keep_channels {
             for n in fed {
@@ -594,6 +600,7 @@ impl Core {
 
     pub fn channel_remove(&mut self, n: u32, origin: &str) -> Result<Graph, RpcError> {
         self.check_channel(n)?;
+        self.check_teardown(&[n])?;
         self.ensure_room(MAX_OUTPUTS * MAX_INSTRUMENTS + 2)?;
         self.remove_channel_unchecked(n);
         self.graph_changed(origin);
