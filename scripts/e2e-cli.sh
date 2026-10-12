@@ -1014,6 +1014,7 @@ check "...pans the render left" "left" python3 "$TMP/lr.py"
 check "...and leaves the value set by hand" "pan C" bash -c "$BIN/4s mixer | grep 'ch 1'"
 check "the transport takes no automation" "the transport's" s clip lane drums transport.tempo "0:100"
 check "nor does the song's loop (the daemon counts time by it)" "the transport's" s clip lane drums song.loop_end "0:2"
+check "nor does modulation" "the transport's" bash -c "$BIN/4s device add lfo >/dev/null && $BIN/4s mod route lfo.1 song.loop_end 40%; $BIN/4s device rm lfo >/dev/null"
 check "nor do toggles" "is a toggle" s clip lane drums mixer.1.mute "0:1"
 check "values are clamped to the parameter's range" "lane mixer.1.volume: 0:1" s clip lane drums mixer.1.volume "0:9"
 check "a duplicate copies the lanes" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s clip dup drums | grep pan"
@@ -1024,7 +1025,9 @@ check "lanes save with the project and load back" "lane mixer.1.pan: 0:-1 192:-1
 check "a lane on an unknown parameter is dropped on load (a warning in the log), and the rest loads" "1
 ignored the lane for 'mixer.9.pan'" bash -c "sed -i.bak 's/mixer.1.pan/mixer.9.pan/' '$FOURS_DATA_DIR/projects/lanes.4s/project.json' && $BIN/4s project load lanes >/dev/null && $BIN/4s clip show drums | grep -c 'lane ' && $BIN/4s daemon logs | grep -o \"ignored the lane for 'mixer.9.pan'\" | tail -1; mv '$FOURS_DATA_DIR/projects/lanes.4s/project.json.bak' '$FOURS_DATA_DIR/projects/lanes.4s/project.json'"
 s project load lanes >/dev/null
-check "a lane on an effect goes with the effect" "no lane" bash -c "$BIN/4s device add filter --on 1 >/dev/null && $BIN/4s clip lane drums filter.cutoff '0:0.1' >/dev/null && $BIN/4s device rm filter >/dev/null && ($BIN/4s clip show drums | grep -q filter.cutoff || echo no lane)"
+check "a whole-number parameter's lane points are rounded" "lane filter.mode: 0:2" bash -c "$BIN/4s device add filter --on 1 >/dev/null && $BIN/4s clip lane drums filter.mode '0:1.6' | grep filter.mode"
+s clip lane drums filter.mode --rm >/dev/null
+check "a lane on an effect goes with the effect" "no lane" bash -c "$BIN/4s clip lane drums filter.cutoff '0:0.1' >/dev/null && $BIN/4s device rm filter >/dev/null && ($BIN/4s clip show drums | grep -q filter.cutoff || echo no lane)"
 check "...and undo brings both back" "lane filter.cutoff: 0:0.1" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show drums"
 check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null && python3 '$TMP/lr.py'"
 check "a session with lanes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/lanes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/lanes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"

@@ -1013,13 +1013,14 @@ impl Engine {
                 }
                 let Some((clip, pos)) = self.tracks[slot].at else { continue };
                 for k in 0..MAX_LANES {
-                    let l = self.clips[clip as usize].lanes[k];
+                    let l = &self.clips[clip as usize].lanes[k];
                     let (Some(target), Some(v)) = (l.target, l.value(pos as f32)) else { continue };
+                    let (base, min, max, whole) = (l.base, l.min, l.max, l.whole);
                     if count < MAX_AUTOMATED && !now[..count].iter().flatten().any(|a| a.0 == target) {
-                        now[count] = Some((target, l.base));
+                        now[count] = Some((target, base));
                         count += 1;
-                        let v = if l.whole { v.round() } else { v };
-                        self.write_param(target, v.clamp(l.min, l.max));
+                        let v = if whole { v.round() } else { v };
+                        self.write_param(target, v.clamp(min, max));
                     }
                 }
             }

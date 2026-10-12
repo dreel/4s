@@ -1567,7 +1567,7 @@ impl Core {
             match file.tracks.get(&i.id).map(|t| clips::load_track(i.kind, t)) {
                 Some(Ok(t)) => {
                     clip_count += t.clips.len();
-                    track_commands += t.clips.iter().map(|c| c.3.len() + 3 + lanes::lane_commands(&c.4)).sum::<usize>() + t.placements.len() + 2;
+                    track_commands += t.clips.iter().map(|c| c.3.len() + 3 + if c.4.is_empty() { 0 } else { lanes::lane_commands(&c.4) }).sum::<usize>() + t.placements.len() + 2;
                 }
                 // Loaded as an empty track (with a warning).
                 _ => {

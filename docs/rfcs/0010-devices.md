@@ -409,6 +409,9 @@ instruments.
 - Whole-number parameters' lanes are rounded (points in the daemon, the
   line between them in the engine). The UI's limits come from the
   generated `limits.ts`.
+- The song's loop (`song.*`) counts as the transport's for modulation
+  routes too (they took only continuous parameters, so no route could
+  reach it before either; now the error says why).
 - UI: `AutomationLanes.tsx`: a lane strip per lane under the piano roll's
   velocity lane (click: add a point on the snap grid, drag: move,
   alt-click: remove; a dashed line is the value set by hand), and a

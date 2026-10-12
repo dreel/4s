@@ -4,3 +4,5 @@
 export const MAX_CLIP_TICKS = 1536;
 export const MAX_LANES = 8;
 export const MAX_LANE_POINTS = 64;
+/** Parameters under these prefixes are the transport's (`transport_param`). */
+export const TRANSPORT_PREFIXES = ["transport.", "song."];

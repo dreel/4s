@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { Clip } from "../generated/Clip";
 import type { Lane } from "../generated/Lane";
 import type { LanePoint } from "../generated/LanePoint";
-import { MAX_CLIP_TICKS, MAX_LANES } from "../generated/limits";
+import { MAX_CLIP_TICKS, MAX_LANES, TRANSPORT_PREFIXES } from "../generated/limits";
 import type { ParamInfo } from "../generated/ParamInfo";
 import { act, client, useApp } from "../store";
 
@@ -32,7 +32,7 @@ function useRange(path: string): [number, number] {
  * transport's (`transport_param` in the protocol). */
 export function useAutomatable(): string[] {
   const registry = useApp((s) => s.registry);
-  return registry.filter((p) => p.kind !== "toggle" && !p.path.startsWith("transport.") && !p.path.startsWith("song.")).map((p) => p.path);
+  return registry.filter((p) => p.kind !== "toggle" && !TRANSPORT_PREFIXES.some((x) => p.path.startsWith(x))).map((p) => p.path);
 }
 
 /** Set a lane's points (one undo step), or remove it with none left. */

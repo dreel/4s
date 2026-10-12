@@ -86,8 +86,11 @@ pub struct Clip {
 /// loop, launch quantize): the daemon counts time by these, so nothing but a
 /// hand (or a CC) moves them, not automation.
 pub fn transport_param(path: &str) -> bool {
-    path.starts_with("transport.") || path.starts_with("song.")
+    TRANSPORT_PREFIXES.iter().any(|p| path.starts_with(p))
 }
+
+/// The transport's parameter path prefixes.
+pub const TRANSPORT_PREFIXES: [&str; 2] = ["transport.", "song."];
 
 /// Most automation lanes in a clip.
 pub const MAX_LANES: usize = 8;
