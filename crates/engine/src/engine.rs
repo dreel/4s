@@ -582,6 +582,9 @@ impl Engine {
             Command::AddEffect { slot, effect } => {
                 // Never drop an effect here: an invalid slot hands it back.
                 let Some(s) = self.effects.get_mut(slot as usize) else { return Some(Returned::Effect(effect)) };
+                // Settled at this tempo, so a synced delay does not glide in.
+                let mut effect = effect;
+                effect.snap(&ProcessContext { tempo: self.globals[TEMPO].clamp(20.0, 300.0) });
                 let wet = Smoother::new(self.sr, 0.01, 0.0);
                 return s.replace(EffectSlot { effect, bypass: false, mix: 0.0, wet, idle: false }).map(|e| Returned::Effect(e.effect));
             }

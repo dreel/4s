@@ -454,11 +454,12 @@ enum DeviceCmd {
     },
     /// Remove an effect.
     Rm { id: String },
-    /// Move an effect to another place (`--at`, 1-based) or channel.
+    /// Move an effect to another place (`--at`, 1-based) or channel
+    /// (`--on`; default its own chain).
     Mv {
         id: String,
         #[arg(long)]
-        on: String,
+        on: Option<String>,
         #[arg(long)]
         at: Option<u32>,
     },
@@ -1297,7 +1298,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             DeviceCmd::Rm { id } => vec![Request::DeviceRemove(DeviceRefParams { id: id.clone() })],
             DeviceCmd::Mv { id, on, at } => vec![Request::DeviceMove(DeviceMoveParams {
                 id: id.clone(),
-                channel: chain_arg(on)?,
+                channel: on.as_deref().map(chain_arg).transpose()?,
                 position: at.map(|a| one_based(a, "position")).transpose()?,
             })],
         },

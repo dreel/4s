@@ -95,7 +95,7 @@ export function DevicePanel() {
   const bypassed = useApp((s) => (s.snapshot?.params[`${s.device}.bypass`] ?? 0) >= 0.5);
   if (!id || !device) return null;
   const params = registry.filter((p) => p.path.startsWith(`${id}.`));
-  const move = (position: number) => void act(client.call("device.move", { id, channel: device.channel, position }));
+  const move = (position: number) => void act(client.call("device.move", { id, channel: null, position }));
   const btn = "px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:opacity-30";
   return (
     <section className="flex flex-col gap-2 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800" data-testid={`device-panel-${id}`}>

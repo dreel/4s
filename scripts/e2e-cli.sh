@@ -884,6 +884,8 @@ s set delay.bypass off >/dev/null
 check "a filter goes first in the chain" "<- drums  [filter, delay]" bash -c "$BIN/4s device add filter --on 1 --at 1 >/dev/null && $BIN/4s mixer"
 check "a reverb on the master" "master        vol  80%  [reverb]" bash -c "$BIN/4s device add reverb --on master >/dev/null && $BIN/4s mixer"
 check "moving one is one undo step" "undid: device.move filter" bash -c "$BIN/4s device mv filter --on master >/dev/null && $BIN/4s undo"
+check "moving within its own chain needs no --on" "<- drums  [delay, filter]" bash -c "$BIN/4s device mv filter --at 2 >/dev/null && $BIN/4s mixer"
+s device mv filter --at 1 >/dev/null
 check "ids are shared with instruments" "already an instrument or device id" s device add delay --on 1 --id drums
 check "unknown types are refused" "unknown device type" s device add flanger --on 1
 check "a chain holds at most 8" "at most 8 inserts" bash -c "for i in 1 2 3 4 5 6; do $BIN/4s device add filter --on 1 >/dev/null; done; $BIN/4s device add filter --on 1"
