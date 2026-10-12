@@ -559,7 +559,8 @@ impl Core {
             return Err(RpcError::invalid(format!("'{id}' keeps at least one clip")));
         }
         let placements: Vec<Placement> = t.placements.iter().filter(|p| p.clip != n).copied().collect();
-        self.ensure_room(t.placements.len() + 2)?;
+        // Placements, a selection, and a launch going back.
+        self.ensure_room(t.placements.len() + 3)?;
         if t.launched == Some(n) || t.playing.is_some_and(|p| p.0 == n) {
             self.launch(id, None, true)?;
             // It plays the arrangement from the next tick: a take into it

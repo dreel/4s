@@ -276,6 +276,11 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   launched elsewhere since: `launched:<id>` has no per-user conflict check
   beyond the doc's (`apply_clip_sets`).
 
+- (2026-10-12, clip launching review) deleting a launched clip frees its
+  engine clip-table entry at once, while the engine plays it until the
+  `now` return lands on the next tick; a `clip.new` in the same batch that
+  reuses the entry could sound for that tick on the deleted clip's track.
+  Free the entry on `Feedback::Launched` (`delete_clip`).
 - (2026-10-12, step view) the Block has no hardware control for launch
   mode or moving a pitched focus's rows (`controller.set_mode` only); map
   spare Block buttons or a knob page when the device is probed

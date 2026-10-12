@@ -49,6 +49,11 @@ impl Core {
     /// from play, song position `pos`. A take into it writes what was
     /// played into the old target and goes on into the new one.
     pub(super) fn launched(&mut self, slot: u8, clip: Option<u16>, tick: u64, pos: u64) {
+        // A switch from before a restart that the engine has not confirmed
+        // yet: the restart's own (tick 0) switches settle it.
+        if self.starting > 0 && tick > 0 {
+            return;
+        }
         let Some(id) = self.instruments.iter().find(|i| i.slot == slot).map(|i| i.id.clone()) else { return };
         let t = self.track(&id);
         let clip = clip.and_then(|e| t.clips.iter().find(|(_, c)| c.engine == e).map(|(n, _)| *n));

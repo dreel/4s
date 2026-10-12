@@ -289,6 +289,11 @@ Where these differ from the sections above, these win:
   relaunch; with it, undoing a removal left a silent instrument.) Inside a
   `batch` the doc is built for the whole batch, so a launch there is part
   of the batch's undo step.
+- **Boundaries.** A waiting switch lands on the first tick whose song
+  position is a multiple of the quantum, or on a loop's wrap, whichever
+  comes first (section 2 expected a short loop to reach a multiple
+  eventually; a one-bar loop over bar 2 with a two-bar quantum never
+  does).
 - **Parameters and state.** `transport.launch_quantize` (the path is under
   `transport.`, a reserved id, so no instrument can shadow it) is an
   ordinary parameter: saved and undone. Removing an instrument resets its
