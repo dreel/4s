@@ -4,11 +4,13 @@
 
 pub mod api;
 pub mod clip;
+pub mod layout;
 pub mod project;
 pub mod types;
 
 pub use api::*;
 pub use clip::*;
+pub use layout::*;
 pub use project::*;
 pub use types::*;
 

@@ -42,6 +42,7 @@ impl Core {
     /// A track's launch state changed: it is saved, but not undone.
     pub(super) fn launch_changed(&mut self, id: &str, origin: &str) {
         self.track_changed(id, origin);
+        self.refresh_controller(origin, false);
     }
 
     /// The engine switched a slot to a launched clip (or back) at `tick`
@@ -65,6 +66,8 @@ impl Core {
         }
         let track = self.track_info(&id);
         self.emit("engine", Event::Track { track });
+        // The Block edits what the armed track plays.
+        self.refresh_controller("engine", false);
     }
 
     /// Where a track is playing now (while playing): its launched clip, from

@@ -1,14 +1,16 @@
-//! Livid Block controller logic: grid pads edit the pattern of the host
-//! seat's focused instrument (when it is a drum machine), knobs control its
-//! knob page, LEDs mirror the pattern and playhead. This is pure state; the
-//! same logic serves the real device (via MIDI), the virtual controller (via
-//! RPC), and a future bridge daemon.
+//! Livid Block controller logic (RFC 0009): grid pads edit the clip the
+//! host seat's focused (armed) track is playing, through its instrument's
+//! note layout; knobs control its knob page; LEDs mirror the clip and the
+//! playhead. In launch mode the grid launches clips instead. This is pure
+//! state; the same logic serves the real device (via MIDI), the virtual
+//! controller (via RPC), and a future bridge daemon.
 //!
-//! Layout: 8 rows = 8 tracks, 8 columns = 8 steps of the current page.
-//! Knob N controls parameter N of the knob page. Without a drum focus the
-//! grid is dark and pads do nothing.
+//! Step layout: 8 rows = a drum machine's voices, or 8 pitches from a base
+//! note up (top row highest); 8 columns = 8 steps of the current page.
+//! Knob N controls parameter N of the knob page. Without a focus the grid
+//! is dark and pads do nothing.
 
-use fours_protocol::{MAX_STEPS, NUM_TRACKS, STEP_OFF};
+use fours_protocol::GridMode;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -19,15 +21,23 @@ pub type Leds = [[u8; GRID]; GRID];
 pub struct Controller {
     pub page: u32,
     pub follow: bool,
+    pub grid: GridMode,
+    /// A pitched focus's bottom row.
+    pub base_note: u8,
     pub leds: Leds,
     pub device: Option<String>,
 }
+
+/// The bottom row's pitch for a pitched focus by default: C2.
+pub const BASE_NOTE: u8 = 36;
 
 impl Default for Controller {
     fn default() -> Self {
         Self {
             page: 0,
             follow: true,
+            grid: GridMode::Steps,
+            base_note: BASE_NOTE,
             leds: [[0; GRID]; GRID],
             device: None,
         }
@@ -44,26 +54,19 @@ impl Controller {
         self.page * GRID as u32 + col
     }
 
-    /// Recompute LEDs. Lit = step on; the playhead column is inverted so it
-    /// is visible on both lit and unlit steps. Steps past `length` are dark,
-    /// and everything is dark without a target pattern.
-    pub fn compute_leds(
-        &self,
-        pattern: Option<&[[u8; MAX_STEPS]; NUM_TRACKS]>,
-        length: u32,
-        playhead: Option<u32>,
-    ) -> Leds {
+    /// Recompute the step grid's LEDs: `on(row, step)` says whether a cell
+    /// is on, for `rows` rows. Lit = on; the playhead column is inverted so
+    /// it is visible on both lit and unlit steps. Steps past `length` are
+    /// dark.
+    pub fn compute_leds(&self, rows: usize, on: impl Fn(usize, u32) -> bool, length: u32, playhead: Option<u32>) -> Leds {
         let mut leds = [[0u8; GRID]; GRID];
-        let Some(pattern) = pattern else { return leds };
-        for (row, led_row) in leds.iter_mut().enumerate().take(NUM_TRACKS) {
+        for (row, led_row) in leds.iter_mut().enumerate().take(rows) {
             for (col, led) in led_row.iter_mut().enumerate() {
                 let step = self.pad_step(col as u32);
                 if step >= length {
                     continue;
                 }
-                let on = pattern[row][step as usize] != STEP_OFF;
-                let at_playhead = playhead == Some(step);
-                *led = (on != at_playhead) as u8;
+                *led = (on(row, step) != (playhead == Some(step))) as u8;
             }
         }
         leds
@@ -207,22 +210,19 @@ pub fn decode_block(map: &BlockMap, msg: &[u8]) -> Option<BlockInput> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fours_protocol::STEP_ON;
 
     #[test]
     fn leds_show_steps_and_inverted_playhead() {
         let mut c = Controller::default();
-        let mut pattern = [[STEP_OFF; MAX_STEPS]; NUM_TRACKS];
-        pattern[0][0] = STEP_ON;
-        pattern[1][9] = STEP_ON;
-        let leds = c.compute_leds(Some(&pattern), 16, Some(0));
+        let on = |row: usize, step: u32| (row, step) == (0, 0) || (row, step) == (1, 9);
+        let leds = c.compute_leds(8, on, 16, Some(0));
         assert_eq!(leds[0][0], 0, "lit step under playhead is inverted");
         assert_eq!(leds[1][0], 1, "unlit step under playhead is lit");
         assert_eq!(leds[1][1], 0);
         c.page = 1;
-        let leds = c.compute_leds(Some(&pattern), 16, None);
+        let leds = c.compute_leds(8, on, 16, None);
         assert_eq!(leds[1][1], 1, "page 2 shows step 10 in column 2");
-        let leds = c.compute_leds(Some(&pattern), 12, None);
+        let leds = c.compute_leds(8, on, 12, None);
         assert_eq!(leds[0][5], 0, "steps past length are dark");
     }
 
