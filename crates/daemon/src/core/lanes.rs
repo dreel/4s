@@ -82,6 +82,8 @@ impl Core {
             checked.push(self.check_lane(l)?);
         }
         if self.track(id).clips[&n].lanes == checked {
+            // The same lanes again still repair any the engine did not get.
+            self.sync_lanes(id, n, false);
             return Ok(self.clip(id, n));
         }
         self.ensure_room(lane_commands(&checked))?;

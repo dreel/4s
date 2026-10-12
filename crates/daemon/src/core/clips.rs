@@ -796,7 +796,7 @@ impl Core {
                 let c = &self.track(&id).clips[&n];
                 let (name, length, list, lanes) = (format!("{} copy", c.name), c.length, c.events.clone(), c.lanes.clone());
                 let name: String = name.chars().take(32).collect();
-                self.ensure_room(lanes::lane_commands(&lanes))?;
+                self.ensure_room(lanes::lane_commands(&lanes) + list.len() + 4)?;
                 let copy = self.new_clip(&id, None, Some(name), length, list, true, origin)?;
                 if lanes.is_empty() { Ok(copy) } else { self.set_lanes(&id, copy.id, lanes, origin) }
             })),
