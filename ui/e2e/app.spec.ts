@@ -1278,11 +1278,13 @@ test("moving values: knobs and faders show where an LFO or a lane has them, besi
   // A lane on channel 1's volume while playing: the fader's marker sits at
   // the lane's value, and goes when it stops.
   await rpc("clip.lane.set", { instrument: "drums", clip: null, path: "mixer.1.volume", points: [{ tick: 0, value: 0.25 }] });
-  await rpc("transport.play", { count_in: null });
+  await rpc("transport.play", {});
   await expect(page.getByTestId("fader-1-moving")).toBeVisible();
   expect((await rpc("state.get", {})).moving).toEqual({ "mixer.1.volume": 0.25 });
   await rpc("transport.stop", {});
   await expect(page.getByTestId("fader-1-moving")).toHaveCount(0);
+  await rpc("clip.lane.remove", { instrument: "drums", clip: null, path: "mixer.1.volume" });
+  await rpc("device.remove", { id: "lfo" });
 });
 
 test("sampler: load a WAV into a pad from this computer, play it from the step view, clear it", async () => {
