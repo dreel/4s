@@ -841,6 +841,27 @@
             "type": "object"
           },
           {
+            "description": "The parameters modulation or automation moves and where they are\n(all of them; absent ones are at their values set by hand), at\nmeter rate while any move, once when they stop (RFC 0010).",
+            "properties": {
+              "params": {
+                "additionalProperties": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              "type": {
+                "const": "moving",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
             "properties": {
               "state": {
                 "$ref": "#/$defs/ControllerState"
@@ -9023,6 +9044,15 @@
           "$ref": "#/$defs/MidiConnection"
         },
         "type": "array"
+      },
+      "moving": {
+        "additionalProperties": {
+          "format": "double",
+          "type": "number"
+        },
+        "default": {},
+        "description": "Parameters modulation or automation moves, and where they are now\n(`params` keeps the values set by hand). RFC 0010.",
+        "type": "object"
       },
       "params": {
         "additionalProperties": {

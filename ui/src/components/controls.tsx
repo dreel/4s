@@ -36,8 +36,10 @@ export function Knob(props: {
   onChange: (v: number) => void;
   testId?: string;
   size?: number;
+  /** Where modulation or automation has it now (a second marker). */
+  moving?: number;
 }) {
-  const { value, min, max, size = 34 } = props;
+  const { value, min, max, size = 34, moving } = props;
   const drag = useDrag(value, min, max, props.onChange);
   const t = (clamp(value, min, max) - min) / (max - min || 1);
   const angle = -135 + t * 270;
@@ -50,12 +52,15 @@ export function Knob(props: {
   const [ex, ey] = arc(angle);
   const large = angle + 135 > 180 ? 1 : 0;
   const [px, py] = arc(angle);
+  const fmt = (v: number) => (props.format ? props.format(v) : v.toFixed(2));
+  const [mx, my] = moving === undefined ? [0, 0] : arc(-135 + ((clamp(moving, min, max) - min) / (max - min || 1)) * 270);
   return (
     <div
       className="flex flex-col items-center gap-0.5 cursor-ns-resize touch-none"
       data-testid={props.testId}
       data-value={value}
-      title={`${props.label}: ${props.format ? props.format(value) : value.toFixed(2)}`}
+      data-moving={moving}
+      title={`${props.label}: ${fmt(value)}${moving === undefined ? "" : ` (now ${fmt(moving)}: modulated or automated)`}`}
       onDoubleClick={() => props.onChange(props.defaultValue)}
       {...drag}
     >
@@ -70,6 +75,7 @@ export function Knob(props: {
           />
         )}
         <line x1={size / 2} y1={size / 2} x2={px} y2={py} className="stroke-zinc-200" strokeWidth={2} strokeLinecap="round" />
+        {moving !== undefined && <circle cx={mx} cy={my} r={2.5} className="fill-sky-400" />}
       </svg>
       <div className="text-[10px] leading-none text-zinc-400">{props.label}</div>
       <div className="text-[10px] leading-none text-zinc-300 tabular-nums">
@@ -86,8 +92,11 @@ export function Fader(props: {
   height?: number;
   /** Double-click resets to this (default 0.8). */
   defaultValue?: number;
+  /** Where modulation or automation has it now (a second marker). */
+  moving?: number;
 }) {
   const h = props.height ?? 110;
+  const moving = props.moving;
   const drag = useDrag(props.value, 0, 1, props.onChange, h);
   return (
     <div
@@ -101,6 +110,13 @@ export function Fader(props: {
     >
       <div className="absolute bottom-0 left-0 right-0 rounded-b bg-amber-500/30" style={{ height: `${props.value * 100}%` }} />
       <div className="absolute left-0 right-0 h-1.5 -mb-0.75 bg-zinc-100 rounded" style={{ bottom: `calc(${props.value * 100}% - 3px)` }} />
+      {moving !== undefined && (
+        <div
+          className="absolute left-1 right-1 h-1 bg-sky-400 rounded pointer-events-none"
+          style={{ bottom: `calc(${Math.min(1, Math.max(0, moving)) * 100}% - 2px)` }}
+          data-testid={props.testId && `${props.testId}-moving`}
+        />
+      )}
     </div>
   );
 }

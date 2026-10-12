@@ -330,7 +330,12 @@ impl ParamInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ParamValue {
     pub path: String,
+    /// The value set by hand: what is saved and undone.
     pub value: f64,
+    /// Where modulation or automation has it now, if either moves it
+    /// (RFC 0010).
+    #[serde(default)]
+    pub moving: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -810,6 +815,10 @@ pub struct Snapshot {
     pub audio: AudioStatus,
     /// Each sampler's loaded pads (RFC 0010).
     pub samplers: Vec<crate::device::SamplerInfo>,
+    /// Parameters modulation or automation moves, and where they are now
+    /// (`params` keeps the values set by hand). RFC 0010.
+    #[serde(default)]
+    pub moving: BTreeMap<String, f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -915,6 +924,10 @@ pub enum Event {
     /// Peak levels since the last meter event (linear, 0..1+), per active
     /// channel (post fader, pan, and mute/solo) and for the master.
     Meters { channels: Vec<ChannelLevel>, master: Vec<f32> },
+    /// The parameters modulation or automation moves and where they are
+    /// (all of them; absent ones are at their values set by hand), at
+    /// meter rate while any move, once when they stop (RFC 0010).
+    Moving { params: BTreeMap<String, f64> },
     Controller { state: ControllerState },
     Midi { connections: Vec<MidiConnection> },
     /// Seats, their bindings, or who sits where changed.
@@ -952,6 +965,7 @@ impl Event {
             Event::Playhead { .. } => "playhead",
             Event::Trigger { .. } => "trigger",
             Event::Meters { .. } => "meters",
+            Event::Moving { .. } => "moving",
             Event::Controller { .. } => "controller",
             Event::Midi { .. } => "midi",
             Event::Seats { .. } => "seats",

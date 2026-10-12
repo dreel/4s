@@ -46,7 +46,7 @@ const MAX_ACTIVE: usize = 64;
 const METER_HZ: f32 = 30.0;
 
 /// Where a parameter lives inside the engine.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ParamTarget {
     Global(usize),
     Instrument { slot: u8, index: u16 },
@@ -204,6 +204,12 @@ pub enum Feedback {
     Stopped { time: f64 },
     /// Peak (left, right) per channel index since the last meter message.
     Meters { channels: [[f32; 2]; MAX_CHANNELS], master: [f32; 2] },
+    /// A parameter modulation or automation moved, and where it is now
+    /// (at meter rate, one per moved parameter, then `MovedDone`).
+    Moved { target: ParamTarget, value: f32 },
+    /// The end of a meter period's `Moved` messages: parameters not in them
+    /// are at their values set by hand.
+    MovedDone,
 }
 
 struct Slot {
@@ -300,6 +306,8 @@ impl LaneStore {
 
 /// Most parameters automated at once: every lane of a clip on every track.
 const MAX_AUTOMATED: usize = MAX_INSTRUMENTS * MAX_LANES;
+/// Most parameters moved at once (by modulation or automation).
+const MAX_MOVED: usize = MAX_AUTOMATED + MAX_MOD_ROUTES;
 
 impl ClipStore {
     fn position(&self, e: &ClipEvent) -> Result<usize, usize> {
@@ -495,6 +503,13 @@ pub struct Engine {
     routes: [Option<ModRoute>; MAX_MOD_ROUTES],
     /// Parameters automation set in the last block, with their bases.
     automated: [Option<(ParamTarget, f32)>; MAX_AUTOMATED],
+    /// Where modulation and automation put parameters in the last block
+    /// (the first `moved_len`), reported at meter rate.
+    moved: [(ParamTarget, f32); MAX_MOVED],
+    moved_len: usize,
+    /// Whether the last meter period reported any (so a quiet engine
+    /// reports "none" once, not every period).
+    moved_reported: bool,
     /// Beats since the song's tick 0, advanced every block (synced LFOs
     /// follow it; it runs while stopped too).
     beat: f64,
@@ -552,6 +567,9 @@ impl Engine {
             modulators: (0..MAX_MODULATORS).map(|_| None).collect(),
             routes: [None; MAX_MOD_ROUTES],
             automated: [None; MAX_AUTOMATED],
+            moved: [(ParamTarget::Global(0), 0.0); MAX_MOVED],
+            moved_len: 0,
+            moved_reported: false,
             beat: 0.0,
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
@@ -1021,6 +1039,7 @@ impl Engine {
                         count += 1;
                         let v = if whole { v.round() } else { v };
                         self.write_param(target, v.clamp(min, max));
+                        self.note_moved(target, v.clamp(min, max));
                     }
                 }
             }
@@ -1063,6 +1082,18 @@ impl Engine {
                 v += q.depth * (q.max - q.min) * out;
             }
             self.write_param(r.target, v.clamp(r.min, r.max));
+            self.note_moved(r.target, v.clamp(r.min, r.max));
+        }
+    }
+
+    /// Remember where a parameter was moved this block (the last write wins:
+    /// automation after modulation).
+    fn note_moved(&mut self, target: ParamTarget, value: f32) {
+        if let Some(m) = self.moved[..self.moved_len].iter_mut().find(|m| m.0 == target) {
+            m.1 = value;
+        } else if self.moved_len < MAX_MOVED {
+            self.moved[self.moved_len] = (target, value);
+            self.moved_len += 1;
         }
     }
 
@@ -1261,6 +1292,7 @@ impl Engine {
     }
 
     fn render_block(&mut self, out: &mut [f32], channels: usize, n: usize) {
+        self.moved_len = 0;
         self.modulate(n);
         self.automate();
         for s in self.slots.iter_mut().flatten() {
@@ -1402,6 +1434,13 @@ impl Engine {
         }
         emit(Feedback::Meters { channels, master: self.master_peak });
         self.master_peak = [0.0; 2];
+        if self.moved_len > 0 || self.moved_reported {
+            for &(target, value) in &self.moved[..self.moved_len] {
+                emit(Feedback::Moved { target, value });
+            }
+            emit(Feedback::MovedDone);
+            self.moved_reported = self.moved_len > 0;
+        }
     }
 }
 
@@ -1834,12 +1873,22 @@ pub(crate) mod tests {
         apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 1, tick: 384, value: 1.0 });
         assert_eq!(e.channels[0].params[CH_PAN], 0.25, "stopped: the value set by hand");
         apply(&mut e, Command::Play { count_in: 0 });
-        render_secs(&mut e, 1.0, &mut vec![]);
+        let mut fb = vec![];
+        render_secs(&mut e, 1.0, &mut fb);
         let mid = e.channels[0].params[CH_PAN];
         assert!(mid.abs() < 0.05, "half the bar: {mid}");
+        // It reports where it moved the pan, at meter rate.
+        let moved: Vec<f32> = fb.iter().filter_map(|f| if let Feedback::Moved { target, value } = f { (*target == pan).then_some(*value) } else { None }).collect();
+        assert!(moved.len() >= 25 && moved.windows(2).all(|w| w[1] >= w[0]), "a rising pan, about 30 times a second: {moved:?}");
         apply(&mut e, Command::Stop);
-        render_secs(&mut e, 0.1, &mut vec![]);
+        let mut fb = vec![];
+        render_secs(&mut e, 0.1, &mut fb);
         assert_eq!(e.channels[0].params[CH_PAN], 0.25, "let go: back to the value set by hand");
+        // ...and once that nothing moves it any more, then nothing.
+        let tail: Vec<&Feedback> = fb.iter().filter(|f| matches!(f, Feedback::Moved { .. } | Feedback::MovedDone)).collect();
+        let dones = tail.iter().filter(|f| matches!(f, Feedback::MovedDone)).count();
+        assert!(matches!(tail.last(), Some(Feedback::MovedDone)), "{tail:?}");
+        assert!(dones <= 2, "reported once settled, not every period: {dones}");
         // A count-in plays no clip, so nothing is automated yet.
         apply(&mut e, Command::Play { count_in: TICKS_PER_BAR });
         render_secs(&mut e, 0.5, &mut vec![]);

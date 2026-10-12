@@ -59,7 +59,9 @@ song (`song.*`: each track's arrangement, RFC 0008, and `song.back`
 from launched clips, RFC 0009), the
 instrument graph (`instrument.*`, `channel.*`,
 `route.set`), clips (`clip.*`: timed note events, RFC 0007; `clip.lane.set` /
-`clip.lane.remove`: automation lanes, RFC 0010; `clip.update`
+`clip.lane.remove`: automation lanes, RFC 0010, whose live values, and
+modulation's, are `moving` in the snapshot, the `moving` event, and
+`param.get`; `clip.update`
 removes and adds in one step, and is how recorded takes are journaled;
 `clip.quantize` takes `events` to quantize only those notes, as
 `4s clip quantize --notes` does;

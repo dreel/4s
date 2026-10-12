@@ -401,9 +401,6 @@ instruments.
   instrument or effect removed) goes with it, as modulation routes do, in
   the same undo step. Duplicating a clip copies its lanes; renders and
   `4s render --record` include them; projects save them in the clip.
-- Not built yet: `state.get` does not show live automated values (the
-  `automated` field above); the UI shows the lane, and the knob shows the
-  value set by hand (backlog).
 - CLI: `4s clip lane <instrument> <path> "tick:value ..."` (`--rm`), and
   `4s clip show` lists lanes.
 - Whole-number parameters' lanes are rounded (points in the daemon, the
@@ -416,3 +413,18 @@ instruments.
   velocity lane (click: add a point on the snap grid, drag: move,
   alt-click: remove; a dashed line is the value set by hand), and a
   parameter field to add one.
+
+## Implementation notes (live values)
+
+- Section 6's live values are built as `moving` rather than `automated`,
+  and cover modulation as well as automation: the engine notes where each
+  block's routes and lanes put their targets (automation's write wins) and
+  reports them at meter rate (`Feedback::Moved` per parameter, then
+  `MovedDone`; once more when nothing moves, then quiet). The daemon maps
+  targets back to paths and keeps `Snapshot.moving` (path -> value), emits
+  `moving` events when the set or a value changes, and adds `moving` to
+  `param.get` / `param.set` results. `params` and saved values stay the
+  ones set by hand.
+- CLI: `4s get` prints `(now <value>: modulated or automated)`.
+- UI: knobs show a sky dot and faders a sky bar at the moving value, with
+  it in the tooltip; the handle stays at the value set by hand.

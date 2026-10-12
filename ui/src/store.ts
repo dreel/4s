@@ -54,6 +54,9 @@ export type LiveState = {
   lastNote: Record<string, number>;
   /** Notes a take is recording into each instrument, not written yet. */
   takeNotes: Record<string, TakeNote[]>;
+  /** Where modulation or automation has parameters now (RFC 0010); the
+   * snapshot's `params` keep the values set by hand. */
+  moving: Record<string, number>;
 };
 
 class Store<T> {
@@ -97,7 +100,7 @@ export const app = new Store<AppState>({
   device: null,
   mapping: null,
 });
-export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {} });
+export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {}, moving: {} });
 
 /** Select an instrument for the editor. */
 export function select(id: string) {
@@ -147,6 +150,7 @@ const UI_EVENTS: EventEnvelope["event"]["type"][] = [
   "playhead",
   "trigger",
   "meters",
+  "moving",
   "controller",
   "midi",
   "seats",
@@ -177,7 +181,7 @@ async function resync() {
   // No seat after a (re)connect or a project load: ask.
   if (!mySeat(app.state)) app.set({ choosingSeat: true });
   // Take notes come only as events: whatever was missed is stale.
-  live.set({ channels: {}, takeNotes: {} });
+  live.set({ channels: {}, takeNotes: {}, moving: snapshot.moving });
   for (const e of pending) if (e.seq > snapshot.seq) apply(e);
 }
 
@@ -215,6 +219,9 @@ function apply(env: EventEnvelope) {
       live.set({ channels, master: ev.master });
       return;
     }
+    case "moving":
+      live.set({ moving: ev.params });
+      return;
     case "trigger": {
       const now = performance.now();
       const key = ev.voice ? `${ev.instrument}.${ev.voice}` : ev.instrument;

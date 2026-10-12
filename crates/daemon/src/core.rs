@@ -85,6 +85,12 @@ struct ParamEntry {
 pub struct Core {
     params: Vec<ParamEntry>,
     index: HashMap<String, usize>,
+    /// Parameter registry index by engine target (for the engine's reports).
+    by_target: HashMap<ParamTarget, usize>,
+    /// Where modulation and automation have parameters (RFC 0010), as last
+    /// reported, and the report being gathered.
+    moving: BTreeMap<String, f64>,
+    moving_next: BTreeMap<String, f64>,
     instruments: Vec<InstrumentState>,
     channels: Vec<ChannelInfo>,
     routes: BTreeMap<String, u32>,
@@ -186,6 +192,9 @@ impl Core {
         let mut core = Self {
             params: Vec::new(),
             index: HashMap::new(),
+            by_target: HashMap::new(),
+            moving: BTreeMap::new(),
+            moving_next: BTreeMap::new(),
             instruments: Vec::new(),
             channels: Vec::new(),
             routes: BTreeMap::new(),
@@ -376,6 +385,7 @@ impl Core {
             })
             .collect();
         self.index = self.params.iter().enumerate().map(|(i, p)| (p.info.path.clone(), i)).collect();
+        self.by_target = self.params.iter().enumerate().map(|(i, p)| (p.target, i)).collect();
     }
 
     fn find_instrument(&self, id: &str) -> Result<&InstrumentState, RpcError> {
@@ -838,6 +848,7 @@ impl Core {
             project: self.project.clone(),
             audio: self.audio.clone(),
             samplers: self.sampler_infos(),
+            moving: self.moving.clone(),
         }
     }
 
@@ -999,7 +1010,7 @@ impl Core {
             self.emit(origin, Event::ParamChanged { path: path.to_string(), value });
             self.mark_dirty(origin);
         }
-        Ok(ParamValue { path: path.to_string(), value })
+        Ok(ParamValue { path: path.to_string(), value, moving: self.moving.get(path).copied() })
     }
 
     // ---- transport ---------------------------------------------------------
@@ -1400,6 +1411,18 @@ impl Core {
                 }
             }
             Feedback::Live { .. } | Feedback::Stopped { .. } => {}
+            Feedback::Moved { target, value } => {
+                if let Some(p) = self.by_target.get(&target).map(|i| &self.params[*i]) {
+                    self.moving_next.insert(p.info.path.clone(), (value as f64 * 1e6).round() / 1e6);
+                }
+            }
+            Feedback::MovedDone => {
+                let now = std::mem::take(&mut self.moving_next);
+                if now != self.moving {
+                    self.moving = now;
+                    self.emit("engine", Event::Moving { params: self.moving.clone() });
+                }
+            }
             Feedback::Meters { channels, master } => {
                 let levels: Vec<ChannelLevel> = self
                     .channels
@@ -2408,7 +2431,8 @@ impl Core {
             }
             Request::ParamGet(p) => {
                 let id = self.param_id(&p.path)?;
-                ok(ParamValue { path: p.path, value: self.params[id].value })
+                let moving = self.moving.get(&p.path).copied();
+                ok(ParamValue { path: p.path, value: self.params[id].value, moving })
             }
             Request::ParamSet(p) => ok(self.set_param(&p.path, p.value, origin)?),
             Request::TransportPlay(_) => ok(self.play(origin)),

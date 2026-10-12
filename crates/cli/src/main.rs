@@ -2242,7 +2242,11 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
         }
         Cmd::Get { .. } | Cmd::Set { .. } | Cmd::Tempo { .. } | Cmd::Send { .. } => {
             let v: ParamValue = serde_json::from_value(last)?;
-            println!("{} = {}", v.path, v.value);
+            match v.moving {
+                // Modulation or automation has it elsewhere (RFC 0010).
+                Some(now) => println!("{} = {}  (now {now}: modulated or automated)", v.path, v.value),
+                None => println!("{} = {}", v.path, v.value),
+            }
         }
         Cmd::Play | Cmd::Stop => {
             let t: TransportState = serde_json::from_value(last)?;

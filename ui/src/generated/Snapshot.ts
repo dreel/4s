@@ -31,4 +31,9 @@ clips: Array<Clip>, controller: ControllerState, midi: Array<MidiConnection>, se
 /**
  * Each sampler's loaded pads (RFC 0010).
  */
-samplers: Array<SamplerInfo>, };
+samplers: Array<SamplerInfo>, 
+/**
+ * Parameters modulation or automation moves, and where they are now
+ * (`params` keeps the values set by hand). RFC 0010.
+ */
+moving: { [key in string]: number }, };

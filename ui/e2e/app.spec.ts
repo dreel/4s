@@ -1262,6 +1262,29 @@ test("modulators: an LFO from the rack, mapped onto a knob by pressing it, depth
   await expect(page.getByTestId("mapping")).toHaveCount(0);
 });
 
+test("moving values: knobs and faders show where an LFO or a lane has them, beside the value set by hand", async () => {
+  const { page, rpc } = h;
+  const knob = page.getByTestId("knob-mixer.1.pan");
+  await page.getByTestId("fader-master").scrollIntoViewIfNeeded();
+  await expect(knob).not.toHaveAttribute("data-moving", /./);
+  // An LFO on channel 1's pan: the knob gets a second marker that moves.
+  await rpc("device.add", { type: "lfo", id: null, name: null, channel: null, position: null });
+  await rpc("mod.route", { source: "lfo.1", target: "mixer.1.pan", depth: 0.5 });
+  await expect(knob).toHaveAttribute("data-moving", /./);
+  await expect(knob).toHaveAttribute("data-value", "0");
+  await expect(knob).toHaveAttribute("title", /now .*modulated or automated/);
+  await rpc("mod.unroute", { source: "lfo.1", target: "mixer.1.pan" });
+  await expect(knob).not.toHaveAttribute("data-moving", /./);
+  // A lane on channel 1's volume while playing: the fader's marker sits at
+  // the lane's value, and goes when it stops.
+  await rpc("clip.lane.set", { instrument: "drums", clip: null, path: "mixer.1.volume", points: [{ tick: 0, value: 0.25 }] });
+  await rpc("transport.play", { count_in: null });
+  await expect(page.getByTestId("fader-1-moving")).toBeVisible();
+  expect((await rpc("state.get", {})).moving).toEqual({ "mixer.1.volume": 0.25 });
+  await rpc("transport.stop", {});
+  await expect(page.getByTestId("fader-1-moving")).toHaveCount(0);
+});
+
 test("sampler: load a WAV into a pad from this computer, play it from the step view, clear it", async () => {
   const { page, rpc } = h;
   // A 0.2 s 220 Hz tone as a 16-bit mono WAV.

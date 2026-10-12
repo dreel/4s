@@ -332,11 +332,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   that reloads the pad fails (skipped). Point undo at the bundle copy, or
   keep decoded samples by content.
 
-- (2026-10-12, automation lanes) lanes: `state.get` does not show the
-  live values of automated (or modulated) parameters, as RFC 0010 section 6
-  plans (`automated`); knobs show the value set by hand while a lane moves
-  the sound. Report them from the engine at meter rate (`Feedback`) and
-  draw them on the knob.
 - (2026-10-12, automation lanes) lanes: a lane's first value at play start
   ramps in through parameter smoothing (a few ms), so the first hit can
   sound partly at the value set by hand (the pan e2e's right channel peaks

@@ -2,7 +2,7 @@
 // come from the parameter registry, never duplicated in the UI.
 
 import type { ParamInfo } from "../generated/ParamInfo";
-import { act, app, client, setParam, useApp } from "../store";
+import { act, app, client, setParam, useApp, useLive } from "../store";
 import { Knob } from "./controls";
 
 function range(info: ParamInfo | undefined): [number, number] {
@@ -23,6 +23,7 @@ export function ParamKnob({
   size?: number;
 }) {
   const value = useApp((s) => s.snapshot?.params[path] ?? 0);
+  const moving = useLive((s) => s.moving[path]);
   const info = useApp((s) => s.registry.find((p) => p.path === path));
   const mapping = useApp((s) => s.mapping);
   const routed = useApp((s) => s.snapshot?.graph.mod_routes.some((r) => r.target === path) ?? false);
@@ -41,6 +42,7 @@ export function ParamKnob({
       onChange={(v) => void setParam(path, info?.kind === "integer" ? Math.round(v) : v)}
       testId={`knob-${path}`}
       size={size}
+      moving={moving}
     />
   );
   return (
