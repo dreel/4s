@@ -763,7 +763,8 @@ check "a take into a launched clip deleted mid-take writes nothing elsewhere" "c
 s tempo 120 >/dev/null
 check "step expressions only go with a note turned on" "not off" s step sv 1 C2 --off --set accent
 check "steps past the clip's end are refused" "past the clip's end" s step sv 17 C2
-check "a step of the focus" "C2 D2 - -" bash -c "$BIN/4s step 3 C2 >/dev/null; $BIN/4s step 3 --off | tail -1"
+check "a step of the focus" "C2 D2 G2 -" bash -c "$BIN/4s step 3 G2 | tail -1"
+s step 3 --off >/dev/null
 check "the Block comes back to its step page after launch mode" "page: 2" bash -c "$BIN/4s clip length sv 32 >/dev/null; $BIN/4s controller mode --page 2 >/dev/null; $BIN/4s controller mode --grid launch >/dev/null; $BIN/4s controller mode --grid steps | head -1"
 s focus drums >/dev/null
 s instrument rm sv >/dev/null

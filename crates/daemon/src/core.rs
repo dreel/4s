@@ -1486,6 +1486,7 @@ impl Core {
 
         self.controller.follow = file.controller.follow;
         self.controller.page = 0;
+        self.controller.steps_page = 0;
 
         // Seats: the project's, plus session-only seats someone sits in.
         let occupied: Vec<String> = self.clients.values().filter_map(|c| c.seat.clone()).collect();

@@ -121,8 +121,10 @@ enum Cmd {
     /// it was not). Notes are pitches (`C2`), drum voices (`kick`), or MIDI
     /// numbers. Without an instrument (`4s step 3 C2`), your focus.
     Step {
+        /// Instrument ids start with a letter, so a number here is a step
+        /// of your focus.
         instrument: Option<String>,
-        step: Option<u32>,
+        step: Option<String>,
         note: Option<String>,
         #[arg(long)]
         off: bool,
@@ -1136,12 +1138,14 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             })],
         },
         Cmd::Step { instrument, step, note, off, set_expr, clear, res, clip } => {
-            // `4s step 3 C2`: a step of the focus.
+            // `4s step 3 C2`: a step of the focus (instrument ids start with
+            // a letter).
             let (instrument, step, note) = match (instrument.as_deref().map(str::parse::<u32>), step, note) {
-                (Some(Ok(s)), Some(n), None) => (&None, &Some(s), &Some(n.to_string())),
-                (Some(Ok(s)), None, None) => (&None, &Some(s), &None),
-                _ => (instrument, step, note),
+                (Some(Ok(s)), n, None) => (&None, Some(s), n),
+                (Some(Ok(_)), _, Some(_)) => bail!("a step and a note, or an instrument, a step, and a note"),
+                (_, s, n) => (instrument, s.as_deref().map(str::parse::<u32>).transpose().map_err(|_| anyhow!("step must be a number from 1"))?, n),
             };
+            let step = &step;
             let resolution = res.as_deref().map(grid_arg).transpose()?.flatten();
             match step {
                 None => vec![Request::StepGet(StepGetParams { instrument: instrument.clone(), clip: *clip, resolution })],
@@ -1153,7 +1157,7 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                     for x in clear {
                         expressions.insert(x.clone(), false);
                     }
-                    let note = note.as_deref().map(|n| Voice::parse(n).filter(|_| n.parse::<u8>().is_err()).map_or_else(|| note_arg(n), |v| Ok(v.gm_note()))).transpose()?;
+                    let note = note.as_ref().map(String::as_str).map(|n| Voice::parse(n).filter(|_| n.parse::<u8>().is_err()).map_or_else(|| note_arg(n), |v| Ok(v.gm_note()))).transpose()?;
                     vec![Request::StepSet(StepSetParams {
                         instrument: instrument.clone(),
                         clip: *clip,
