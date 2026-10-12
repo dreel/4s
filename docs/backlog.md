@@ -290,6 +290,11 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-12, step view) the step view's pitch-row layout (pitched, not
   mono) has no instrument yet; it shows C1..C4 only, with no scrolling.
 
+- (2026-10-12, #37 review) the launch quantize labels (none, 1 beat, 1 bar,
+  2 bars, 4 bars) are spelled out in the CLI (`print_song`) and the UI
+  (`Transport.tsx`); export them from the protocol with
+  `LAUNCH_QUANTIZE_TICKS`, as for the record grids.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

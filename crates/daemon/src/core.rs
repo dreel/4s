@@ -899,6 +899,7 @@ impl Core {
         let ids: Vec<String> = self.instruments.iter().map(|i| i.id.clone()).collect();
         for id in ids {
             let t = self.tracks.get_mut(&id).expect("every instrument has a track");
+            t.restart = false;
             let now = t.launched.map(|n| (n, 0));
             if t.playing != now {
                 let was_pending = t.launched != t.playing.map(|p| p.0);

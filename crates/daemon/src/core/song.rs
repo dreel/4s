@@ -36,6 +36,7 @@ impl Core {
         if !playing {
             t.playing = clip.map(|n| (n, 0));
         }
+        t.restart = playing && clip.is_some() && t.playing.map(|p| p.0) == clip;
         Ok(())
     }
 
@@ -60,6 +61,7 @@ impl Core {
         if t.playing == clip.map(|n| (n, tick)) {
             return;
         }
+        self.tracks.get_mut(&id).expect("found").restart = false;
         let recording = self.playing && self.starting == 0 && self.take.as_ref().is_some_and(|t| t.slot == slot);
         let pos = pos as f64;
         if recording {
