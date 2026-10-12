@@ -703,6 +703,7 @@ impl Core {
             clip: self.grid_target(&self.host_seat).filter(|_| c.grid == GridMode::Steps).map(|(_, n)| n),
             rows: self.grid_rows(&self.host_seat),
             page: c.page,
+            length: self.grid_length(),
             base_note: c.base_note,
             follow: c.follow,
             leds: c.leds.iter().map(|r| r.to_vec()).collect(),

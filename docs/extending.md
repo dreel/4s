@@ -203,9 +203,13 @@ a second drum machine) is an Extension.
 
 1. **Protocol.** Add a variant to `InstrumentType` in
    `crates/protocol/src/types.rs` (`id`, `default_id`, `label`, `parse`).
-   It is sequenced by its clip (notes), so it needs no pattern code; add a
-   `PatternData` step view only if a step editor helps (drum steps and note
-   steps exist). Regenerate bindings.
+   It is sequenced by its clip (notes), so it needs no pattern code: declare
+   its `layout()` (`crates/protocol/src/layout.rs`, RFC 0009): named rows
+   for a drum machine or sampler pads, else a pitch range, `mono` for one
+   note at a time, a new note's gate and velocity, and the note expressions
+   it reads (a velocity threshold like the 303's accent, an overlap like its
+   slide). The step view, `step.*`, `4s step`, and the Block use it.
+   Regenerate bindings.
 2. **Engine.** Write a type implementing `Instrument`
    (`crates/engine/src/instrument.rs`) in its own file, following
    `tb303.rs` (one mono voice with a note stack) or `tr808.rs` (several
@@ -217,13 +221,15 @@ a second drum machine) is an Extension.
    - declare `params(id)` and outputs (each mono or stereo; main first);
    - keep peaks at or below 1.0.
    Add it to `instrument::make`, `params`, and `outputs`.
-3. **Daemon.** Every instance has a clip (`crates/daemon/src/core/clips.rs`),
-   edited with `clip.*` and, through the step views, `pattern.*`;
+3. **Daemon.** Every instance has a clip pool (`crates/daemon/src/core/clips.rs`),
+   edited with `clip.*` and, through its layout, `step.*`;
    `Core::resolve` picks the default instance by type.
 4. **CLI.** Usually nothing: `4s instrument add <type>` and the pattern
    commands cover it. Extend `InstrumentType::parse` aliases if helpful.
-5. **UI.** Add an editor component (like `BassEditor.tsx`) and show it from
-   `Editor.tsx` for the new type. Use `ParamKnob` for every parameter.
+5. **UI.** Add a panel component (like `BassEditor.tsx`): the generic
+   `StepView` for its clip (with controls beside named rows if it has
+   them), and `ParamKnob` for every parameter; show it from `Editor.tsx`
+   for the new type.
 
 Validate:
 - An engine test that the instrument sounds, stays at or below 1.0, and

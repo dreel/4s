@@ -424,6 +424,8 @@ pub struct ControllerState {
     pub knob_params: Vec<String>,
     /// Which 8-step page the grid shows (0 = steps 1-8, 1 = steps 9-16, ...).
     pub page: u32,
+    /// Steps the grid pages over (the target clip's length in 16ths).
+    pub length: u32,
     /// For a pitched focus: the pitch of the bottom row (rows go up a
     /// semitone each).
     pub base_note: u8,

@@ -62,4 +62,4 @@ decisions (before implementation).
 | [0006](0006-journal-and-undo.md) | Journal and per-user undo | implemented |
 | [0007](0007-midi-bindings-and-clips.md) | MIDI bindings, seats, clips, and recording | accepted (phases 1-2 implemented; recording moved to 0008) |
 | [0008](0008-recording-and-arrangement.md) | Recording and the arrangement | accepted (phases A, B1, B2 implemented; C in progress) |
-| [0009](0009-sequencing-model.md) | One transport, clip launching, and a generic step view | accepted (phase 1 implemented) |
+| [0009](0009-sequencing-model.md) | One transport, clip launching, and a generic step view | accepted (phases 1 and 2 implemented) |

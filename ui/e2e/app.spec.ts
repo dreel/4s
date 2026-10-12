@@ -1108,6 +1108,41 @@ test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, a
   await page.getByTestId("view-steps").click();
 });
 
+test("step view: one component for both instruments; resolution; the Block's launch mode and pitch rows", async () => {
+  const { page, rpc } = h;
+  // The 808 at 1/8: eight steps over its bar, a click at step 2 is tick 48.
+  await page.getByTestId("step-res-drums").selectOption("48");
+  await expect(page.getByTestId("step-kick-7")).toBeVisible();
+  await expect(page.getByTestId("step-kick-8")).toHaveCount(0);
+  await page.getByTestId("step-kick-1").click();
+  await expect.poll(async () => (await rpc("clip.get", { instrument: "drums", clip: null })).events).toEqual([
+    { tick: 48, len: 48, note: 36, velocity: 89 },
+  ]);
+  // Shift-click: the 808's declared expression, accent.
+  await page.getByTestId("step-kick-1").click({ modifiers: ["Shift"] });
+  await expect(page.getByTestId("step-kick-1")).toHaveAttribute("data-level", "2");
+
+  // The Block's launch mode: drums are launched (lit), the last pad goes back.
+  await page.getByTestId("block-grid-launch").click();
+  await expect.poll(async () => (await rpc("controller.get", {})).grid).toBe("launch");
+  await expect(page.getByTestId("block-row-0")).toHaveText("drums");
+  await expect(page.getByTestId("pad-0-0")).toHaveAttribute("data-lit", "1");
+  await page.getByTestId("pad-0-7").click();
+  await expect.poll(async () => (await rpc("song.get", {})).tracks[0].launched).toBe(null);
+  await page.getByTestId("block-grid-steps").click();
+
+  // A 303 focus: pitch rows from C2, moved up a semitone.
+  await rpc("instrument.add", { type: "tb303", id: "bass", name: null, channel: null, no_channel: false });
+  await rpc("seat.focus", { seat: (await rpc("controller.get", {})).seat, instrument: "bass" });
+  await page.getByTestId("select-bass").click();
+  await expect(page.getByTestId("block-row-7")).toHaveText("C2");
+  await page.getByTestId("block-rows-up").click();
+  await expect(page.getByTestId("block-row-7")).toHaveText("C#2");
+  // A pad sets its row's pitch, and the step view shows it.
+  await page.getByTestId("pad-7-0").click();
+  await expect(page.getByTestId("note-0")).toHaveValue("37");
+});
+
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
   const { page, rpc } = h;
   // Pad row 1 (snare), column 3 -> snare step 2.

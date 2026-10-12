@@ -728,6 +728,33 @@ PY
 s instrument add tr808 --id gridd --no-channel >/dev/null; s focus gridd >/dev/null; s clip length gridd 3 >/dev/null; s clip launch gridd >/dev/null
 check "the Block grid's playhead follows the focus clip where it plays" "grid playhead at clip step" python3 "$TMP/grid.py"
 s instrument rm gridd >/dev/null
+# --- Step views and the Block on clips (RFC 0009 phase 2) ---
+s instrument add tb303 --id sv --no-channel >/dev/null
+s clip launch sv >/dev/null
+s step sv 1 C2 --set accent >/dev/null
+check "step set writes notes through the instrument's layout" "C2! - D#2~ -" bash -c "$BIN/4s step sv 3 D#2 --set slide | tail -1"
+check "...the same events the note view reads" "sv: C2! - D#2~" s notes sv
+check "a mono step takes a new pitch, keeping its expressions" "C2! - G2~ -" bash -c "$BIN/4s step sv 3 G2 | tail -1"
+check "--off makes a mono step a rest" "C2! - - -" bash -c "$BIN/4s step sv 3 --off | tail -1"
+check "clearing an expression" "C2 - - -" bash -c "$BIN/4s step sv 1 C2 --clear accent | tail -1"
+check "steps at another resolution" "8 steps of 48 ticks" s step sv --res 1/8
+check "drum rows, an accent as X" "SD   ---- X---" bash -c "$BIN/4s step drums 5 snare --set accent | grep SD; $BIN/4s step drums 5 snare --off >/dev/null"
+check "expressions are the instrument's own" "no expression 'slide' (this instrument has: accent)" s step drums 1 kick --set slide
+check "notes off the instrument's grid are refused" "not on this instrument's grid" s step drums 1 C5
+s focus sv >/dev/null
+check "the Block shows a pitched focus as pitch rows" ".  C2" bash -c "$BIN/4s controller mode --base C2 | tail -1"
+check "...edits the clip the armed track plays" "grid: steps (clip 1)" s controller
+check "a pad puts its row's pitch on its step" "C2 D2 - -" bash -c "$BIN/4s controller press 6 2 >/dev/null && $BIN/4s step sv | tail -1"
+s clip new sv --keep >/dev/null
+s clip launch sv 2 >/dev/null
+check "launching another clip retargets the grid" "grid: steps (clip 2)" s controller
+check "launch mode: a row per track, its launched clip and back pad lit" ". # . . . . . #  sv" bash -c "$BIN/4s controller mode --grid launch | grep ' sv'"
+SV_ROW=$(s controller | awk '/ sv$/ {print NR - 1}')
+check "...a pad launches the row's clip" "sv: clips *1, 2; plays clip 1 (launched)" bash -c "$BIN/4s controller press $SV_ROW 1 >/dev/null && $BIN/4s clip list sv"
+check "...the last pad goes back to the arrangement" "sv: clips *1, 2; plays its arrangement" bash -c "$BIN/4s controller press $SV_ROW 8 >/dev/null && $BIN/4s clip list sv"
+s controller mode --grid steps >/dev/null
+s focus drums >/dev/null
+s instrument rm sv >/dev/null
 # --- The song (RFC 0008 phase B, RFC 0009): clip pools, the arrangement,
 # launching ---
 # Renders list what the `song` 808 fired as voice@seconds (120 bpm: a bar

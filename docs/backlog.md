@@ -276,6 +276,16 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   launched elsewhere since: `launched:<id>` has no per-user conflict check
   beyond the doc's (`apply_clip_sets`).
 
+- (2026-10-12, step view) the Block has no hardware control for launch
+  mode or moving a pitched focus's rows (`controller.set_mode` only); map
+  spare Block buttons or a knob page when the device is probed
+  (`crates/daemon/src/controller.rs`, `BlockMap`).
+- (2026-10-12, step view) `pattern.*` (drum and note step views) are kept
+  for scripts and the journal; retire them for `step.*` once nothing uses
+  them (`crates/daemon/src/core/clips.rs`, `crates/cli`).
+- (2026-10-12, step view) the step view's pitch-row layout (pitched, not
+  mono) has no instrument yet; it shows C1..C4 only, with no scrolling.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are
