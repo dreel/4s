@@ -33,6 +33,11 @@ pub struct ProjectFile {
     /// Modulation routes (RFC 0010).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mod_routes: Vec<crate::device::ModRoute>,
+    /// Samplers' samples by instrument id and pad: a path inside the
+    /// bundle (`samples/...`) once saved, else where it is on the engine
+    /// host.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub samples: BTreeMap<String, BTreeMap<u32, String>>,
     /// Parameter values by path. Unknown paths are ignored on load; missing
     /// paths take their defaults.
     pub params: BTreeMap<String, f64>,

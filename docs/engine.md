@@ -108,7 +108,9 @@ modulator) puts the target back at its base.
 
 - `lfo`: four LFOs (`<id>.<k>.shape`: sine, triangle, saw up, saw down,
   square, sample and hold; `sync` (on) with `division` (1/16 .. 4 bars,
-  default a bar) on a beat clock that runs from play, or a free `rate`
+  default a bar) on a beat clock that runs from play (it does not follow
+  a loop's wrap or a locate while playing, so a period that does not divide
+  the loop drifts across passes), or a free `rate`
   (0.01..20 Hz); `phase`). Outputs `<id>.1` .. `<id>.4`, -1..1.
 
 ## Instruments
@@ -158,6 +160,21 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 12-108). String form (CLI, project files): space-separated tokens, `C2` note
 (C4 = MIDI 60), `!` accent, `~` slide, `-` rest, e.g.
 `"C2! - C2 D#2~ G2 - C2 -"`.
+
+### `sampler` (default id `sampler`, RFC 0010)
+
+- 16 pads; pad k plays on note `35 + k` (GM drum notes from 36, as its note
+  layout's rows), so the step view and the Block treat it as a drum
+  machine. Polyphonic (16 voices, the quietest stolen), linear
+  interpolation, one stereo output.
+- Per pad (`<id>.<k>.*`): `gain`, `pan`, `tune` (-24..24 st), `start` and
+  `end` (0..1 of the sample), `attack` (to 0.5 s), `release` (to 2 s),
+  `oneshot` (on: plays to the end; off: a held note releases), `choke`
+  (0 none, 1..8: a pad stops the others in its group).
+- Samples are decoded (8/16/24/32-bit integer or 32-bit float WAV, mono
+  doubled) and resampled to the engine rate on the control side, sent in
+  with `SetSample` as shared buffers, and handed back to be dropped when
+  replaced; at most 60 s each.
 
 ## Sequencer
 

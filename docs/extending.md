@@ -262,6 +262,24 @@ Validate: an engine test that it stays in range and decays (the shared
 `effects_stay_in_range_and_decay` covers every type), `no_alloc` with it
 in a chain, and a CLI e2e render showing its effect (onsets, levels).
 
+## 8. Add a modulator type
+
+Modulators (RFC 0010) sit in the modulator rack and drive parameters
+through modulation routes. A new one (an envelope follower, a step
+modulator, a random source) is an Extension.
+
+1. **Protocol.** Add a variant to `DeviceType` (`id`, `label`, `parse`,
+   `ALL`), with `kind()` returning `DeviceKind::Modulator` and its outputs
+   in `ports()`.
+2. **Engine.** Implement `Modulator` in `crates/engine/src/modulator.rs`:
+   `advance` computes the block's outputs (-1..1) without allocating; add
+   its `params`, `knob_pages`, `outputs`, and a `make` arm.
+3. **Daemon, CLI, UI.** Nothing: `device.add`, `mod.route`, the rack, and
+   map mode read the registry.
+
+Validate: a unit test of its outputs, `no_alloc` with it routed, and a CLI
+e2e render that changes with a route.
+
 ---
 
 ## Not an extension: big changes

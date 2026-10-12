@@ -12,6 +12,7 @@ pub mod modulator;
 pub mod offline;
 pub mod params;
 pub mod rt;
+pub mod sampler;
 pub mod tb303;
 pub mod tr808;
 pub mod voices;

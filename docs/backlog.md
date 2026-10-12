@@ -320,6 +320,12 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   out in `DeviceType::ports`, `modulator::LFOS`, and the UI's map buttons;
   derive the UI's from the registry's ports and share one constant.
 
+- (2026-10-12, #43 review) routes to a removed target are pruned once at
+  the end of a change; if the same undo/redo then adds a device in the
+  same engine slot, the old route can touch it until the prune, which then
+  writes the old base into the new parameter (`graph_changed`,
+  `prune_routes`). Prune right after teardowns, or re-push the parameters.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

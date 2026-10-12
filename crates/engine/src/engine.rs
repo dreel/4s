@@ -82,6 +82,7 @@ pub enum Returned {
     Instrument(Box<dyn Instrument>),
     Effect(Box<dyn AudioEffect>),
     Modulator(Box<dyn Modulator>),
+    Sample(std::sync::Arc<[f32]>),
 }
 
 /// Control messages into the engine. Channel fields are 0-based indexes.
@@ -100,6 +101,9 @@ pub enum Command {
     /// A channel's (or, `MASTER_CHAIN`, the master's) insert chain: the
     /// first `len` effect slots of `slots`, in order.
     SetChain { ch: u8, slots: [u8; MAX_INSERTS], len: u8 },
+    /// Give a sampler's pad a sample (interleaved stereo at the engine's
+    /// rate), or none; the old one is handed back.
+    SetSample { slot: u8, pad: u8, sample: Option<std::sync::Arc<[f32]>> },
     /// Put a modulator in a modulator slot (replacing any there).
     AddModulator { slot: u8, modulator: Box<dyn Modulator> },
     RemoveModulator { slot: u8 },
@@ -145,6 +149,7 @@ impl std::fmt::Debug for Command {
             Command::RemoveEffect { slot } => write!(f, "RemoveEffect({slot})"),
             Command::SetChain { ch, slots, len } => write!(f, "SetChain({ch}, {:?})", &slots[..(*len as usize).min(MAX_INSERTS)]),
             Command::AddModulator { slot, .. } => write!(f, "AddModulator({slot})"),
+            Command::SetSample { slot, pad, sample } => write!(f, "SetSample({slot}, {pad}, {:?})", sample.as_ref().map(|s| s.len())),
             Command::RemoveModulator { slot } => write!(f, "RemoveModulator({slot})"),
             Command::SetModRoute { index, route } => write!(f, "SetModRoute({index}, {route:?})"),
             Command::ClearClip { clip } => write!(f, "ClearClip({clip})"),
@@ -605,6 +610,13 @@ impl Engine {
                     r.base = value;
                 }
                 self.write_param(target, value);
+            }
+            Command::SetSample { slot, pad, sample } => {
+                let old = match self.slots.get_mut(slot as usize) {
+                    Some(Some(s)) => s.instrument.set_sample(pad as usize, sample),
+                    _ => sample,
+                };
+                return old.map(Returned::Sample);
             }
             Command::AddModulator { slot, modulator } => {
                 let Some(s) = self.modulators.get_mut(slot as usize) else { return Some(Returned::Modulator(modulator)) };

@@ -742,6 +742,23 @@
             "type": "object"
           },
           {
+            "description": "A sampler's pads changed (a sample loaded or cleared).",
+            "properties": {
+              "info": {
+                "$ref": "#/$defs/SamplerInfo"
+              },
+              "type": {
+                "const": "sampler",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "info"
+            ],
+            "type": "object"
+          },
+          {
             "description": "An instrument played (from the sequencer, a pad, MIDI, or an\naudition). Drums set `voice`; note instruments set `note`.",
             "properties": {
               "instrument": {
@@ -1110,6 +1127,11 @@
           {
             "const": "tb303",
             "description": "TB-303-style bass synth: one monophonic voice, a note pattern.",
+            "type": "string"
+          },
+          {
+            "const": "sampler",
+            "description": "16 pads, each a sample on its own note (RFC 0010).",
             "type": "string"
           }
         ]
@@ -1718,6 +1740,55 @@
         ],
         "type": "object"
       },
+      "SamplerInfo": {
+        "description": "A sampler's loaded pads.",
+        "properties": {
+          "instrument": {
+            "type": "string"
+          },
+          "pads": {
+            "items": {
+              "$ref": "#/$defs/SamplerPad"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "instrument",
+          "pads"
+        ],
+        "type": "object"
+      },
+      "SamplerPad": {
+        "description": "A loaded pad of a sampler.",
+        "properties": {
+          "name": {
+            "description": "The file's name, without its folders.",
+            "type": "string"
+          },
+          "pad": {
+            "description": "1..16.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Where it is on the engine host.",
+            "type": "string"
+          },
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pad",
+          "name",
+          "path",
+          "seconds"
+        ],
+        "type": "object"
+      },
       "Seat": {
         "properties": {
           "config": {
@@ -2094,6 +2165,11 @@
           {
             "const": "tb303",
             "description": "TB-303-style bass synth: one monophonic voice, a note pattern.",
+            "type": "string"
+          },
+          {
+            "const": "sampler",
+            "description": "16 pads, each a sample on its own note (RFC 0010).",
             "type": "string"
           }
         ]
@@ -2547,6 +2623,19 @@
           "type": "integer"
         },
         "description": "Source (`drums`, `drums.kick`) -> channel number.",
+        "type": "object"
+      },
+      "samples": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^\\d+$": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "description": "Samplers' samples by instrument id and pad: a path inside the\nbundle (`samples/...`) once saved, else where it is on the engine\nhost.",
         "type": "object"
       },
       "seats": {
@@ -3471,6 +3560,11 @@
             "const": "tb303",
             "description": "TB-303-style bass synth: one monophonic voice, a note pattern.",
             "type": "string"
+          },
+          {
+            "const": "sampler",
+            "description": "16 pads, each a sample on its own note (RFC 0010).",
+            "type": "string"
           }
         ]
       },
@@ -4298,6 +4392,19 @@
             "description": "Source (`drums`, `drums.kick`) -> channel number.",
             "type": "object"
           },
+          "samples": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "patternProperties": {
+                "^\\d+$": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "description": "Samplers' samples by instrument id and pad: a path inside the\nbundle (`samples/...`) once saved, else where it is on the engine\nhost.",
+            "type": "object"
+          },
           "seats": {
             "additionalProperties": {
               "$ref": "#/$defs/SeatConfig"
@@ -4691,6 +4798,97 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "SamplerGetParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "description": "Default: the first sampler.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SamplerLoadParams": {
+        "description": "Load a WAV file on the engine host into a pad.",
+        "properties": {
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pad": {
+            "description": "1..16.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Relative paths are under the data dir; absolute paths as given.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pad",
+          "path"
+        ],
+        "type": "object"
+      },
+      "SamplerPadParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pad": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pad"
+        ],
+        "type": "object"
+      },
+      "SamplerUploadParams": {
+        "description": "Send a WAV file to load into a pad (from a client on another machine).",
+        "properties": {
+          "data": {
+            "description": "The WAV file, base64 (at most `MAX_UPLOAD_BYTES` decoded).",
+            "type": "string"
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The file's name.",
+            "type": "string"
+          },
+          "pad": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pad",
+          "name",
+          "data"
         ],
         "type": "object"
       },
@@ -5675,6 +5873,74 @@
           },
           "params": {
             "$ref": "#/$defs/DeviceMoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "A sampler's loaded pads.",
+        "properties": {
+          "method": {
+            "const": "sampler.get",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplerGetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Load a WAV on the engine host into a sampler's pad.",
+        "properties": {
+          "method": {
+            "const": "sampler.load",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplerLoadParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Send a WAV to load into a pad; journaled as the `sampler.load` of the\nfile it was stored as.",
+        "properties": {
+          "method": {
+            "const": "sampler.upload",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplerUploadParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Empty a pad.",
+        "properties": {
+          "method": {
+            "const": "sampler.clear",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplerPadParams"
           }
         },
         "required": [
@@ -7597,6 +7863,11 @@
             "const": "tb303",
             "description": "TB-303-style bass synth: one monophonic voice, a note pattern.",
             "type": "string"
+          },
+          {
+            "const": "sampler",
+            "description": "16 pads, each a sample on its own note (RFC 0010).",
+            "type": "string"
           }
         ]
       },
@@ -8150,6 +8421,55 @@
         ],
         "type": "object"
       },
+      "SamplerInfo": {
+        "description": "A sampler's loaded pads.",
+        "properties": {
+          "instrument": {
+            "type": "string"
+          },
+          "pads": {
+            "items": {
+              "$ref": "#/$defs/SamplerPad"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "instrument",
+          "pads"
+        ],
+        "type": "object"
+      },
+      "SamplerPad": {
+        "description": "A loaded pad of a sampler.",
+        "properties": {
+          "name": {
+            "description": "The file's name, without its folders.",
+            "type": "string"
+          },
+          "pad": {
+            "description": "1..16.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Where it is on the engine host.",
+            "type": "string"
+          },
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pad",
+          "name",
+          "path",
+          "seconds"
+        ],
+        "type": "object"
+      },
       "Seat": {
         "properties": {
           "config": {
@@ -8436,6 +8756,13 @@
       "record": {
         "$ref": "#/$defs/RecordState"
       },
+      "samplers": {
+        "description": "Each sampler's loaded pads (RFC 0010).",
+        "items": {
+          "$ref": "#/$defs/SamplerInfo"
+        },
+        "type": "array"
+      },
       "seats": {
         "$ref": "#/$defs/SeatsState"
       },
@@ -8468,7 +8795,8 @@
       "midi",
       "seats",
       "project",
-      "audio"
+      "audio",
+      "samplers"
     ],
     "title": "Snapshot",
     "type": "object"

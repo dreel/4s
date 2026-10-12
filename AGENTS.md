@@ -93,7 +93,8 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   parameters are `<id>.*` (RFC 0010). `4s channel add --return` makes a
   return bus and `4s send 1 3 40%` feeds it from channel 1. `4s device add
   lfo` and `4s mod route lfo.1 bass.cutoff 40%` modulate any continuous
-  parameter.
+  parameter. `4s instrument add sampler` and `4s sampler load 1 kick.wav`
+  play samples on pads (notes 36-51).
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history.

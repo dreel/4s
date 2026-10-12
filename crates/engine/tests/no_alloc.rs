@@ -67,6 +67,9 @@ fn process_never_allocates() {
     .filter_map(|(i, s)| note_event(i, s))
     .collect();
 
+    // A short sample, built here (allocations here are fine).
+    let sample: std::sync::Arc<[f32]> = (0..4800).map(|i| ((i as f32) * 0.05).sin() * 0.5).collect::<Vec<f32>>().into();
+
     for round in 0..3u8 {
         // Built on the control side (allocations here are fine).
         let cmds = vec![
@@ -88,6 +91,11 @@ fn process_never_allocates() {
             Command::SetParam { target: ParamTarget::Effect { slot: 0, index: 3 }, value: 0.3 },
             Command::SetChain { ch: 0, slots: [0, 1, 0, 0, 0, 0, 0, 0], len: 2 },
             Command::SetChain { ch: fours_engine::MASTER_CHAIN, slots: [2, 0, 0, 0, 0, 0, 0, 0], len: 1 },
+            // A sampler (RFC 0010) with a sample on pad 1, played below.
+            Command::AddInstrument { slot: 2, instrument: instrument::make(InstrumentType::Sampler, sr as f32) },
+            Command::SetRoute { slot: 2, output: 0, channel: Some(1) },
+            Command::SetSample { slot: 2, pad: 0, sample: Some(sample.clone()) },
+            Command::NoteOn { slot: 2, note: 36, velocity: 1.0, gate: false },
             // An LFO (RFC 0010) moving the filter's cutoff and channel 1's pan.
             Command::AddModulator { slot: 0, modulator: modulator::make(DeviceType::Lfo) },
             Command::SetParam { target: ParamTarget::Modulator { slot: 0, index: 2 }, value: 0.8 },
@@ -178,6 +186,7 @@ fn process_never_allocates() {
             Command::SetRoute { slot: 0, output: 1, channel: None },
             Command::RemoveInstrument { slot: 0 },
             Command::RemoveInstrument { slot: 1 },
+            Command::RemoveInstrument { slot: 2 },
             Command::SetModRoute { index: 1, route: None },
             Command::RemoveModulator { slot: 0 },
             Command::RemoveEffect { slot: 0 },
@@ -191,7 +200,7 @@ fn process_never_allocates() {
         assert_eq!(n, 0, "round {round}: {n} heap operations while removing");
         // The removed instruments and effects came back to be dropped here,
         // off the audio thread.
-        assert_eq!(link.returns.slots(), 6);
+        assert_eq!(link.returns.slots(), 7);
         while let Ok(b) = link.returns.pop() {
             drop(b);
         }

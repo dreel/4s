@@ -969,6 +969,30 @@ check "...and undo brings them back" "lfo.1 -> filter.cutoff depth -40%" bash -c
 check "routes save and load back" "lfo.1 -> filter.cutoff depth -40%" bash -c "$BIN/4s project save mods >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load mods >/dev/null && $BIN/4s mod"
 check "removing the target drops the route" "(no modulation routes)" bash -c "$BIN/4s device rm filter >/dev/null && $BIN/4s mod"
 check "a session with modulation replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/mods.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/mods.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+# The sampler (RFC 0010): a WAV on pad 1, played from a clip, saved inside
+# the bundle.
+s project new >/dev/null
+python3 - "$TMP/tone.wav" <<'PY'
+import math, struct, sys
+sr = 44100; n = int(sr * 0.3)
+data = b''.join(struct.pack('<h', int(20000 * math.sin(2 * math.pi * 220 * i / sr) * (1 - i / n))) for i in range(n))
+fmt = struct.pack('<IHHIIHH', 16, 1, 1, sr, sr * 2, 2, 16)
+open(sys.argv[1], 'wb').write(b'RIFF' + struct.pack('<I', 36 + len(data)) + b'WAVEfmt ' + fmt + b'data' + struct.pack('<I', len(data)) + data)
+PY
+check "add a sampler" "sampler    sampler" s instrument add sampler
+s clip launch sampler >/dev/null
+check "a file here is sent to the engine and loaded into a pad" "sampler pad 1  tone.wav                 0.30s" s sampler load 1 "$TMP/tone.wav"
+check "...journaled as the load of the stored file" "sampler.load" s journal --limit 1
+check "pads are rows of the step view" "P1   x--- x---" bash -c "$BIN/4s step sampler 1 pad1 >/dev/null; $BIN/4s step sampler 5 pad1 | grep P1"
+check "the pad plays from the clip" "triggers: 2 (sampler 2)  detected onsets: 2" bash -c "$BIN/4s render | grep triggers"
+check "a pad with no sample stays silent" "triggers: 2 (sampler 2)" bash -c "$BIN/4s step sampler 9 pad2 >/dev/null; $BIN/4s render | grep triggers"
+check "tune moves its pitch" "sampler.1.tune = 12" s set sampler.1.tune 12
+check "non-WAV files are refused" "sampler.upload" s sampler load 2 Cargo.toml
+check "saving copies the sample into the bundle" "samples/sampler-1-tone.wav" bash -c "$BIN/4s project save sampled >/dev/null && ls '$FOURS_DATA_DIR/projects/sampled.4s/samples' && grep -o 'samples/sampler-1-tone.wav' '$FOURS_DATA_DIR/projects/sampled.4s/project.json'"
+check "...so it loads without the original" "sampler pad 1  sampler-1-tone.wav" bash -c "rm '$TMP/tone.wav' && $BIN/4s project new >/dev/null && $BIN/4s project load sampled >/dev/null && $BIN/4s sampler"
+check "clearing a pad, and undo" "sampler pad 1  sampler-1-tone.wav" bash -c "$BIN/4s sampler clear 1 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler"
+check "removing the sampler and undo bring its samples back" "sampler pad 1" bash -c "$BIN/4s instrument rm sampler >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler"
+check "a session with samples replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/smp.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/smp.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status

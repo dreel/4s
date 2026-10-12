@@ -30,6 +30,12 @@ devices?: Array<ProjectDevice>,
  */
 mod_routes?: Array<ModRoute>, 
 /**
+ * Samplers' samples by instrument id and pad: a path inside the
+ * bundle (`samples/...`) once saved, else where it is on the engine
+ * host.
+ */
+samples?: { [key in string]: { [key in number]: string } }, 
+/**
  * Parameter values by path. Unknown paths are ignored on load; missing
  * paths take their defaults.
  */

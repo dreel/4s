@@ -152,15 +152,18 @@ pub enum InstrumentType {
     Tr808,
     /// TB-303-style bass synth: one monophonic voice, a note pattern.
     Tb303,
+    /// 16 pads, each a sample on its own note (RFC 0010).
+    Sampler,
 }
 
 impl InstrumentType {
-    pub const ALL: [InstrumentType; 2] = [InstrumentType::Tr808, InstrumentType::Tb303];
+    pub const ALL: [InstrumentType; 3] = [InstrumentType::Tr808, InstrumentType::Tb303, InstrumentType::Sampler];
 
     pub fn id(self) -> &'static str {
         match self {
             InstrumentType::Tr808 => "tr808",
             InstrumentType::Tb303 => "tb303",
+            InstrumentType::Sampler => "sampler",
         }
     }
 
@@ -169,6 +172,7 @@ impl InstrumentType {
         match self {
             InstrumentType::Tr808 => "drums",
             InstrumentType::Tb303 => "bass",
+            InstrumentType::Sampler => "sampler",
         }
     }
 
@@ -176,6 +180,7 @@ impl InstrumentType {
         match self {
             InstrumentType::Tr808 => "Drums",
             InstrumentType::Tb303 => "Bass",
+            InstrumentType::Sampler => "Sampler",
         }
     }
 
@@ -183,6 +188,7 @@ impl InstrumentType {
         match s.trim().to_ascii_lowercase().as_str() {
             "tr808" | "808" | "drums" => Some(InstrumentType::Tr808),
             "tb303" | "303" | "bass" => Some(InstrumentType::Tb303),
+            "sampler" | "pads" => Some(InstrumentType::Sampler),
             _ => None,
         }
     }
@@ -802,6 +808,8 @@ pub struct Snapshot {
     pub seats: SeatsState,
     pub project: ProjectInfo,
     pub audio: AudioStatus,
+    /// Each sampler's loaded pads (RFC 0010).
+    pub samplers: Vec<crate::device::SamplerInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -899,6 +907,8 @@ pub enum Event {
     Playhead { step: u32, tick: u32, time: f64, clips: BTreeMap<String, crate::clip::ClipPlayhead> },
     /// The start point moved (`transport.locate`).
     Located { tick: u32 },
+    /// A sampler's pads changed (a sample loaded or cleared).
+    Sampler { info: crate::device::SamplerInfo },
     /// An instrument played (from the sequencer, a pad, MIDI, or an
     /// audition). Drums set `voice`; note instruments set `note`.
     Trigger { instrument: String, voice: Option<Voice>, note: Option<u8>, velocity: f32, time: f64 },
@@ -935,6 +945,7 @@ impl Event {
             Event::ClipDeleted { .. } => "clip_deleted",
             Event::TakeNotes { .. } => "take_notes",
             Event::Located { .. } => "located",
+            Event::Sampler { .. } => "sampler",
             Event::Graph { .. } => "graph",
             Event::Transport { .. } => "transport",
             Event::Record { .. } => "record",

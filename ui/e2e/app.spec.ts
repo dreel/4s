@@ -1224,6 +1224,40 @@ test("modulators: an LFO from the rack, mapped onto a knob by pressing it, depth
   await expect(page.getByTestId("mapping")).toHaveCount(0);
 });
 
+test("sampler: load a WAV into a pad from this computer, play it from the step view, clear it", async () => {
+  const { page, rpc } = h;
+  // A 0.2 s 220 Hz tone as a 16-bit mono WAV.
+  const sr = 44100;
+  const n = Math.round(sr * 0.2);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sr, 24);
+  buf.writeUInt32LE(sr * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(12000 * Math.sin((2 * Math.PI * 220 * i) / sr)), 44 + i * 2);
+  await rpc("instrument.add", { type: "sampler", id: "pads", name: null, channel: null, no_channel: false });
+  await page.getByTestId("select-pads").click();
+  await expect(page.getByTestId("sampler-editor-pads")).toBeVisible();
+  await page.getByTestId("pad-load-pads-1").setInputFiles({ name: "tone.wav", mimeType: "audio/wav", buffer: buf });
+  await expect(page.getByTestId("pad-pads-1")).toContainText("tone.wav");
+  expect((await rpc("sampler.get", { instrument: "pads" })).pads.map((p) => p.pad)).toEqual([1]);
+  // Pads are rows of the step view.
+  await page.getByTestId("step-pad1-0").click();
+  await expect.poll(async () => (await rpc("clip.get", { instrument: "pads", clip: null })).events.map((e) => e.note)).toEqual([36]);
+  // The selected pad's knobs.
+  await expect(page.getByTestId("knob-pads.1.tune")).toBeVisible();
+  await page.getByTestId("pad-clear-pads-1").click();
+  await expect(page.getByTestId("pad-pads-1")).toContainText("empty");
+});
+
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
   const { page, rpc } = h;
   // Pad row 1 (snare), column 3 -> snare step 2.

@@ -102,6 +102,8 @@ pub(super) fn project_entry(kind: InstrumentType, n: u32, c: &ClipState) -> Proj
                     return out;
                 }
             }
+            // A sampler's clips are saved as events.
+            InstrumentType::Sampler => {}
         }
     }
     out.events = Some(format_events(&c.events));

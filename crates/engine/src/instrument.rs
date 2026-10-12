@@ -5,6 +5,7 @@
 //! instrument only makes sound: the sequencer plays it with notes from its
 //! clip (RFC 0007).
 
+use crate::sampler::Sampler;
 use crate::tb303::Tb303;
 use crate::tr808::Tr808;
 use fours_protocol::{InstrumentType, KnobPage, OutputInfo, OutputWidth, ParamInfo};
@@ -55,12 +56,20 @@ pub trait Instrument: Send {
 
     /// Jump parameter smoothers to their targets (before an offline render).
     fn snap(&mut self) {}
+
+    /// Give pad `pad` a sample (a sampler; RFC 0010), handing back the one
+    /// it replaces (or, an instrument without pads, the one given), to be
+    /// dropped off the audio thread.
+    fn set_sample(&mut self, _pad: usize, sample: Option<std::sync::Arc<[f32]>>) -> Option<std::sync::Arc<[f32]>> {
+        sample
+    }
 }
 
 pub fn make(kind: InstrumentType, sample_rate: f32) -> Box<dyn Instrument> {
     match kind {
         InstrumentType::Tr808 => Box::new(Tr808::new(sample_rate)),
         InstrumentType::Tb303 => Box::new(Tb303::new(sample_rate)),
+        InstrumentType::Sampler => Box::new(Sampler::new(sample_rate)),
     }
 }
 
@@ -69,6 +78,7 @@ pub fn params(kind: InstrumentType, id: &str) -> Vec<ParamInfo> {
     match kind {
         InstrumentType::Tr808 => Tr808::params(id),
         InstrumentType::Tb303 => Tb303::params(id),
+        InstrumentType::Sampler => crate::sampler::params(id),
     }
 }
 
@@ -77,6 +87,7 @@ pub fn knob_pages(kind: InstrumentType, id: &str) -> Vec<KnobPage> {
     match kind {
         InstrumentType::Tr808 => Tr808::knob_pages(id),
         InstrumentType::Tb303 => Tb303::knob_pages(id),
+        InstrumentType::Sampler => crate::sampler::knob_pages(id),
     }
 }
 
@@ -85,5 +96,6 @@ pub fn outputs(kind: InstrumentType, id: &str, name: &str) -> Vec<OutputInfo> {
     match kind {
         InstrumentType::Tr808 => Tr808::outputs(id, name),
         InstrumentType::Tb303 => vec![OutputInfo { source: id.to_string(), label: name.to_string(), width: OutputWidth::Mono }],
+        InstrumentType::Sampler => vec![OutputInfo { source: id.to_string(), label: name.to_string(), width: OutputWidth::Stereo }],
     }
 }

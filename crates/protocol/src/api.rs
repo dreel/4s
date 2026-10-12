@@ -270,6 +270,45 @@ pub struct ModRoutesResult {
     pub routes: Vec<crate::device::ModRoute>,
 }
 
+// ---- the sampler (RFC 0010) ---------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerGetParams {
+    /// Default: the first sampler.
+    #[serde(default)]
+    pub instrument: Option<String>,
+}
+
+/// Load a WAV file on the engine host into a pad.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerLoadParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// 1..16.
+    pub pad: u32,
+    /// Relative paths are under the data dir; absolute paths as given.
+    pub path: String,
+}
+
+/// Send a WAV file to load into a pad (from a client on another machine).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerUploadParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    pub pad: u32,
+    /// The file's name.
+    pub name: String,
+    /// The WAV file, base64 (at most `MAX_UPLOAD_BYTES` decoded).
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerPadParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    pub pad: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct InstrumentRemoveParams {
     pub id: String,
@@ -1196,6 +1235,15 @@ api! {
     DeviceRemove = "device.remove" (DeviceRefParams) -> Graph;
     /// Move an audio effect within its chain or to another channel's.
     DeviceMove = "device.move" (DeviceMoveParams) -> Graph;
+    /// A sampler's loaded pads.
+    SamplerGet = "sampler.get" (SamplerGetParams) -> crate::device::SamplerInfo;
+    /// Load a WAV on the engine host into a sampler's pad.
+    SamplerLoad = "sampler.load" (SamplerLoadParams) -> crate::device::SamplerInfo;
+    /// Send a WAV to load into a pad; journaled as the `sampler.load` of the
+    /// file it was stored as.
+    SamplerUpload = "sampler.upload" (SamplerUploadParams) -> crate::device::SamplerInfo;
+    /// Empty a pad.
+    SamplerClear = "sampler.clear" (SamplerPadParams) -> crate::device::SamplerInfo;
     /// Route a modulator output to a continuous parameter, with a depth
     /// (or change an existing route's depth).
     ModRoute = "mod.route" (ModRouteParams) -> ModRoutesResult;

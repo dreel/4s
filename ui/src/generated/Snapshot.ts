@@ -7,6 +7,7 @@ import type { InstrumentPattern } from "./InstrumentPattern";
 import type { MidiConnection } from "./MidiConnection";
 import type { ProjectInfo } from "./ProjectInfo";
 import type { RecordState } from "./RecordState";
+import type { SamplerInfo } from "./SamplerInfo";
 import type { SeatsState } from "./SeatsState";
 import type { TrackInfo } from "./TrackInfo";
 import type { TransportState } from "./TransportState";
@@ -26,4 +27,8 @@ tracks: Array<TrackInfo>,
 /**
  * Every clip of every track.
  */
-clips: Array<Clip>, controller: ControllerState, midi: Array<MidiConnection>, seats: SeatsState, project: ProjectInfo, audio: AudioStatus, };
+clips: Array<Clip>, controller: ControllerState, midi: Array<MidiConnection>, seats: SeatsState, project: ProjectInfo, audio: AudioStatus, 
+/**
+ * Each sampler's loaded pads (RFC 0010).
+ */
+samplers: Array<SamplerInfo>, };

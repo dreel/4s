@@ -29,7 +29,7 @@ export function ParamKnob({
   const [min, max] = range(info);
   // Map mode (RFC 0010): a press on a continuous knob routes the waiting
   // modulator output to it instead of turning it.
-  const mappable = mapping !== null && info?.kind === "continuous";
+  const mappable = mapping !== null && info?.kind === "continuous" && !path.startsWith("transport.");
   const knob = (
     <Knob
       label={label}

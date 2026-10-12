@@ -139,6 +139,7 @@ const UI_EVENTS: EventEnvelope["event"]["type"][] = [
   "clip_deleted",
   "track",
   "located",
+  "sampler",
   "take_notes",
   "graph",
   "transport",
@@ -287,6 +288,16 @@ function apply(env: EventEnvelope) {
     case "track":
       app.set({
         snapshot: { ...s, tracks: s.tracks.map((t) => (t.instrument === ev.track.instrument ? ev.track : t)) },
+      });
+      break;
+    case "sampler":
+      app.set({
+        snapshot: {
+          ...s,
+          samplers: s.samplers.some((x) => x.instrument === ev.info.instrument)
+            ? s.samplers.map((x) => (x.instrument === ev.info.instrument ? ev.info : x))
+            : [...s.samplers, ev.info],
+        },
       });
       break;
     case "located":

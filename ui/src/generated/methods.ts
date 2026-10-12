@@ -78,6 +78,11 @@ import type { Recording } from "./Recording";
 import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
 import type { RouteSetParams } from "./RouteSetParams";
+import type { SamplerGetParams } from "./SamplerGetParams";
+import type { SamplerInfo } from "./SamplerInfo";
+import type { SamplerLoadParams } from "./SamplerLoadParams";
+import type { SamplerPadParams } from "./SamplerPadParams";
+import type { SamplerUploadParams } from "./SamplerUploadParams";
 import type { Seat } from "./Seat";
 import type { SeatApplyLayoutParams } from "./SeatApplyLayoutParams";
 import type { SeatBindParams } from "./SeatBindParams";
@@ -131,6 +136,10 @@ export interface Methods {
   "device.add": { params: DeviceAddParams; result: DeviceInfo };
   "device.remove": { params: DeviceRefParams; result: Graph };
   "device.move": { params: DeviceMoveParams; result: Graph };
+  "sampler.get": { params: SamplerGetParams; result: SamplerInfo };
+  "sampler.load": { params: SamplerLoadParams; result: SamplerInfo };
+  "sampler.upload": { params: SamplerUploadParams; result: SamplerInfo };
+  "sampler.clear": { params: SamplerPadParams; result: SamplerInfo };
   "mod.route": { params: ModRouteParams; result: ModRoutesResult };
   "mod.unroute": { params: ModUnrouteParams; result: ModRoutesResult };
   "channel.add": { params: ChannelAddParams; result: ChannelInfo };
@@ -235,6 +244,10 @@ export const METHODS: MethodName[] = [
   "device.add",
   "device.remove",
   "device.move",
+  "sampler.get",
+  "sampler.load",
+  "sampler.upload",
+  "sampler.clear",
   "mod.route",
   "mod.unroute",
   "channel.add",

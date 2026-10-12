@@ -1,6 +1,6 @@
 # RFC 0010: Devices: effects, buses, modulators, a sampler, automation
 
-- Status: accepted (phases 2, 3, and 4 implemented; Sam asked to keep building and
+- Status: accepted (phases 2 to 5 implemented; Sam asked to keep building and
   review the stack later, so the choices marked "default" are reversible
   and open to review; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
@@ -350,4 +350,28 @@ instruments.
   a depth slider and a remove button; routed knobs get a ring.
 - Not yet: `state.get` showing live modulated values; modulating a
   route's depth.
+
+## Implementation notes (phase 5: the sampler)
+
+- `InstrumentType::Sampler`: 16 pads on notes 36..51 (the note layout's
+  named rows `Pad 1`..`Pad 16`, ids `pad1`..). A pad spanning a key range
+  for melodic sampling is not built yet; each pad plays its sample at
+  `tune`.
+- `sampler.get|load|upload|clear`; the snapshot's `samplers` and the
+  `sampler` event. `sampler.upload` stores the file under
+  `<data dir>/samples/` and is journaled as the `sampler.load` of it, so
+  the journal holds no audio and a replay needs no upload. Uploads are at
+  most 16 MB, samples 60 s.
+- Engine: `Instrument::set_sample` takes and hands back `Arc<[f32]>`
+  buffers (`Command::SetSample`, `Returned::Sample`), so the audio thread
+  never frees a sample; `no_alloc` plays one.
+- Projects: `samples` (instrument -> pad -> path); saving copies them
+  into the bundle, loading resolves them against it. Undo key
+  `sample:<id>.<pad>` -> the file's path (undo reloads it).
+- CLI: `4s sampler [load <pad> <file>|clear <pad>] [--instrument]`; a file
+  on the CLI's machine is uploaded, else the path is read on the engine
+  host. `4s step sampler 1 pad1` names pads.
+- UI: `SamplerEditor`: the step view with each pad's sample, audition,
+  load (a file picker, uploaded), and clear beside its row; the selected
+  pad's knobs.
 

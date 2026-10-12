@@ -22,6 +22,8 @@ pub struct RenderInstrument {
     pub launched: Option<u16>,
     /// Its arrangement, by start.
     pub placements: Vec<Placement>,
+    /// A sampler's samples by pad (0-based).
+    pub samples: Vec<(u8, std::sync::Arc<[f32]>)>,
 }
 
 /// A clip in the engine's clip table: length in ticks and events.
@@ -91,6 +93,9 @@ impl RenderSpec {
             }
             for (o, ch) in inst.routes.iter().enumerate() {
                 let _ = e.apply(Command::SetRoute { slot, output: o as u8, channel: *ch }, &mut fb);
+            }
+            for (pad, sample) in &inst.samples {
+                let _ = e.apply(Command::SetSample { slot, pad: *pad, sample: Some(sample.clone()) }, &mut fb);
             }
             if inst.launched.is_some() {
                 let _ = e.apply(Command::Launch { slot, clip: inst.launched, now: true }, &mut fb);
@@ -332,6 +337,7 @@ mod tests {
                 routes,
                 launched: Some(0),
                 placements: Vec::new(),
+                samples: Vec::new(),
             }],
             clips: vec![RenderClip { index: 0, length: fours_protocol::DEFAULT_CLIP_LENGTH, events }],
             effects: Vec::new(),

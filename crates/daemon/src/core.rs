@@ -13,6 +13,7 @@ mod clips;
 mod devices;
 mod grid;
 pub(crate) mod record;
+mod samples;
 mod seats;
 mod song;
 
@@ -22,6 +23,7 @@ use crate::journal::{self, Doc, History, Journal};
 use crate::midi::{Midi, MidiMessage, list_ports};
 use clips::{ClipSets, TrackState};
 use devices::{DeviceSets, DeviceState};
+use samples::SampleState;
 use record::{LiveTake, RecordSettings};
 use seats::{ClientState, Held, InputEffect, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
@@ -97,6 +99,8 @@ pub struct Core {
     chains: BTreeMap<u32, Vec<String>>,
     /// Effect slots of the engine in use.
     effect_used: [bool; MAX_EFFECTS],
+    /// Samplers' samples by instrument id and pad (1..16).
+    samples: HashMap<String, BTreeMap<u32, SampleState>>,
     /// Modulator slots of the engine in use.
     mod_used: [bool; MAX_MODULATORS],
     /// Modulation routes, in the order they were made (the engine's route
@@ -189,6 +193,7 @@ impl Core {
             devices: Vec::new(),
             chains: BTreeMap::new(),
             effect_used: [false; MAX_EFFECTS],
+            samples: HashMap::new(),
             mod_used: [false; MAX_MODULATORS],
             mod_routes: Vec::new(),
             routes_sent: [None; MAX_MOD_ROUTES],
@@ -557,6 +562,9 @@ impl Core {
         self.slot_used[inst.slot as usize] = false;
         self.in_flight += 1;
         self.remove_track(&inst.id);
+        // Its samples left with it (inside the instrument the engine hands
+        // back).
+        self.samples.remove(&inst.id);
         // However it goes (removal, undo, redo), a take into it ends.
         if self.take.as_ref().is_some_and(|t| t.instrument == inst.id) {
             self.drop_take(origin);
@@ -826,6 +834,7 @@ impl Core {
             seats: self.seats_state(),
             project: self.project.clone(),
             audio: self.audio.clone(),
+            samplers: self.sampler_infos(),
         }
     }
 
@@ -897,7 +906,12 @@ impl Core {
                     })
                     .collect();
                 let launched = t.launched.map(|n| t.clips[&n].engine);
-                RenderInstrument { id: i.id.clone(), kind: i.kind, params, routes, launched, placements }
+                let samples = self
+                    .samples
+                    .get(&i.id)
+                    .map(|pads| pads.iter().map(|(n, s)| ((*n - 1) as u8, s.data.clone())).collect())
+                    .unwrap_or_default();
+                RenderInstrument { id: i.id.clone(), kind: i.kind, params, routes, launched, placements, samples }
             })
             .collect();
         // The clips keep their indexes in the engine's table.
@@ -1460,6 +1474,7 @@ impl Core {
                 .map(|d| ProjectDevice { id: d.id, kind: d.kind, name: d.name, channel: d.channel })
                 .collect(),
             mod_routes: self.mod_routes.clone(),
+            samples: self.project_samples(),
             params: self.params.iter().map(|p| (p.info.path.clone(), p.value)).collect(),
             tracks,
             controller: ProjectController { follow: self.controller.follow },
@@ -1608,6 +1623,7 @@ impl Core {
         }
         self.effect_used = [false; MAX_EFFECTS];
         self.mod_used = [false; MAX_MODULATORS];
+        self.samples.clear();
         for c in std::mem::take(&mut self.channels) {
             self.send(Command::SetChannelActive { ch: (c.n - 1) as u8, active: false });
         }
@@ -1654,6 +1670,23 @@ impl Core {
         }
         for (n, ids) in chains {
             self.set_chain_unchecked(n, ids);
+        }
+        // Samples: a file that is missing or unreadable leaves its pad empty.
+        for (id, pads) in &file.samples {
+            if !self.instruments.iter().any(|i| &i.id == id && i.kind == InstrumentType::Sampler) {
+                warnings.push(format!("ignored the samples of '{id}' (no such sampler)"));
+                continue;
+            }
+            for (pad, path) in pads {
+                let path = self.resolve_data_path(path);
+                match samples::decode(&path, self.sample_rate) {
+                    Ok((data, frames)) if (1..=SAMPLER_PADS).contains(pad) => {
+                        self.set_sample_unchecked(id, *pad, Some(SampleState { path, frames, data }))
+                    }
+                    Ok(_) => warnings.push(format!("{id}: no pad {pad}")),
+                    Err(e) => warnings.push(format!("{id} pad {pad}: {e}")),
+                }
+            }
         }
         // Routes after the parameters: each starts from its target's value.
         for r in &file.mod_routes {
@@ -1727,7 +1760,10 @@ impl Core {
             ),
         };
         std::fs::create_dir_all(&bundle).map_err(|e| RpcError::failed(format!("create {}: {e}", bundle.display())))?;
-        let json = project_to_json(&self.to_project_file());
+        let mut project = self.to_project_file();
+        // Samples go inside the bundle, so it moves between machines whole.
+        self.bundle_samples(&bundle, &mut project)?;
+        let json = project_to_json(&project);
         let file = bundle.join(PROJECT_FILE_NAME);
         std::fs::write(&file, json).map_err(|e| RpcError::failed(format!("write {}: {e}", file.display())))?;
         self.project = ProjectInfo { path: Some(bundle.to_string_lossy().into_owned()), dirty: false };
@@ -1741,7 +1777,8 @@ impl Core {
         let file = bundle.join(PROJECT_FILE_NAME);
         let json = std::fs::read_to_string(&file)
             .map_err(|e| RpcError::failed(format!("read {}: {e}", file.display())))?;
-        let project = parse_project(&json).map_err(|e| RpcError::failed(format!("{}: {e}", file.display())))?;
+        let mut project = parse_project(&json).map_err(|e| RpcError::failed(format!("{}: {e}", file.display())))?;
+        samples::resolve_samples(&bundle, &mut project);
         for w in self.apply_project_file(&project, origin)? {
             tracing::warn!("{}: {w}", file.display());
         }
@@ -1798,6 +1835,7 @@ impl Core {
         }
         self.clip_doc(&mut d);
         self.device_doc(&mut d);
+        self.sample_doc(&mut d);
         for c in &self.channels {
             d.insert(format!("channel:{}", c.n), json!(c.name));
             // The kind, for every channel: an undo can tell a reused number.
@@ -1919,6 +1957,7 @@ impl Core {
         let mut params: Vec<(String, Option<f64>)> = Vec::new();
         let mut clip_sets = ClipSets::default();
         let mut device_sets = DeviceSets::default();
+        let mut sample_sets: Vec<(String, u32, Option<String>)> = Vec::new();
         let mut seats: Vec<(String, SeatConfig)> = Vec::new();
         let mut skipped = Vec::new();
         for (key, v) in sets {
@@ -1947,6 +1986,11 @@ impl Core {
                 "param" => Some(params.push((rest.to_string(), v.as_f64()))),
                 "clip" | "event" | "selected" | "place" | "launched" => clip_sets.parse(kind, rest, v),
                 "device" | "chain" | "mod" => device_sets.parse(kind, rest, v),
+                "sample" => rest.rsplit_once('.').and_then(|(id, pad)| {
+                    let pad = pad.parse().ok()?;
+                    sample_sets.push((id.to_string(), pad, v.as_str().map(String::from)));
+                    Some(())
+                }),
                 "seat" => match v {
                     Value::Null => Some(seats.push((rest.to_string(), SeatConfig::default()))),
                     v => serde_json::from_value(v.clone()).ok().map(|c| seats.push((rest.to_string(), c))),
@@ -2116,6 +2160,11 @@ impl Core {
             }
         }
         skipped.extend(self.apply_clip_sets(clip_sets, &added, origin));
+        sample_sets.retain(|(id, _, _)| !removing.contains(id));
+        if !sample_sets.is_empty() {
+            self.ensure_room(sample_sets.len())?;
+            skipped.extend(self.apply_sample_sets(sample_sets, origin));
+        }
         if !route_sets.is_empty() {
             skipped.extend(self.apply_route_sets(route_sets));
             graph = true;
@@ -2198,6 +2247,17 @@ impl Core {
                 }
                 Request::SeatApplyLayout(p)
             }
+            // An upload is stored first and journaled as the load of that
+            // file, so the journal holds no audio and a replay needs no
+            // upload.
+            Request::SamplerUpload(p) => match self.store_upload(&p) {
+                Ok(path) => Request::SamplerLoad(SamplerLoadParams {
+                    instrument: p.instrument,
+                    pad: p.pad,
+                    path: path.to_string_lossy().into_owned(),
+                }),
+                Err(_) => Request::SamplerUpload(p),
+            },
             // A launch is journaled with the clip it resolves to, so a replay
             // launches the same clip whatever its focus (RFC 0009).
             Request::ClipLaunch(mut p) => {
@@ -2313,6 +2373,10 @@ impl Core {
             Err(req) => req,
         };
         let req = match self.handle_device(req, origin) {
+            Ok(r) => return r,
+            Err(req) => req,
+        };
+        let req = match self.handle_sampler(req, origin) {
             Ok(r) => return r,
             Err(req) => req,
         };
@@ -2517,6 +2581,9 @@ impl Core {
             | Request::DeviceMove(_)
             | Request::ModRoute(_)
             | Request::ModUnroute(_) => unreachable!("handled by handle_device"),
+            Request::SamplerGet(_) | Request::SamplerLoad(_) | Request::SamplerUpload(_) | Request::SamplerClear(_) => {
+                unreachable!("handled by handle_sampler")
+            }
             Request::ClipNew(_)
             | Request::ClipDuplicate(_)
             | Request::ClipRename(_)
@@ -2574,7 +2641,7 @@ fn read_only(req: &Request) -> bool {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
-        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) => true,
+        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) | SamplerGet(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
         | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | ClipLaunch(_) | SongPlace(_) | SongRemove(_)
         | SongMove(_) | SongBack(_)
@@ -2586,7 +2653,7 @@ fn read_only(req: &Request) -> bool {
         | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
         | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
         | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) => false,
+        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) | SamplerLoad(_) | SamplerUpload(_) | SamplerClear(_) => false,
     }
 }
 
@@ -2653,6 +2720,7 @@ fn default_project() -> ProjectFile {
         routes: BTreeMap::from([("drums".to_string(), 1)]),
         devices: Vec::new(),
         mod_routes: Vec::new(),
+        samples: BTreeMap::new(),
         params: BTreeMap::new(),
         tracks: BTreeMap::from([("drums".to_string(), drums)]),
         controller: ProjectController { follow: true },

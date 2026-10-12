@@ -186,3 +186,77 @@ pub struct DeviceTypeInfo {
     /// Instruments: how their notes show in a step view.
     pub layout: Option<NoteLayout>,
 }
+
+/// Pads in a `sampler`.
+pub const SAMPLER_PADS: u32 = 16;
+/// The largest sample a `sampler.upload` takes, decoded from base64.
+pub const MAX_UPLOAD_BYTES: usize = 16 * 1024 * 1024;
+
+/// A loaded pad of a sampler.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerPad {
+    /// 1..16.
+    pub pad: u32,
+    /// The file's name, without its folders.
+    pub name: String,
+    /// Where it is on the engine host.
+    pub path: String,
+    pub seconds: f64,
+}
+
+/// A sampler's loaded pads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerInfo {
+    pub instrument: String,
+    pub pads: Vec<SamplerPad>,
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Standard base64, with padding.
+pub fn base64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Decode standard base64 (whitespace ignored).
+pub fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    let (mut acc, mut bits) = (0u32, 0);
+    for c in s.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=') {
+        let v = B64.iter().position(|b| *b == c).ok_or("invalid base64")? as u32;
+        acc = acc << 6 | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_round_trips() {
+        for data in [&b""[..], b"f", b"fo", b"foo", b"foob", b"fooba", b"foobar", &[0, 255, 128, 7]] {
+            let e = base64_encode(data);
+            assert_eq!(base64_decode(&e).unwrap(), data, "{e}");
+        }
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert!(base64_decode("@@").is_err());
+    }
+}

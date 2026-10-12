@@ -199,6 +199,17 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ModCmd>,
     },
+    /// A sampler's pads (RFC 0010): `4s sampler` lists them; `4s sampler
+    /// load pads 1 kick.wav` loads a WAV into pad 1 (pads 1-16 play notes
+    /// 36-51). A file on this machine is sent to the engine; a path that
+    /// is not here is read on the engine host.
+    Sampler {
+        #[command(subcommand)]
+        cmd: Option<SamplerCmd>,
+        /// Which sampler (default: the first).
+        #[arg(long, global = true)]
+        instrument: Option<String>,
+    },
     /// Set a track channel's send to a return bus, e.g. `4s send 1 3 40%`
     /// (shorthand for `set mixer.1.send.3`).
     Send {
@@ -471,6 +482,14 @@ enum DeviceCmd {
         #[arg(long)]
         at: Option<u32>,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SamplerCmd {
+    /// Load a WAV into a pad (1-16).
+    Load { pad: u32, file: String },
+    /// Empty a pad.
+    Clear { pad: u32 },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1238,7 +1257,17 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                     for x in clear {
                         expressions.insert(x.clone(), false);
                     }
-                    let note = note.as_ref().map(String::as_str).map(|n| Voice::parse(n).filter(|_| n.parse::<u8>().is_err()).map_or_else(|| note_arg(n), |v| Ok(v.gm_note()))).transpose()?;
+                    // `pad3`: a sampler's pad 3 (note 38); `kick`: a drum voice.
+                    let note_of = |n: &str| -> Result<u8> {
+                        if let Some(k) = n.strip_prefix("pad").and_then(|k| k.parse::<u8>().ok()).filter(|k| (1..=16).contains(k)) {
+                            return Ok(35 + k);
+                        }
+                        match Voice::parse(n).filter(|_| n.parse::<u8>().is_err()) {
+                            Some(v) => Ok(v.gm_note()),
+                            None => note_arg(n),
+                        }
+                    };
+                    let note = note.as_deref().map(note_of).transpose()?;
                     vec![Request::StepSet(StepSetParams {
                         instrument: instrument.clone(),
                         clip: *clip,
@@ -1303,6 +1332,30 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 id: id.clone(),
                 keep_channels: *keep_channels,
             })],
+        },
+        Cmd::Sampler { cmd, instrument } => match cmd {
+            None => vec![Request::SamplerGet(SamplerGetParams { instrument: instrument.clone() })],
+            Some(SamplerCmd::Load { pad, file }) => {
+                let local = std::path::Path::new(file);
+                if local.is_file() {
+                    let data = std::fs::read(local).map_err(|e| anyhow!("read {file}: {e}"))?;
+                    if data.len() > MAX_UPLOAD_BYTES {
+                        bail!("{file} is over {} MB", MAX_UPLOAD_BYTES / 1024 / 1024);
+                    }
+                    let name = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sample.wav".into());
+                    vec![Request::SamplerUpload(SamplerUploadParams {
+                        instrument: instrument.clone(),
+                        pad: *pad,
+                        name,
+                        data: base64_encode(&data),
+                    })]
+                } else {
+                    vec![Request::SamplerLoad(SamplerLoadParams { instrument: instrument.clone(), pad: *pad, path: file.clone() })]
+                }
+            }
+            Some(SamplerCmd::Clear { pad }) => {
+                vec![Request::SamplerClear(SamplerPadParams { instrument: instrument.clone(), pad: *pad })]
+            }
         },
         Cmd::Mod { cmd } => match cmd {
             None => vec![Request::StateGet(e)],
@@ -2233,6 +2286,15 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             }
         }
         Cmd::Device { cmd: DeviceCmd::Add { .. } } => print_device(&serde_json::from_value(last)?),
+        Cmd::Sampler { .. } => {
+            let info: SamplerInfo = serde_json::from_value(last)?;
+            if info.pads.is_empty() {
+                println!("{}: no samples", info.instrument);
+            }
+            for p in &info.pads {
+                println!("{} pad {:<2} {:<24} {:.2}s", info.instrument, p.pad, p.name, p.seconds);
+            }
+        }
         Cmd::Mod { cmd: None } => {
             let s: Snapshot = serde_json::from_value(last)?;
             print_routes(&s.graph.mod_routes);
@@ -2779,7 +2841,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "send 1 2 50%", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
+            "send 1 2 50%", "sampler", "sampler load 1 /nope.wav", "sampler load 1 Cargo.toml", "sampler clear 1", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",
