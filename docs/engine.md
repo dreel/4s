@@ -170,7 +170,10 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 - Per pad (`<id>.<k>.*`): `gain`, `pan`, `tune` (-24..24 st), `start` and
   `end` (0..1 of the sample), `attack` (to 0.5 s), `release` (to 2 s),
   `oneshot` (on: plays to the end; off: a held note releases), `choke`
-  (0 none, 1..8: a pad stops the others in its group).
+  (0 none, 1..8: a pad stops the others in its group). `gain`, `tune`,
+  `start`, `end`, `attack`, and `oneshot` are read when a note starts (a
+  knob or an LFO on them changes the next notes); `pan` and `release`
+  follow while a note plays.
 - Samples are decoded (8/16/24/32-bit integer or 32-bit float WAV, mono
   doubled) and resampled to the engine rate on the control side, sent in
   with `SetSample` as shared buffers, and handed back to be dropped when

@@ -189,8 +189,9 @@ pub struct DeviceTypeInfo {
 
 /// Pads in a `sampler`.
 pub const SAMPLER_PADS: u32 = 16;
-/// The largest sample a `sampler.upload` takes, decoded from base64.
-pub const MAX_UPLOAD_BYTES: usize = 16 * 1024 * 1024;
+/// The largest sample a `sampler.upload` takes, decoded from base64 (its
+/// base64 then fits a 16 MiB WebSocket frame).
+pub const MAX_UPLOAD_BYTES: usize = 11 * 1024 * 1024;
 
 /// A loaded pad of a sampler.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]

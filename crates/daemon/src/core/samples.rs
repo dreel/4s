@@ -24,11 +24,17 @@ pub(super) struct SampleState {
 
 /// Decode a WAV file to interleaved stereo at `rate`.
 pub(super) fn decode(path: &Path, rate: u32) -> Result<(Arc<[f32]>, usize), String> {
-    let mut r = hound::WavReader::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    decode_from(std::io::BufReader::new(file), rate).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Decode WAV data to interleaved stereo at `rate`.
+pub(super) fn decode_from<R: std::io::Read>(reader: R, rate: u32) -> Result<(Arc<[f32]>, usize), String> {
+    let mut r = hound::WavReader::new(reader).map_err(|e| e.to_string())?;
     let spec = r.spec();
     let channels = spec.channels.max(1) as usize;
     if r.duration() as f64 / spec.sample_rate as f64 > MAX_SECONDS {
-        return Err(format!("{}: longer than {MAX_SECONDS} s", path.display()));
+        return Err(format!("longer than {MAX_SECONDS} s"));
     }
     let samples: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Float => r.samples::<f32>().collect::<Result<_, _>>(),
@@ -37,7 +43,7 @@ pub(super) fn decode(path: &Path, rate: u32) -> Result<(Arc<[f32]>, usize), Stri
             r.samples::<i32>().map(|s| s.map(|v| v as f32 * scale)).collect::<Result<_, _>>()
         }
     }
-    .map_err(|e| format!("{}: {e}", path.display()))?;
+    .map_err(|e| e.to_string())?;
     // Stereo frames at the file's rate (mono doubled, extra channels left out).
     let frames = samples.len() / channels;
     let at = |f: usize, c: usize| samples[f * channels + c.min(channels - 1)];
@@ -45,7 +51,7 @@ pub(super) fn decode(path: &Path, rate: u32) -> Result<(Arc<[f32]>, usize), Stri
     let ratio = spec.sample_rate as f64 / rate as f64;
     let out_frames = ((frames as f64) / ratio).floor() as usize;
     if out_frames < 2 {
-        return Err(format!("{}: no audio", path.display()));
+        return Err("no audio".into());
     }
     let mut out = Vec::with_capacity(out_frames * 2);
     for i in 0..out_frames {
@@ -69,7 +75,12 @@ impl Core {
                 pads.iter()
                     .map(|(pad, s)| SamplerPad {
                         pad: *pad,
-                        name: s.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                        // A bundle's copy shows its original name.
+                        name: {
+                            let file = s.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                            let prefix = format!("{id}.{pad}.");
+                            file.strip_prefix(&prefix).map(str::to_string).unwrap_or(file)
+                        },
                         path: s.path.to_string_lossy().into_owned(),
                         seconds: s.frames as f64 / self.sample_rate.max(1) as f64,
                     })
@@ -148,12 +159,16 @@ impl Core {
         path
     }
 
-    /// Store an upload, returning where it went.
+    /// Store an upload, returning where it went. Checked first (a sampler,
+    /// a pad, a WAV it can play), so a refused upload leaves nothing behind.
     pub(super) fn store_upload(&self, p: &SamplerUploadParams) -> Result<PathBuf, RpcError> {
+        self.resolve(p.instrument.as_deref(), InstrumentType::Sampler)?;
+        Self::check_pad(p.pad)?;
         let bytes = base64_decode(&p.data).map_err(RpcError::invalid)?;
         if bytes.len() > MAX_UPLOAD_BYTES {
             return Err(RpcError::invalid(format!("uploads are at most {} MB", MAX_UPLOAD_BYTES / 1024 / 1024)));
         }
+        decode_from(std::io::Cursor::new(&bytes), self.sample_rate).map_err(|e| RpcError::invalid(format!("{}: {e}", p.name)))?;
         let path = self.upload_path(&p.name);
         std::fs::create_dir_all(path.parent().expect("under the data dir"))
             .and_then(|_| std::fs::write(&path, bytes))
@@ -218,11 +233,12 @@ impl Core {
             let result = match (&path, sampler) {
                 (_, false) => Err(()),
                 (Some(p), true) => self.load_sample(&id, pad, Path::new(p), origin).map(|_| ()).map_err(|_| ()),
-                (None, true) => {
+                (None, true) if self.in_flight < RETURN_CAPACITY => {
                     self.set_sample_unchecked(&id, pad, None);
                     self.sampler_changed(&id, origin);
                     Ok(())
                 }
+                (None, true) => Err(()),
             };
             if result.is_err() {
                 skipped.push(key);
@@ -242,14 +258,20 @@ impl Core {
     }
 
     /// Copy every sample into a bundle's `samples/` and point `file` at the
-    /// copies, relative to the bundle.
+    /// copies, relative to the bundle. A sample already in it stays where
+    /// it is.
     pub(super) fn bundle_samples(&self, bundle: &Path, file: &mut ProjectFile) -> Result<(), RpcError> {
         let dir = bundle.join("samples");
         for (id, pads) in file.samples.iter_mut() {
             for (pad, path) in pads.iter_mut() {
                 let src = PathBuf::from(&*path);
+                if let Ok(inside) = src.strip_prefix(&dir) {
+                    *path = format!("samples/{}", inside.to_string_lossy());
+                    continue;
+                }
                 let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sample.wav".into());
-                let rel = format!("samples/{id}-{pad}-{name}");
+                // `<id>.<pad>.<file>`: ids have no dots, so names never clash.
+                let rel = format!("samples/{id}.{pad}.{name}");
                 let dst = bundle.join(&rel);
                 if src != dst {
                     std::fs::create_dir_all(&dir)

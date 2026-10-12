@@ -1577,11 +1577,13 @@ impl Core {
             return Err(RpcError::invalid(format!("project has more than {MAX_CLIPS} clips")));
         }
         let effect_params: usize = file.devices.iter().map(|d| fours_engine::device_params(d.kind, &d.id).len()).sum();
+        let samples: usize = file.samples.values().map(BTreeMap::len).sum();
         let needed = self.instruments.len()
             + self.devices.len() * 2
             + self.chains.len()
             + file.devices.len() * 2
             + effect_params
+            + samples
             + 2 * MAX_MOD_ROUTES
             + MAX_CHANNELS
             + self.channels.len()
@@ -2240,6 +2242,7 @@ impl Core {
         }
         // A layout is journaled with the ports it applies (see
         // `SeatApplyLayoutParams`).
+        let mut failed: Option<RpcError> = None;
         let req = match req {
             Request::SeatApplyLayout(mut p) if p.model.is_none() => {
                 if let Some((model, ports)) = self.layout_ports(&p.device) {
@@ -2256,7 +2259,11 @@ impl Core {
                     pad: p.pad,
                     path: path.to_string_lossy().into_owned(),
                 }),
-                Err(_) => Request::SamplerUpload(p),
+                // Refused: journaled without the audio, with its error.
+                Err(e) => {
+                    failed = Some(e);
+                    Request::SamplerUpload(SamplerUploadParams { data: String::new(), ..p })
+                }
             },
             // A launch is journaled with the clip it resolves to, so a replay
             // launches the same clip whatever its focus (RFC 0009).
@@ -2280,7 +2287,10 @@ impl Core {
         // Taken first, so a segment this request starts begins after it.
         let seq = self.journal.next_seq();
         self.in_request = before.is_some();
-        let result = self.dispatch(req, origin, client, &user);
+        let result = match failed {
+            Some(e) => Err(e),
+            None => self.dispatch(req, origin, client, &user),
+        };
         self.in_request = false;
         let changes = before.map(|b| journal::diff(&b, &self.doc())).unwrap_or_default();
         if fresh && result.is_ok() {
