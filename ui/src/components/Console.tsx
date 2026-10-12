@@ -1,7 +1,7 @@
 // The console: the app's central control point. Transport on top, then one
 // strip per mixer channel (in display order), the master, and controls to
-// add instruments and channels. Each strip picks its input instrument and can
-// be moved left or right. Clicking a strip's source selects the instrument
+// add instruments and channels. Each strip picks its input instrument, shows
+// its insert chain (RFC 0010), and can be moved left or right. Clicking a strip's source selects the instrument
 // that feeds it for the editor below.
 
 import { useEffect, useState } from "react";
@@ -10,6 +10,7 @@ import type { InstrumentType } from "../generated/InstrumentType";
 import type { InstrumentTypeInfo } from "../generated/InstrumentTypeInfo";
 import { act, client, select, setParam, useApp, useLive, useSelected } from "../store";
 import { Fader, Meter, Toggle } from "./controls";
+import { Inserts } from "./Devices";
 import { ParamKnob, pan, pct } from "./ParamKnob";
 import { Transport } from "./Transport";
 
@@ -172,6 +173,7 @@ function Strip({ channel, index, count }: { channel: ChannelInfo; index: number;
       >
         {sources || "(empty)"}
       </button>
+      <Inserts n={n} />
       <ParamKnob path={`mixer.${n}.pan`} label="pan" format={pan} />
       <div className="flex items-end gap-1">
         <Fader
@@ -250,6 +252,7 @@ export function Console() {
         ))}
         <div className="flex flex-col items-center justify-end gap-2 p-2 rounded bg-zinc-900 border border-zinc-700 min-w-20">
           <div className="text-xs font-semibold text-zinc-300">Master</div>
+          <Inserts n={0} />
           <div className="flex items-end gap-1">
             <Fader value={master} onChange={(v) => void setParam("mixer.master.volume", v)} testId="fader-master" height={150} />
             <MasterMeters />

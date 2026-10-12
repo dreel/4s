@@ -21,6 +21,12 @@ import type { ClipUpdateParams } from "./ClipUpdateParams";
 import type { ControllerModeParams } from "./ControllerModeParams";
 import type { ControllerState } from "./ControllerState";
 import type { DaemonInfo } from "./DaemonInfo";
+import type { DeviceAddParams } from "./DeviceAddParams";
+import type { DeviceInfo } from "./DeviceInfo";
+import type { DeviceListResult } from "./DeviceListResult";
+import type { DeviceMoveParams } from "./DeviceMoveParams";
+import type { DeviceRefParams } from "./DeviceRefParams";
+import type { DeviceTypesResult } from "./DeviceTypesResult";
 import type { Empty } from "./Empty";
 import type { Graph } from "./Graph";
 import type { HelloParams } from "./HelloParams";
@@ -117,6 +123,11 @@ export interface Methods {
   "instrument.list": { params: Empty; result: InstrumentListResult };
   "instrument.add": { params: InstrumentAddParams; result: InstrumentInfo };
   "instrument.remove": { params: InstrumentRemoveParams; result: Graph };
+  "device.types": { params: Empty; result: DeviceTypesResult };
+  "device.list": { params: Empty; result: DeviceListResult };
+  "device.add": { params: DeviceAddParams; result: DeviceInfo };
+  "device.remove": { params: DeviceRefParams; result: Graph };
+  "device.move": { params: DeviceMoveParams; result: Graph };
   "channel.add": { params: ChannelAddParams; result: ChannelInfo };
   "channel.remove": { params: ChannelRemoveParams; result: Graph };
   "channel.rename": { params: ChannelRenameParams; result: ChannelInfo };
@@ -214,6 +225,11 @@ export const METHODS: MethodName[] = [
   "instrument.list",
   "instrument.add",
   "instrument.remove",
+  "device.types",
+  "device.list",
+  "device.add",
+  "device.remove",
+  "device.move",
   "channel.add",
   "channel.remove",
   "channel.rename",

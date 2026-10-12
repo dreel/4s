@@ -10,7 +10,7 @@ use ts_rs::TS;
 
 /// Current project format version. Bump and add a migration when the format
 /// changes incompatibly.
-pub const PROJECT_FORMAT_VERSION: u32 = 6;
+pub const PROJECT_FORMAT_VERSION: u32 = 7;
 /// Oldest version this build can load. Version 1 (the fixed 8-track kit)
 /// was dropped with RFC 0004, without a migration.
 pub const OLDEST_PROJECT_FORMAT_VERSION: u32 = 2;
@@ -26,6 +26,10 @@ pub struct ProjectFile {
     pub channels: Vec<ChannelInfo>,
     /// Source (`drums`, `drums.kick`) -> channel number.
     pub routes: BTreeMap<String, u32>,
+    /// Audio effects (RFC 0010), each chain in order (channel 0 is the
+    /// master). Their parameters are in `params` under their ids.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<ProjectDevice>,
     /// Parameter values by path. Unknown paths are ignored on load; missing
     /// paths take their defaults.
     pub params: BTreeMap<String, f64>,
@@ -48,6 +52,18 @@ pub struct ProjectInstrument {
     #[ts(rename = "type")]
     pub kind: InstrumentType,
     pub name: String,
+}
+
+/// An audio effect in a project file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ProjectDevice {
+    pub id: String,
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub kind: crate::device::DeviceType,
+    pub name: String,
+    /// Whose insert chain: a channel number, or 0 for the master.
+    pub channel: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -112,7 +128,13 @@ pub struct ProjectController {
 /// `MIGRATIONS[0]` upgrades `OLDEST_PROJECT_FORMAT_VERSION` to the next one,
 /// and so on.
 type Migration = fn(Value) -> Result<Value, String>;
-const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6];
+const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6, v6_to_v7];
+
+/// v7 (RFC 0010): audio effects (`devices`). A v6 project has none.
+fn v6_to_v7(mut v: Value) -> Result<Value, String> {
+    v["format_version"] = 7.into();
+    Ok(v)
+}
 
 /// v6 (RFC 0009): one transport that always plays the arrangement, and clip
 /// launching instead of pattern mode. `song.mode` and `sequencer.length`
@@ -263,7 +285,7 @@ mod tests {
     #[test]
     fn v2_fixture_loads() {
         let p = parse_project(V2_FIXTURE).unwrap();
-        assert_eq!(p.format_version, 6);
+        assert_eq!(p.format_version, 7);
         assert!(p.seats.is_empty());
         assert!(p.controller.follow);
         let drums = &p.tracks["drums"];

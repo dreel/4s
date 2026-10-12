@@ -21,12 +21,15 @@ mysong.4s/
 snapshot; loading applies it. One set of types covers the API and the file, and
 agents can generate or edit projects directly.
 
-It contains (format version 6; RFC 0004, RFC 0007, RFC 0008, RFC 0009):
+It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010):
 
 - The graph: `instruments` (`{id, type, name}`, in creation order),
   `channels` (`{n, name}`, in display order), and `routes`
   (`source -> channel number`, e.g. `"drums": 1`, `"drums.kick": 3`).
   Effects come later.
+- Audio effects (RFC 0010) under `devices`, each chain in order: `{id,
+  type, name, channel}` (channel 0 is the master). Their parameters are in
+  `params` under their ids. Absent when there are none.
 - Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,
   `"bass.cutoff": 0.3`).
 - Each instrument's track (RFC 0008, RFC 0009) under `tracks`: its clip
@@ -100,7 +103,8 @@ a track) before anything changes.
   `sequencer.length`: a project saved in pattern mode launches each
   track's selected clip (an instrument without a track gets one, its empty
   clip launched), so it plays as it did, and a clip without a length gets
-  `sequencer.length` (default 16 steps) in ticks.
+  `sequencer.length` (default 16 steps) in ticks. v6 -> v7 (RFC 0010) adds
+  `devices` (none in an older project).
 - Parameters are stored by path, so added params take their defaults from the
   parameter registry. Unknown paths are warned about (whether they are kept or
   dropped is decided when building).

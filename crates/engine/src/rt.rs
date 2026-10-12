@@ -1,14 +1,13 @@
 //! Real-time wrapper: the audio thread owns an `RtEngine` and talks to the
 //! control side only through lock-free SPSC ring buffers.
 
-use crate::engine::{Command, Engine, Feedback};
-use crate::instrument::Instrument;
+use crate::engine::{Command, Engine, Feedback, Returned};
 use rtrb::{Consumer, Producer, RingBuffer};
 
-/// Capacity of the ring that hands removed instruments back to the control
-/// side. The control side never has more than this many in flight (see
+/// Capacity of the ring that hands removed instruments and effects back to
+/// the control side. The control side never has more than this many in flight (see
 /// `Core`), so the audio thread's push always has room.
-pub const RETURN_CAPACITY: usize = 4 * fours_protocol::MAX_INSTRUMENTS;
+pub const RETURN_CAPACITY: usize = 4 * fours_protocol::MAX_INSTRUMENTS + 2 * fours_protocol::MAX_EFFECTS;
 
 /// Capacity of the command ring.
 pub const COMMAND_CAPACITY: usize = fours_protocol::MAX_CLIPS * fours_protocol::MAX_EVENTS
@@ -19,15 +18,15 @@ pub struct RtEngine {
     engine: Engine,
     commands: Consumer<Command>,
     feedback: Producer<Feedback>,
-    returns: Producer<Box<dyn Instrument>>,
+    returns: Producer<Returned>,
 }
 
 /// Control-side ends of the queues.
 pub struct EngineLink {
     pub commands: Producer<Command>,
     pub feedback: Consumer<Feedback>,
-    /// Removed instruments, to be dropped off the audio thread.
-    pub returns: Consumer<Box<dyn Instrument>>,
+    /// Removed instruments and effects, to be dropped off the audio thread.
+    pub returns: Consumer<Returned>,
 }
 
 impl RtEngine {

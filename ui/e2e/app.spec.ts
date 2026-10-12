@@ -1152,6 +1152,36 @@ test("step view: one component for both instruments; resolution; the Block's lau
   await expect(page.getByTestId("note-0")).toHaveValue("37");
 });
 
+test("devices: add effects to a strip and the master, their panel's knobs and bypass, reorder and remove", async () => {
+  const { page, rpc } = h;
+  const devices = async () => (await rpc("device.list", {})).devices.map((d) => `${d.id}@${d.channel}:${d.position}`);
+  await page.getByTestId("insert-add-1").selectOption("delay");
+  await expect(page.getByTestId("insert-delay")).toBeVisible();
+  // Adding opens its panel: a knob per parameter, from the registry.
+  await expect(page.getByTestId("device-panel-delay")).toBeVisible();
+  await expect(page.getByTestId("knob-delay.feedback")).toBeVisible();
+  await page.getByTestId("device-bypass-delay").click();
+  await expect.poll(async () => (await rpc("param.get", { path: "delay.bypass" })).value).toBe(1);
+  await expect(page.getByTestId("insert-delay")).toHaveAttribute("data-bypassed", "true");
+  // A filter after it, moved before it.
+  await page.getByTestId("insert-add-1").selectOption("filter");
+  await expect(page.getByTestId("device-panel-filter")).toBeVisible();
+  await page.getByTestId("device-earlier-filter").click();
+  await expect.poll(devices).toEqual(["filter@1:0", "delay@1:1"]);
+  // A reverb on the master; a daemon-side add shows up too.
+  await page.getByTestId("insert-add-0").selectOption("reverb");
+  await expect.poll(devices).toEqual(["reverb@0:0", "filter@1:0", "delay@1:1"]);
+  await rpc("device.add", { type: "delay", id: "echo", name: "Echo", channel: 0, position: null });
+  await expect(page.getByTestId("insert-echo")).toBeVisible();
+  // Remove from the panel, then undo it.
+  await page.getByTestId("insert-filter").click();
+  await page.getByTestId("device-remove-filter").click();
+  await expect(page.getByTestId("insert-filter")).toHaveCount(0);
+  await rpc("history.undo", {});
+  await expect(page.getByTestId("insert-filter")).toBeVisible();
+  await page.screenshot({ path: "test-results/devices.png", fullPage: true });
+});
+
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
   const { page, rpc } = h;
   // Pad row 1 (snare), column 3 -> snare step 2.

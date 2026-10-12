@@ -250,6 +250,9 @@ pub struct Graph {
     pub channels: Vec<ChannelInfo>,
     /// Source -> channel number. Unrouted sources are absent.
     pub routes: BTreeMap<String, u32>,
+    /// Audio effects (RFC 0010), by channel (the master, 0, first) and
+    /// their place in its insert chain.
+    pub devices: Vec<crate::device::DeviceInfo>,
 }
 
 // ---------------------------------------------------------------------------

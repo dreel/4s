@@ -199,6 +199,53 @@ pub struct InstrumentAddParams {
     pub no_channel: bool,
 }
 
+// ---- devices (RFC 0010) ------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct DeviceTypesResult {
+    /// Every device type: instruments, audio effects.
+    pub types: Vec<crate::device::DeviceTypeInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct DeviceListResult {
+    pub devices: Vec<crate::device::DeviceInfo>,
+}
+
+/// Add an audio effect to a channel's insert chain.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct DeviceAddParams {
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub kind: crate::device::DeviceType,
+    /// Default: the type's id (`delay`), numbered if taken.
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The channel whose chain gets it; 0 is the master.
+    pub channel: u32,
+    /// Its place in the chain from 0 (default: the end).
+    #[serde(default)]
+    pub position: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct DeviceRefParams {
+    pub id: String,
+}
+
+/// Move an effect to another place, in its chain or another channel's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct DeviceMoveParams {
+    pub id: String,
+    /// 0 is the master.
+    pub channel: u32,
+    /// Default: the end.
+    #[serde(default)]
+    pub position: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct InstrumentRemoveParams {
     pub id: String,
@@ -1111,6 +1158,17 @@ api! {
     InstrumentAdd = "instrument.add" (InstrumentAddParams) -> InstrumentInfo;
     /// Remove an instrument (and channels left empty, unless kept).
     InstrumentRemove = "instrument.remove" (InstrumentRemoveParams) -> Graph;
+    /// Every device type (instruments and audio effects) with its ports and
+    /// parameters (RFC 0010).
+    DeviceTypes = "device.types" (Empty) -> DeviceTypesResult;
+    /// Audio effects and where they sit.
+    DeviceList = "device.list" (Empty) -> DeviceListResult;
+    /// Add an audio effect to a channel's (or the master's) insert chain.
+    DeviceAdd = "device.add" (DeviceAddParams) -> crate::device::DeviceInfo;
+    /// Remove an audio effect.
+    DeviceRemove = "device.remove" (DeviceRefParams) -> Graph;
+    /// Move an audio effect within its chain or to another channel's.
+    DeviceMove = "device.move" (DeviceMoveParams) -> Graph;
     /// Add a mixer channel (lowest free number).
     ChannelAdd = "channel.add" (ChannelAddParams) -> ChannelInfo;
     /// Remove a mixer channel; sources routed to it are unrouted.

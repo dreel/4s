@@ -1,7 +1,8 @@
 # RFC 0010: Devices: effects, buses, modulators, a sampler, automation
 
-- Status: proposed (Sam asked to keep building and review the stack later;
-  the choices marked "default" below are reversible and open to review)
+- Status: accepted (phase 2 implemented; Sam asked to keep building and
+  review the stack later, so the choices marked "default" are reversible
+  and open to review; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-12
 - Discussion: the PR that introduces this RFC. Follows RFC 0004
@@ -263,3 +264,29 @@ instruments.
 - Should `instrument.add` grow into `device.add` for every kind? This RFC
   keeps both: instruments have routes and tracks, effects have
   placements.
+
+## Implementation notes (phase 2: the registry and insert chains)
+
+- `DeviceType` (`crates/protocol/src/device.rs`) has the effects; the
+  registry (`device.types`) lists instruments and effects with their
+  ports, parameters, knob pages, and (instruments) note layouts. Modulators
+  join `DeviceType` in phase 4.
+- `device.add { type, id?, name?, channel, position? }`, `device.remove`,
+  `device.move`, `device.list`; the graph's `devices` lists effects by
+  chain (the master, channel 0, first) and place. Ids share the
+  instruments' namespace. Removing a channel removes its inserts (undo
+  brings both back: `device:<id>` and `chain:<n>` undo keys).
+- Engine: `AudioEffect` (`crates/engine/src/effect.rs`), 64 effect slots,
+  a chain per channel and the master (8 inserts each), a shared dry
+  buffer; `bypass` and `mix` are applied by the engine around each
+  effect. The return ring carries `Returned::{Instrument, Effect}`.
+- Offline renders include effects (`RenderSpec.effects`, `chains`).
+- Project format v7 (`devices`), protocol 9.
+- CLI: `4s device types|list|add|rm|mv` (`--on <n|master>`, `--at`);
+  `4s mixer` shows each chain.
+- UI: each strip and the master list their inserts under the name, with
+  a "+ fx" select; a chip opens the device panel below the console (one
+  knob per parameter from the registry, bypass, earlier/later, remove).
+- Not yet: per-channel peaks in `4s render` (the CLI e2e checks a delay by
+  its onsets instead); `seat.focus` on an effect (knobs for effects).
+

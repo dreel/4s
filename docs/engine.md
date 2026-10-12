@@ -56,10 +56,11 @@ Per block of up to 256 frames (blocks also split at step boundaries):
    per side at center), **balance** for a stereo source (unity at center;
    moving to one side attenuates only the other). Both use the channel's
    `pan`.
-3. Each channel applies its fader (squared taper) and mute/solo, and is
-   metered (post fader, left and right peaks).
-4. Channels sum into the master, which applies its fader and a soft clipper
-   above 0.8.
+3. Each channel runs its **insert chain** of audio effects (RFC 0010; up to
+   `MAX_INSERTS` = 8, in order), then applies its fader (squared taper) and
+   mute/solo, and is metered (post fader, left and right peaks).
+4. Channels sum into the master, which runs its own insert chain, then
+   applies its fader and a soft clipper above 0.8.
 
 Gains and pans are smoothed (10 ms) to avoid clicks. Outputs that are not
 routed are silent, except an 808 voice's direct out: unrouted, the voice
@@ -69,6 +70,23 @@ and `mute` still apply; its `pan` is bypassed (the channel pans it).
 
 With default settings a voice plays at the same level as before RFC 0004:
 level 0.8 -> constant-power pan -> balance at unity -> fader at unity.
+
+## Audio effects
+
+Effects (`crates/engine/src/effect.rs`, RFC 0010) are built on the control
+side (`effect::make`, which allocates any buffers), sent in with
+`AddEffect` into one of `MAX_EFFECTS` = 64 slots, placed in chains with
+`SetChain`, and handed back to be dropped with `RemoveEffect`. Each renders
+its wet signal in place on the stereo bus; the engine keeps the dry copy
+and applies the two parameters every effect has first: `<id>.bypass` (a
+bypassed effect fades out and then does not run) and `<id>.mix` (dry/wet,
+smoothed).
+
+| Type | Parameters (after `bypass`, `mix`) | Default mix |
+|------|-------------------------------------|-------------|
+| `filter` | `mode` (0 low, 1 band, 2 high pass), `cutoff` (0..1, 20 Hz..20 kHz), `resonance` | 1.0 |
+| `delay` | `sync` (on), `division` (1/32, 1/16, 1/8t, 1/8, 1/8d (default), 1/4, 1/4d, 1/2, 1 bar), `time` (free: 1 ms..2 s), `feedback` (0..0.95), `pingpong`, `damping` (a low-pass in the feedback path) | 0.35 |
+| `reverb` | `size`, `damping`, `width` (Freeverb's eight combs and four all-passes per side) | 0.3 |
 
 ## Instruments
 

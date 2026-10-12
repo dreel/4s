@@ -13,7 +13,7 @@ import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
 import { RpcClient, type ConnectionState } from "./rpc";
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 export type AppState = {
   connection: ConnectionState;
@@ -28,6 +28,8 @@ export type AppState = {
   choosingSeat: boolean;
   /** Our undo/redo stacks: top labels and depths. */
   history: History;
+  /** The device whose panel is open (view state only). */
+  device: string | null;
 };
 
 export type History = {
@@ -90,6 +92,7 @@ export const app = new Store<AppState>({
   clientId: null,
   choosingSeat: false,
   history: NO_HISTORY,
+  device: null,
 });
 export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {} });
 

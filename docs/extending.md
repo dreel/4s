@@ -242,6 +242,28 @@ Validate:
 
 ---
 
+## 7. Add an audio effect type
+
+Effects are devices (RFC 0010) that sit in channel and master insert
+chains. A new one (a compressor, a chorus, a distortion) is an Extension.
+
+1. **Protocol.** Add a variant to `DeviceType` in
+   `crates/protocol/src/device.rs` (`id`, `label`, `parse`, `ALL`).
+2. **Engine.** Implement `AudioEffect` in `crates/engine/src/effect.rs`
+   (or its own file): render the wet signal in place, allocate buffers in
+   `new` only, keep peaks at or below 1.0. Add its parameters to `params`
+   (after the common `bypass` and `mix`, with a sensible default mix) and
+   it to `make`.
+3. **Daemon, CLI, UI.** Nothing: `device.add`, `4s device add <type>`, the
+   console's "+ fx" select, and the generic device panel read the
+   registry. Extend `DeviceType::parse` aliases if helpful.
+
+Validate: an engine test that it stays in range and decays (the shared
+`effects_stay_in_range_and_decay` covers every type), `no_alloc` with it
+in a chain, and a CLI e2e render showing its effect (onsets, levels).
+
+---
+
 ## Not an extension: big changes
 
 These change the system's shape. Outside the build phase they need an RFC
@@ -249,8 +271,8 @@ first ([docs/rfcs/](rfcs/README.md)); during the build phase
 ([RFC 0005](rfcs/0005-build-phase.md)) an RFC is optional, but a short one
 is a good place to record the design:
 
-- Audio routing beyond instrument outputs to channels: effects, inserts,
-  sends and returns, buses, sidechains.
+- Audio routing beyond what RFC 0010 defines (insert chains, sends and
+  return buses): sidechains, a free patching graph.
 - Changes to the song model (RFC 0008, RFC 0009: clip pools, the
   arrangement, clip launching) beyond their own phases.
 - Protocol or sync model changes, the daemon lifecycle, the multiplayer

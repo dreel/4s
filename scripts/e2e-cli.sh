@@ -867,6 +867,29 @@ s --user other batch "$(cat "$TMP/fill.json")" >/dev/null
 check "undo that needs a clip when the table is full says so" "at most 256 clips" s undo
 check "...and the daemon is still up" "transport:" s status
 s --user other undo >/dev/null
+# --- Devices (RFC 0010): audio effects in insert chains ---
+s project new >/dev/null
+s pattern set kick "x---------------" >/dev/null
+check "a lone kick is one onset" "onsets (s): 0.000" bash -c "$BIN/4s render | tail -1"
+check "device types list instruments and effects" "delay   audio_effect" s device types
+check "add a delay to channel 1" "delay      delay   Delay        on ch 1 at 1" s device add delay --on 1
+check "its parameters are under its id" "delay.feedback" s params delay
+check "a synced delay echoes every dotted eighth" "onsets (s): 0.000 0.373 0.749 1.125 1.499" bash -c "$BIN/4s render | tail -1"
+check "bypass passes the kick through alone" "onsets (s): 0.000" bash -c "$BIN/4s set delay.bypass on >/dev/null && $BIN/4s render | tail -1"
+s set delay.bypass off >/dev/null
+check "a filter goes first in the chain" "<- drums  [filter, delay]" bash -c "$BIN/4s device add filter --on 1 --at 1 >/dev/null && $BIN/4s mixer"
+check "a reverb on the master" "master        vol  80%  [reverb]" bash -c "$BIN/4s device add reverb --on master >/dev/null && $BIN/4s mixer"
+check "moving one is one undo step" "undid: device.move filter" bash -c "$BIN/4s device mv filter --on master >/dev/null && $BIN/4s undo"
+check "ids are shared with instruments" "already an instrument or device id" s device add delay --on 1 --id drums
+check "unknown types are refused" "unknown device type" s device add flanger --on 1
+check "a chain holds at most 8" "at most 8 inserts" bash -c "for i in 1 2 3 4 5 6; do $BIN/4s device add filter --on 1 >/dev/null; done; $BIN/4s device add filter --on 1"
+for i in 2 3 4 5 6 7; do s device rm "filter$i" >/dev/null; done
+check "effects save with the project and load back" "delay      delay   Delay        on ch 1 at 2" bash -c "$BIN/4s set delay.feedback 0.6 >/dev/null && $BIN/4s project save fx >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load fx >/dev/null && $BIN/4s device list"
+check "...with their parameters" "delay.feedback = 0.6" s get delay.feedback
+check "removing a channel removes its inserts" "reverb     reverb" bash -c "$BIN/4s channel rm 1 >/dev/null; $BIN/4s device list"
+check "...and undo brings them back" "delay      delay   Delay        on ch 1 at 2" bash -c "$BIN/4s undo >/dev/null && $BIN/4s device list"
+check "a session with effects replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/fx.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/fx.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
 check "daemon logs" "listening on ws://" s daemon logs
