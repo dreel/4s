@@ -1250,7 +1250,7 @@ impl Core {
                 self.emit("engine", Event::Playhead { step: pos as u32 / TICKS_PER_STEP, tick: pos as u32, time, clips });
                 self.refresh_controller("engine", false);
             }
-            Feedback::Launched { slot, clip, tick, .. } => self.launched(slot, clip, tick),
+            Feedback::Launched { slot, clip, tick, pos, .. } => self.launched(slot, clip, tick, pos),
             Feedback::Trigger { slot, voice, note, velocity, time, .. } => {
                 if let Some(inst) = self.instruments.iter().find(|i| i.slot == slot) {
                     let instrument = inst.id.clone();

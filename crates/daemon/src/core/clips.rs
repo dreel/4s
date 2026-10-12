@@ -2,7 +2,7 @@
 //! track holds a pool of clips (timed note events), one of them selected:
 //! what the step editors (`pattern.*`) and the Block grid edit, and the
 //! default of `clip.*` requests. It does not change what plays: a track
-//! plays its arrangement, or the clip it launched (`launch.rs`). Every clip
+//! plays its arrangement, or the clip it launched (`song.rs`). Every clip
 //! edit, undo included, goes through `edit_clip`, which sends the engine
 //! only the difference and emits `clip_changed` plus, for the selected
 //! clip, the step-view events the editors already understand.
@@ -562,6 +562,9 @@ impl Core {
         self.ensure_room(t.placements.len() + 2)?;
         if t.launched == Some(n) || t.playing.is_some_and(|p| p.0 == n) {
             self.launch(id, None, true)?;
+            // It plays the arrangement from the next tick: a take into it
+            // must not target the deleted clip meanwhile.
+            self.tracks.get_mut(id).expect("checked").playing = None;
         }
         let t = self.track(id);
         if t.selected == n {
@@ -704,9 +707,6 @@ impl Core {
                 self.edit_clip(&id, n, list, None, origin)
             })),
             Request::ClipLength(p) => r(self.clip_ref(p.instrument.as_deref(), p.clip, client).and_then(|(id, n)| {
-                if p.length == 0 || p.length > MAX_CLIP_TICKS {
-                    return Err(RpcError::invalid(format!("clip length must be 1..{MAX_CLIP_TICKS} ticks")));
-                }
                 let list = events(self, &id, n);
                 self.edit_clip(&id, n, list, Some(p.length), origin)
             })),

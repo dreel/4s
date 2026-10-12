@@ -4,9 +4,10 @@
 //! event on the step's first tick. These conversions live here so the
 //! daemon, the offline renderer, the CLI, and migrations agree.
 //!
-//! Tracks (RFC 0008 phase B): each instrument has a pool of clips, one of
-//! them selected (what pattern mode plays and the step editors edit), and an
-//! arrangement of placements on the song timeline.
+//! Tracks (RFC 0008 phase B, RFC 0009): each instrument has a pool of
+//! clips, one of them selected (what the step editors edit), an arrangement
+//! of placements on the song timeline, and maybe a launched clip it loops
+//! instead.
 
 use crate::types::*;
 use schemars::JsonSchema;

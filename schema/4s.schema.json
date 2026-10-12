@@ -7002,7 +7002,7 @@
         "type": "object"
       },
       "TrackPattern": {
-        "description": "Steps for one track. Each entry is 0 (off), 1 (on), or 2 (accent).\nAlways `MAX_STEPS` long; `sequencer.length` sets how many are played.",
+        "description": "Steps for one track. Each entry is 0 (off), 1 (on), or 2 (accent).\nAlways `MAX_STEPS` long; the clip's length sets how many are played.",
         "properties": {
           "steps": {
             "items": {

@@ -286,7 +286,9 @@ Where these differ from the sections above, these win:
   makes an undo step. Changes other requests make to it are undone like
   any key: undoing the removal of an instrument, or the deletion of a
   launched clip, launches it again. (Section 2 said such an undo would not
-  relaunch; with it, undoing a removal left a silent instrument.)
+  relaunch; with it, undoing a removal left a silent instrument.) Inside a
+  `batch` the doc is built for the whole batch, so a launch there is part
+  of the batch's undo step.
 - **Parameters and state.** `transport.launch_quantize` (the path is under
   `transport.`, a reserved id, so no instrument can shadow it) is an
   ordinary parameter: saved and undone. Removing an instrument resets its

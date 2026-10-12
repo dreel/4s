@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use ts_rs::TS;
 
-/// Maximum number of steps a pattern can hold. The active length is the
-/// `sequencer.length` parameter.
+/// Maximum number of steps a pattern (and a clip, in 16ths) can hold.
 pub const MAX_STEPS: usize = 64;
 
 /// Number of drum tracks in a `tr808` (one per voice, one per Livid Block
@@ -291,7 +290,7 @@ pub struct ParamValue {
 // ---------------------------------------------------------------------------
 
 /// Steps for one track. Each entry is 0 (off), 1 (on), or 2 (accent).
-/// Always `MAX_STEPS` long; `sequencer.length` sets how many are played.
+/// Always `MAX_STEPS` long; the clip's length sets how many are played.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct TrackPattern {
     pub voice: Voice,

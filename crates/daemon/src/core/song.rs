@@ -45,9 +45,9 @@ impl Core {
     }
 
     /// The engine switched a slot to a launched clip (or back) at `tick`
-    /// from play. A take into it writes what was played into the old
-    /// target and goes on into the new one.
-    pub(super) fn launched(&mut self, slot: u8, clip: Option<u16>, tick: u64) {
+    /// from play, song position `pos`. A take into it writes what was
+    /// played into the old target and goes on into the new one.
+    pub(super) fn launched(&mut self, slot: u8, clip: Option<u16>, tick: u64, pos: u64) {
         let Some(id) = self.instruments.iter().find(|i| i.slot == slot).map(|i| i.id.clone()) else { return };
         let t = self.track(&id);
         let clip = clip.and_then(|e| t.clips.iter().find(|(_, c)| c.engine == e).map(|(n, _)| *n));
@@ -55,7 +55,7 @@ impl Core {
             return;
         }
         let recording = self.playing && self.starting == 0 && self.take.as_ref().is_some_and(|t| t.slot == slot);
-        let pos = self.song_pos.map(|p| p as f64 + tick as f64 - self.play_tick as f64).unwrap_or(self.locate as f64);
+        let pos = pos as f64;
         if recording {
             self.write_take(tick as f64, pos, true);
         }
@@ -206,18 +206,19 @@ impl Core {
             })()
             .and_then(ok),
             Request::SongBack(p) => (|| {
-                let ids: Vec<String> = match p.instrument.as_deref() {
-                    Some(id) => vec![self.find_instrument(id)?.id.clone()],
-                    None => self
-                        .instruments
-                        .iter()
-                        .filter(|i| {
-                            let t = self.track(&i.id);
-                            t.launched.is_some() || t.playing.is_some()
-                        })
-                        .map(|i| i.id.clone())
-                        .collect(),
-                };
+                // Only tracks with a launch (a switch would end the notes of
+                // one already playing its arrangement).
+                let named = p.instrument.as_deref().map(|id| self.find_instrument(id).map(|i| i.id.clone())).transpose()?;
+                let ids: Vec<String> = self
+                    .instruments
+                    .iter()
+                    .filter(|i| named.as_ref().is_none_or(|n| *n == i.id))
+                    .filter(|i| {
+                        let t = self.track(&i.id);
+                        t.launched.is_some() || t.playing.is_some()
+                    })
+                    .map(|i| i.id.clone())
+                    .collect();
                 self.ensure_room(ids.len())?;
                 for id in &ids {
                     self.launch(id, None, p.now.unwrap_or(false))?;
