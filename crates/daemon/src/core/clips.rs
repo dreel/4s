@@ -1,9 +1,11 @@
-//! Clips (RFC 0007 phase 2, RFC 0008 phase B): each instrument's track holds
-//! a pool of clips (timed note events), one of them selected: what pattern
-//! mode plays and what the step editors (`pattern.*`) and the Block grid
-//! edit. Every clip edit, undo included, goes through `edit_clip`, which
-//! sends the engine only the difference and emits `clip_changed` plus, for
-//! the selected clip, the step-view events the editors already understand.
+//! Clips (RFC 0007 phase 2, RFC 0008 phase B, RFC 0009): each instrument's
+//! track holds a pool of clips (timed note events), one of them selected:
+//! what the step editors (`pattern.*`) and the Block grid edit, and the
+//! default of `clip.*` requests. It does not change what plays: a track
+//! plays its arrangement, or the clip it launched (`launch.rs`). Every clip
+//! edit, undo included, goes through `edit_clip`, which sends the engine
+//! only the difference and emits `clip_changed` plus, for the selected
+//! clip, the step-view events the editors already understand.
 //!
 //! Clips live in the engine's shared clip table; `engine` is a clip's index
 //! there, allocated here (`clip_used`).
@@ -12,8 +14,8 @@ use super::*;
 
 pub(super) struct ClipState {
     pub name: String,
-    /// Ticks; `None` follows `sequencer.length`.
-    pub length: Option<u32>,
+    /// Ticks: where it loops.
+    pub length: u32,
     /// Sorted and unique by (tick, note).
     pub events: Vec<ClipEvent>,
     /// Index in the engine's clip table.
@@ -26,6 +28,12 @@ pub(super) struct TrackState {
     pub selected: u32,
     /// Sorted by start, not overlapping.
     pub placements: Vec<Placement>,
+    /// The clip it loops instead of its arrangement (RFC 0009): what was
+    /// asked for, which lands at the next quantize boundary while playing.
+    pub launched: Option<u32>,
+    /// The launched clip the engine is playing and the tick from play it
+    /// started at (`Feedback::Launched`); while stopped, `launched` from 0.
+    pub playing: Option<(u32, u64)>,
 }
 
 impl TrackState {
@@ -55,9 +63,9 @@ fn step_events(steps: &[NoteStep]) -> Vec<ClipEvent> {
 }
 
 /// A clip as a project file stores it: as a step pattern when the pattern
-/// says exactly the same thing (and the clip follows `sequencer.length`),
-/// else as events; the name when it is not the id.
-pub(super) fn project_entry(kind: InstrumentType, n: u32, c: &ClipState, length: usize) -> ProjectClip {
+/// says exactly the same thing (and the clip is whole steps long), else as
+/// events; the name when it is not the id.
+pub(super) fn project_entry(kind: InstrumentType, n: u32, c: &ClipState) -> ProjectClip {
     let mut out = ProjectClip {
         name: (c.name != n.to_string()).then(|| c.name.clone()),
         length: c.length,
@@ -66,7 +74,8 @@ pub(super) fn project_entry(kind: InstrumentType, n: u32, c: &ClipState, length:
     if c.events.is_empty() {
         return out;
     }
-    if c.length.is_none() {
+    let length = (c.length / TICKS_PER_STEP) as usize;
+    if c.length % TICKS_PER_STEP == 0 {
         match kind {
             InstrumentType::Tr808 => {
                 let grid = drum_grid(&c.events);
@@ -97,8 +106,8 @@ pub(super) fn project_entry(kind: InstrumentType, n: u32, c: &ClipState, length:
 }
 
 /// The length and events a project file's clip describes.
-pub(super) fn from_project(kind: InstrumentType, c: &ProjectClip) -> Result<(Option<u32>, Vec<ClipEvent>), String> {
-    if c.length.is_some_and(|l| l == 0 || l > MAX_CLIP_TICKS) {
+pub(super) fn from_project(kind: InstrumentType, c: &ProjectClip) -> Result<(u32, Vec<ClipEvent>), String> {
+    if c.length == 0 || c.length > MAX_CLIP_TICKS {
         return Err(format!("clip length must be 1..{MAX_CLIP_TICKS} ticks"));
     }
     let events = match (kind, &c.pattern, &c.events) {
@@ -123,8 +132,9 @@ pub(super) fn from_project(kind: InstrumentType, c: &ProjectClip) -> Result<(Opt
 pub(super) struct LoadedTrack {
     pub selected: u32,
     /// (id, name, length, events).
-    pub clips: Vec<(u32, String, Option<u32>, Vec<ClipEvent>)>,
+    pub clips: Vec<(u32, String, u32, Vec<ClipEvent>)>,
     pub placements: Vec<Placement>,
+    pub launched: Option<u32>,
 }
 
 /// Parse and check a project file's track: at least one clip, the
@@ -135,6 +145,9 @@ pub(super) fn load_track(kind: InstrumentType, t: &ProjectTrack) -> Result<Loade
     }
     if !t.clips.contains_key(&t.selected) {
         return Err(format!("the selected clip {} is not in the pool", t.selected));
+    }
+    if let Some(n) = t.launched.filter(|n| !t.clips.contains_key(n)) {
+        return Err(format!("the launched clip {n} is not in the pool"));
     }
     let mut clips = Vec::new();
     for (n, c) in &t.clips {
@@ -164,7 +177,7 @@ pub(super) fn load_track(kind: InstrumentType, t: &ProjectTrack) -> Result<Loade
             return Err(format!("placements at ticks {} and {} overlap", p.start, placements[i + 1].start));
         }
     }
-    Ok(LoadedTrack { selected: t.selected, clips, placements })
+    Ok(LoadedTrack { selected: t.selected, clips, placements, launched: t.launched })
 }
 
 /// Check a clip name.
@@ -180,7 +193,7 @@ fn check_clip_name(name: &str) -> Result<String, RpcError> {
 #[derive(Default)]
 pub(super) struct ClipSets {
     /// `clip:<id>.<n>`: name and length, or `None` to delete it.
-    pub clips: BTreeMap<(String, u32), Option<(String, Option<u32>)>>,
+    pub clips: BTreeMap<(String, u32), Option<(String, u32)>>,
     /// `event:<id>.<n>.<tick>.<note>`: (tick, note, (len, velocity) or
     /// `None` to remove).
     pub events: BTreeMap<(String, u32), Vec<(u32, u8, Option<(u32, u8)>)>>,
@@ -188,6 +201,8 @@ pub(super) struct ClipSets {
     pub selected: BTreeMap<String, u32>,
     /// `place:<id>.<start>`: (start, placement or `None` to remove).
     pub places: BTreeMap<String, Vec<(u32, Option<Placement>)>>,
+    /// `launched:<id>`: the launched clip, or `None` for the arrangement.
+    pub launched: BTreeMap<String, Option<u32>>,
 }
 
 impl ClipSets {
@@ -201,7 +216,7 @@ impl ClipSets {
                     Value::Null => None,
                     v => Some((
                         v.get("name").and_then(Value::as_str)?.to_string(),
-                        v.get("length").and_then(Value::as_u64).map(|l| l as u32),
+                        v.get("length").and_then(Value::as_u64).map_or(DEFAULT_CLIP_LENGTH, |l| l as u32),
                     )),
                 };
                 self.clips.insert((id.to_string(), n.parse().ok()?), value);
@@ -228,6 +243,9 @@ impl ClipSets {
                     self.selected.insert(rest.to_string(), n as u32);
                 }
             }
+            "launched" => {
+                self.launched.insert(rest.to_string(), v.as_u64().map(|n| n as u32));
+            }
             "place" => {
                 let (id, start) = rest.split_once('.')?;
                 let start: u32 = start.parse().ok()?;
@@ -253,6 +271,7 @@ impl ClipSets {
         self.events.retain(|(id, _), _| !ids.contains(id));
         self.selected.retain(|id, _| !ids.contains(id));
         self.places.retain(|id, _| !ids.contains(id));
+        self.launched.retain(|id, _| !ids.contains(id));
     }
 
     /// Engine commands they may take, at most.
@@ -261,6 +280,7 @@ impl ClipSets {
             + self.events.values().map(Vec::len).sum::<usize>()
             + self.selected.len()
             + self.places.values().map(Vec::len).sum::<usize>() * 2
+            + self.launched.len()
     }
 }
 
@@ -294,6 +314,8 @@ impl Core {
             selected: t.selected,
             clips: t.clips.iter().map(|(n, c)| ClipHeader { id: *n, name: c.name.clone(), length: c.length }).collect(),
             arrangement: t.placements.clone(),
+            launched: t.launched,
+            pending: self.playing && t.launched != t.playing.map(|p| p.0),
         }
     }
 
@@ -317,9 +339,15 @@ impl Core {
         self.tracks.get(id).map(|t| note_steps(&t.selected().events)).unwrap_or([NoteStep::default(); MAX_STEPS])
     }
 
-    /// A clip's loop length in ticks (its own, else `sequencer.length`).
+    /// A clip's loop length in ticks.
     pub(super) fn clip_len(&self, id: &str, n: u32) -> u32 {
-        self.track(id).clips.get(&n).and_then(|c| c.length).unwrap_or(self.length() * TICKS_PER_STEP)
+        self.track(id).clips.get(&n).map_or(DEFAULT_CLIP_LENGTH, |c| c.length)
+    }
+
+    /// The selected clip's length in whole steps (rounded up): what the step
+    /// views show.
+    pub(super) fn steps_len(&self, id: &str) -> u32 {
+        self.tracks.get(id).map_or(16, |t| t.selected().length.div_ceil(TICKS_PER_STEP).min(MAX_STEPS as u32))
     }
 
     // ---- the clip table ------------------------------------------------------
@@ -331,12 +359,13 @@ impl Core {
 
     /// Make a clip in a pool, with its contents, in a free slot of the
     /// engine's clip table. The caller checks there is one and queue room.
-    pub(super) fn add_clip_unchecked(&mut self, id: &str, n: u32, name: String, length: Option<u32>, events: Vec<ClipEvent>) {
+    pub(super) fn add_clip_unchecked(&mut self, id: &str, n: u32, name: String, length: u32, events: Vec<ClipEvent>) {
         let engine = self.clip_used.iter().position(|u| !u).expect("checked by the caller") as u16;
         self.clip_used[engine as usize] = true;
-        // A reused table entry may hold an old clip.
+        // A reused table entry may hold an old clip (cleared to the default
+        // length).
         self.send(Command::ClearClip { clip: engine });
-        if length.is_some() {
+        if length != DEFAULT_CLIP_LENGTH {
             self.send(Command::SetClipLength { clip: engine, length });
         }
         for e in &events {
@@ -346,13 +375,12 @@ impl Core {
         t.clips.insert(n, ClipState { name, length, events, engine });
     }
 
-    /// A new track with one empty clip, selected (on an instrument just
-    /// added to the engine).
-    pub(super) fn add_track_unchecked(&mut self, id: &str, kind: InstrumentType, slot: u8) {
-        self.tracks.insert(id.to_string(), TrackState { kind, clips: BTreeMap::new(), selected: 1, placements: Vec::new() });
-        self.add_clip_unchecked(id, 1, "1".into(), None, Vec::new());
-        let engine = self.track(id).clips[&1].engine;
-        self.send(Command::SelectClip { slot, clip: Some(engine) });
+    /// A new track with one empty one-bar clip, selected (on an instrument
+    /// just added to the engine), following its arrangement.
+    pub(super) fn add_track_unchecked(&mut self, id: &str, kind: InstrumentType) {
+        let t = TrackState { kind, clips: BTreeMap::new(), selected: 1, placements: Vec::new(), launched: None, playing: None };
+        self.tracks.insert(id.to_string(), t);
+        self.add_clip_unchecked(id, 1, "1".into(), DEFAULT_CLIP_LENGTH, Vec::new());
     }
 
     /// Replace a new instrument's track with a loaded one. The caller checked
@@ -360,12 +388,15 @@ impl Core {
     pub(super) fn load_track(&mut self, id: &str, t: LoadedTrack) -> Result<(), RpcError> {
         let kind = self.track(id).kind;
         self.remove_track(id);
-        self.tracks.insert(id.to_string(), TrackState { kind, clips: BTreeMap::new(), selected: t.selected, placements: Vec::new() });
+        let track =
+            TrackState { kind, clips: BTreeMap::new(), selected: t.selected, placements: Vec::new(), launched: None, playing: None };
+        self.tracks.insert(id.to_string(), track);
         for (n, name, length, events) in t.clips {
             self.add_clip_unchecked(id, n, name, length, events);
         }
-        let (slot, engine) = (self.slot(id)?, self.track(id).selected().engine);
-        self.send(Command::SelectClip { slot, clip: Some(engine) });
+        if let Some(n) = t.launched {
+            self.launch(id, Some(n), true)?;
+        }
         self.set_arrangement(id, t.placements)
     }
 
@@ -389,13 +420,13 @@ impl Core {
         id: &str,
         n: u32,
         events: Vec<ClipEvent>,
-        length: Option<Option<u32>>,
+        length: Option<u32>,
         origin: &str,
     ) -> Result<Clip, RpcError> {
         self.slot(id)?;
         let n = self.clip_id(id, Some(n))?;
         let events = normalize_events(&events).map_err(RpcError::invalid)?;
-        if let Some(Some(l)) = length
+        if let Some(l) = length
             && (l == 0 || l > MAX_CLIP_TICKS)
         {
             return Err(RpcError::invalid(format!("clip length must be 1..{MAX_CLIP_TICKS} ticks")));
@@ -467,14 +498,11 @@ impl Core {
         }
     }
 
-    /// Select the clip pattern mode plays and the step editors edit.
+    /// Select the clip the step editors and the Block edit (not what plays).
     pub(super) fn select_clip(&mut self, id: &str, n: u32, origin: &str) -> Result<TrackInfo, RpcError> {
         let n = self.clip_id(id, Some(n))?;
         if self.track(id).selected != n {
-            self.ensure_room(1)?;
             let (old_grid, old_notes) = (self.drums(id), self.note_view(id));
-            let (slot, engine) = (self.slot(id)?, self.track(id).clips[&n].engine);
-            self.send(Command::SelectClip { slot, clip: Some(engine) });
             self.tracks.get_mut(id).expect("checked").selected = n;
             self.emit_step_views(id, &old_grid, &old_notes, origin);
             self.track_changed(id, origin);
@@ -490,7 +518,7 @@ impl Core {
         id: &str,
         n: Option<u32>,
         name: Option<String>,
-        length: Option<u32>,
+        length: u32,
         events: Vec<ClipEvent>,
         select: bool,
         origin: &str,
@@ -498,7 +526,7 @@ impl Core {
         if self.free_clips() == 0 {
             return Err(RpcError::failed(format!("at most {MAX_CLIPS} clips in a project")));
         }
-        if length.is_some_and(|l| l == 0 || l > MAX_CLIP_TICKS) {
+        if length == 0 || length > MAX_CLIP_TICKS {
             return Err(RpcError::invalid(format!("clip length must be 1..{MAX_CLIP_TICKS} ticks")));
         }
         let events = normalize_events(&events).map_err(RpcError::invalid)?;
@@ -522,7 +550,8 @@ impl Core {
     }
 
     /// Delete a clip and its placements. A track keeps at least one clip;
-    /// deleting the selected one selects the lowest other.
+    /// deleting the selected one selects the lowest other, and deleting the
+    /// launched one sends the track back to its arrangement at once.
     pub(super) fn delete_clip(&mut self, id: &str, n: u32, origin: &str) -> Result<TrackInfo, RpcError> {
         let n = self.clip_id(id, Some(n))?;
         let t = self.track(id);
@@ -531,6 +560,10 @@ impl Core {
         }
         let placements: Vec<Placement> = t.placements.iter().filter(|p| p.clip != n).copied().collect();
         self.ensure_room(t.placements.len() + 2)?;
+        if t.launched == Some(n) || t.playing.is_some_and(|p| p.0 == n) {
+            self.launch(id, None, true)?;
+        }
+        let t = self.track(id);
         if t.selected == n {
             let other = *t.clips.keys().find(|k| **k != n).expect("more than one");
             self.select_clip(id, other, origin)?;
@@ -598,7 +631,7 @@ impl Core {
     }
 
     pub(super) fn notes_result(&self, id: &str) -> NotesResult {
-        NotesResult { instrument: id.to_string(), length: self.length(), steps: self.note_view(id).to_vec() }
+        NotesResult { instrument: id.to_string(), length: self.steps_len(id), steps: self.note_view(id).to_vec() }
     }
 
     /// Note steps: only steps whose view changes are rewritten (their
@@ -671,6 +704,9 @@ impl Core {
                 self.edit_clip(&id, n, list, None, origin)
             })),
             Request::ClipLength(p) => r(self.clip_ref(p.instrument.as_deref(), p.clip, client).and_then(|(id, n)| {
+                if p.length == 0 || p.length > MAX_CLIP_TICKS {
+                    return Err(RpcError::invalid(format!("clip length must be 1..{MAX_CLIP_TICKS} ticks")));
+                }
                 let list = events(self, &id, n);
                 self.edit_clip(&id, n, list, Some(p.length), origin)
             })),
@@ -696,9 +732,10 @@ impl Core {
                     .collect();
                 self.edit_clip(&id, n, list, None, origin)
             })),
-            Request::ClipNew(p) => r(self
-                .clip_target(p.instrument.as_deref(), client)
-                .and_then(|id| self.new_clip(&id, None, p.name, p.length, Vec::new(), p.select.unwrap_or(true), origin))),
+            Request::ClipNew(p) => r(self.clip_target(p.instrument.as_deref(), client).and_then(|id| {
+                let length = p.length.unwrap_or(DEFAULT_CLIP_LENGTH);
+                self.new_clip(&id, None, p.name, length, Vec::new(), p.select.unwrap_or(true), origin)
+            })),
             Request::ClipDuplicate(p) => r(self.clip_ref(p.instrument.as_deref(), p.clip, client).and_then(|(id, n)| {
                 let c = &self.track(&id).clips[&n];
                 let (name, length, list) = (format!("{} copy", c.name), c.length, c.events.clone());
@@ -721,6 +758,14 @@ impl Core {
                 .clip_ref(p.instrument.as_deref(), p.clip, client)
                 .and_then(|(id, n)| self.select_clip(&id, n, origin))
                 .and_then(ok),
+            Request::ClipLaunch(p) => self
+                .clip_ref(p.instrument.as_deref(), p.clip, client)
+                .and_then(|(id, n)| {
+                    self.launch(&id, Some(n), p.now.unwrap_or(false))?;
+                    self.launch_changed(&id, origin);
+                    Ok(self.track_info(&id))
+                })
+                .and_then(ok),
             other => return Err(other),
         })
     }
@@ -730,8 +775,10 @@ impl Core {
     /// Tracks as undo keys: `clip:<id>.<n>` -> `{name, length}` for each
     /// clip in a pool, one key per event (`event:<id>.<n>.<tick>.<note>` ->
     /// `{len, velocity}`), so two people editing different notes never
-    /// conflict, `selected:<id>`, and `place:<id>.<start>` -> `{clip,
-    /// length, offset}` per placement.
+    /// conflict, `selected:<id>`, `place:<id>.<start>` -> `{clip, length,
+    /// offset}` per placement, and `launched:<id>` -> the launched clip.
+    /// Launching does not make an undo step (`changes_doc`), but undoing a
+    /// delete or a removal brings a launch back with its clip.
     pub(super) fn clip_doc(&self, d: &mut Doc) {
         for (id, t) in &self.tracks {
             for (n, c) in &t.clips {
@@ -741,6 +788,9 @@ impl Core {
                 }
             }
             d.insert(format!("selected:{id}"), json!(t.selected));
+            if let Some(n) = t.launched {
+                d.insert(format!("launched:{id}"), json!(n));
+            }
             for p in &t.placements {
                 d.insert(format!("place:{id}.{}", p.start), json!({ "clip": p.clip, "length": p.length, "offset": p.offset }));
             }
@@ -819,6 +869,14 @@ impl Core {
             placements.sort_by_key(|p| p.start);
             if self.set_arrangement(id, placements).is_err() {
                 skipped.push(format!("place:{id}"));
+            } else {
+                self.track_changed(id, origin);
+            }
+        }
+        for (id, n) in &sets.launched {
+            let ok = self.tracks.get(id).is_some_and(|t| n.is_none_or(|n| t.clips.contains_key(&n)));
+            if !ok || self.launch(id, *n, false).is_err() {
+                skipped.push(format!("launched:{id}"));
             } else {
                 self.track_changed(id, origin);
             }

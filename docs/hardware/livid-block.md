@@ -44,8 +44,9 @@ unplug.
   dark and pads do nothing; the knobs still work.
 - Rows 1-8 = the focus's tracks (kick, snare, clap, closed hat, open hat,
   low tom, high tom, cowbell). Columns = 8 steps of the current page.
-- Pressing a pad toggles that step. Steps past `sequencer.length` are dark and
-  ignored.
+- Pressing a pad toggles that step of the focus's selected clip. Steps past
+  the clip's length are dark and ignored. The playhead shows while that
+  clip is playing (launched, or under the song position; RFC 0009).
 - LEDs: lit = step on. The playhead column is inverted (lit steps go dark,
   dark steps light) so it is visible either way.
 - Pages: page 1 = steps 1-8, page 2 = steps 9-16, and so on. With `follow` on

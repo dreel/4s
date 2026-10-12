@@ -370,8 +370,16 @@ test("clips: a note off the step grid shows as a note in the editor, and steps s
   await expect(page.getByTestId("clip-note-drums")).toHaveCount(0);
   await rpc("clip.add", { instrument: "drums", clip: null, events: [{ tick: 36, len: 6, note: 38, velocity: 100 }] });
   await expect(page.getByTestId("clip-note-drums")).toHaveText("1 note off the step grid (not shown here)");
+  // The step editor shows the clip's length (RFC 0009: every clip has one).
   await rpc("clip.length", { instrument: "drums", clip: null, length: 72 });
-  await expect(page.getByTestId("clip-note-drums")).toContainText("loops every 3 steps");
+  await expect(page.getByTestId("step-kick-2")).toBeVisible();
+  await expect(page.getByTestId("step-kick-3")).toHaveCount(0);
+  await rpc("clip.length", { instrument: "drums", clip: null, length: 70 });
+  await expect(page.getByTestId("clip-note-drums")).toContainText("loops every 70 ticks");
+  // The length buttons set it in steps.
+  await page.getByTestId("length-32").click();
+  await expect.poll(async () => (await rpc("clip.get", { instrument: "drums", clip: null })).length).toBe(32 * 24);
+  await expect(page.getByTestId("step-kick-31")).toBeVisible();
 });
 
 test("transport: play from UI, playhead moves, stop", async () => {
@@ -396,8 +404,9 @@ test("record: settings and the take from the UI; notes played elsewhere land qua
   await page.getByTestId("record-count-in").selectOption("0");
   await expect.poll(async () => (await rpc("state.get", {})).record).toMatchObject({ quantize: 24, count_in: 0 });
 
-  // A 4-step loop (half a second at 120 bpm) so passes come round quickly.
-  await rpc("param.set", { path: "sequencer.length", value: 4 });
+  // A 4-step loop (half a second at 120 bpm) so passes come round quickly:
+  // the drums' launched clip, which the take records into (RFC 0009).
+  await rpc("clip.length", { instrument: "drums", clip: null, length: 96 });
   await page.getByTestId("record-toggle").click();
   await expect(page.getByTestId("record-toggle")).toHaveAttribute("data-recording", "true");
   expect((await rpc("state.get", {})).transport.playing).toBe(true);
@@ -426,9 +435,10 @@ test("record: settings and the take from the UI; notes played elsewhere land qua
   });
 });
 
-test("clip pool and song mode: the step editor edits the selected clip; song controls set the song", async () => {
+test("clip pool and launching: the step editor edits the selected clip; launch and back; song controls set the song", async () => {
   const { page, rpc } = h;
   const clip = async (id: number) => (await rpc("clip.get", { instrument: "drums", clip: id })).events;
+  const track = async () => (await rpc("song.get", {})).tracks.find((t) => t.instrument === "drums")!;
   await page.getByTestId("step-kick-0").click();
   await page.getByTestId("clip-new-drums").click();
   await expect(page.getByTestId("clip-drums-2")).toHaveAttribute("data-selected", "true");
@@ -437,20 +447,34 @@ test("clip pool and song mode: the step editor edits the selected clip; song con
   await page.getByTestId("step-snare-4").click();
   await expect.poll(() => clip(2)).toEqual([{ tick: 96, len: 24, note: 38, velocity: 89 }]);
   expect(await clip(1)).toEqual([{ tick: 0, len: 24, note: 36, velocity: 89 }]);
-  // Selecting clip 1 shows it again; a daemon-side rename shows up.
+  // A new project's drums loop their first clip; selecting another does
+  // not change that (RFC 0009), launching it does.
+  await expect(page.getByTestId("clip-drums-1")).toHaveAttribute("data-launched", "true");
+  expect((await track()).launched).toBe(1);
+  await page.getByTestId("clip-launch-drums").click();
+  await expect.poll(async () => (await track()).launched).toBe(2);
+  await expect(page.getByTestId("clip-drums-2")).toHaveAttribute("data-launched", "true");
+  await expect(page.getByTestId("back-all")).toBeEnabled();
+  // Selecting clip 1 shows it again, still playing clip 2; a daemon-side
+  // rename shows up.
   await page.getByTestId("clip-drums-1").click();
   await expect(page.getByTestId("step-kick-0")).toHaveAttribute("data-level", "1");
+  expect((await track()).launched).toBe(2);
   await rpc("clip.rename", { instrument: "drums", clip: 2, name: "Fill" });
   await expect(page.getByTestId("clip-drums-2")).toContainText("Fill");
+  // Back to the arrangement.
+  await page.getByTestId("clip-back-drums").click();
+  await expect.poll(async () => (await track()).launched).toBe(null);
+  await expect(page.getByTestId("back-all")).toBeDisabled();
   // Deleting asks once.
   await page.getByTestId("clip-drums-2").click();
   await page.getByTestId("clip-delete-drums").click();
   await page.getByTestId("clip-delete-drums").click();
   await expect(page.getByTestId("clip-drums-2")).toHaveCount(0);
 
-  // Song mode, a bar loop, and the start point.
-  await page.getByTestId("mode-toggle").click();
-  await expect.poll(async () => (await rpc("param.get", { path: "song.mode" })).value).toBe(1);
+  // Launch quantize, a bar loop, and the start point.
+  await page.getByTestId("launch-quantize").selectOption("1");
+  await expect.poll(async () => (await rpc("param.get", { path: "transport.launch_quantize" })).value).toBe(1);
   await page.getByTestId("song-loop").selectOption("2");
   await page.getByTestId("loop-end").fill("2");
   await expect.poll(async () => (await rpc("state.get", {})).params).toMatchObject({ "song.loop": 2, "song.loop_end": 2 });
@@ -458,12 +482,36 @@ test("clip pool and song mode: the step editor edits the selected clip; song con
   await expect.poll(async () => (await rpc("state.get", {})).transport.start).toBe(768);
   await rpc("transport.locate", { tick: 0 });
   await expect(page.getByTestId("locate")).toHaveValue("1");
-  // Playing in song mode shows bar.beat.
+  // Playing shows bar.beat.
   await rpc("song.place", { instrument: "drums", clip: 1, start: 0, length: 768, offset: null });
   await rpc("transport.play", {});
   await expect(page.getByTestId("playhead")).toHaveText(/^\d+\.\d$/);
   await rpc("transport.stop", {});
-  await rpc("param.set", { path: "song.mode", value: 0 });
+});
+
+test("launching while playing waits for the bar, the editors' playhead follows the clip where it plays, back to the song for all", async () => {
+  const { page, rpc } = h;
+  const track = async (id: string) => (await rpc("song.get", {})).tracks.find((t) => t.instrument === id)!;
+  await rpc("instrument.add", { type: "tb303", id: "bass", name: null, channel: null, no_channel: false });
+  // A slow tempo, so the bar takes a while to come.
+  await rpc("param.set", { path: "transport.tempo", value: 40 });
+  await rpc("transport.play", {});
+  await page.getByTestId("select-bass").click();
+  await page.getByTestId("clip-launch-bass").click();
+  // Waiting: pending, pulsing, and no playhead in its editor yet.
+  await expect.poll(async () => (await track("bass")).pending).toBe(true);
+  await expect(page.getByTestId("clip-drums-1")).toHaveCount(0);
+  await expect(page.getByTestId("clip-bass-1")).toHaveAttribute("data-launched", "true");
+  await expect(page.locator('[data-testid^="note-step-"].ring-2')).toHaveCount(0);
+  // At 40 bpm a bar is 6 s.
+  await expect.poll(async () => (await track("bass")).pending, { timeout: 8000 }).toBe(false);
+  await expect(page.locator('[data-testid^="note-step-"].ring-2')).toHaveCount(1);
+  // Back for every track.
+  await page.getByTestId("back-all").click();
+  await expect.poll(async () => (await track("drums")).launched).toBe(null);
+  expect((await track("bass")).launched).toBe(null);
+  await rpc("transport.stop", {});
+  await rpc("param.set", { path: "transport.tempo", value: 120 });
 });
 
 test("arrangement: lanes show placements and repeats, headers select and arm, the ruler locates, the playhead follows", async () => {
@@ -510,17 +558,44 @@ test("arrangement: lanes show placements and repeats, headers select and arm, th
   const seats = (await rpc("state.get", {})).seats.seats;
   expect(seats.some((s) => s.config.focus === "bass")).toBe(true);
 
-  // In song mode the playhead follows.
+  // The playhead follows (play always plays the arrangement).
   await rpc("param.set", { path: "song.loop", value: 0 });
   await rpc("transport.locate", { tick: 0 });
-  await rpc("param.set", { path: "song.mode", value: 1 });
   await rpc("transport.play", {});
   const head = page.getByTestId("arr-playhead");
   await expect(head).toBeVisible();
   await expect.poll(async () => Number(await head.getAttribute("data-tick"))).toBeGreaterThan(0);
   await arr.screenshot({ path: "test-results/arrangement.png" });
   await rpc("transport.stop", {});
-  await rpc("param.set", { path: "song.mode", value: 0 });
+});
+
+test("arrangement launching: a pool clip's triangle launches it and dims the lane; back returns; L loops the selected placements", async () => {
+  const { page, rpc } = h;
+  const track = async () => (await rpc("song.get", {})).tracks.find((t) => t.instrument === "drums")!;
+  await rpc("clip.new", { instrument: "drums", name: "Fill", length: 384, select: false });
+  await rpc("song.place", { instrument: "drums", clip: 1, start: 384, length: 2 * 384, offset: null });
+  // A new project's drums are launched: the lane is dimmed.
+  await expect(page.getByTestId("lane-drums")).toHaveAttribute("data-launched", "true");
+  await expect(page.getByTestId("pool-drums-1")).toHaveAttribute("data-launched", "true");
+  await page.getByTestId("launch-drums-2").click();
+  await expect.poll(async () => (await track()).launched).toBe(2);
+  await expect(page.getByTestId("pool-drums-2")).toHaveAttribute("data-launched", "true");
+  // Not a placement drag.
+  expect((await track()).arrangement).toHaveLength(1);
+  await page.getByTestId("track-back-drums").click();
+  await expect.poll(async () => (await track()).launched).toBe(null);
+  await expect(page.getByTestId("lane-drums")).toHaveAttribute("data-launched", "false");
+  await expect(page.getByTestId("track-back-drums")).toBeDisabled();
+  // Loop this placement: bars 2-3 (one batch, one undo step).
+  await page.getByTestId("placement-drums-384").click();
+  await page.keyboard.press("l");
+  await expect.poll(async () => (await rpc("state.get", {})).params).toMatchObject({ "song.loop": 2, "song.loop_start": 1, "song.loop_end": 3 });
+  await rpc("history.undo", {});
+  await expect.poll(async () => (await rpc("state.get", {})).params["song.loop"]).toBe(1);
+  // The toolbar button does the same.
+  await page.getByTestId("placement-drums-384").click();
+  await page.getByTestId("arr-loop-selection").click();
+  await expect.poll(async () => (await rpc("state.get", {})).params["song.loop"]).toBe(2);
 });
 
 test("arrangement editing: place from the pool, move, resize, copy, and delete by dragging, one undo step each", async () => {
@@ -785,7 +860,7 @@ test("arrangement: drag a placement to another track (its clip is copied into th
     await expect.poll(all).toEqual(after);
   };
   const fill = (start: number, clip: number) => ({ clip, start, length: 768, offset: 96 });
-  const bassClip1 = { id: 1, name: "1", length: null, events: [] };
+  const bassClip1 = { id: 1, name: "1", length: 384, events: [] };
   const fillIn = (id: number) => ({ id, name: "Fill", length: 384, events: notes });
   const start = { drums: [fill(384, 2)], bass: [], bassPool: [bassClip1], bassSelected: 1 };
   await expect(page.getByTestId("placement-drums-384")).toBeVisible();
@@ -1120,6 +1195,7 @@ test("screenshot of a full groove for visual review", async () => {
   ] as const)
     notes[i] = { note: n, accent: a, slide: sl };
   await rpc("pattern.set_notes", { instrument: "bass", steps: notes });
+  await rpc("clip.launch", { instrument: "bass", clip: null, now: null });
   await rpc("transport.play", {});
   await page.getByTestId("select-drums").click();
   await page.waitForTimeout(600);

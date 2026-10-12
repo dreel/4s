@@ -10,7 +10,7 @@ instrument: string | null,
  */
 name: string | null, 
 /**
- * Ticks; default: follow `sequencer.length`.
+ * Ticks; default: one bar (`DEFAULT_CLIP_LENGTH`).
  */
 length: number | null, 
 /**

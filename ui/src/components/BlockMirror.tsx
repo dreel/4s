@@ -1,7 +1,7 @@
 // Mirror of the Livid Block: LEDs as the daemon computes them, and a virtual
 // grid + knobs that send the same RPCs a real Block's MIDI would trigger.
 
-import { act, client, useApp } from "../store";
+import { act, client, useApp, useSelectedClipSteps } from "../store";
 import { Knob } from "./controls";
 
 function VirtualKnob({ index, path }: { index: number; path: string }) {
@@ -26,7 +26,7 @@ function VirtualKnob({ index, path }: { index: number; path: string }) {
 
 export function BlockMirror() {
   const c = useApp((s) => s.snapshot?.controller);
-  const length = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
+  const length = useSelectedClipSteps(c?.focus ?? "");
   if (!c) return null;
   const pages = Math.max(1, Math.ceil(length / 8));
   return (

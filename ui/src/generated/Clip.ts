@@ -10,9 +10,9 @@ export type Clip = { instrument: string,
  */
 id: number, name: string, 
 /**
- * Length in ticks; `None` follows `sequencer.length`.
+ * Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.
  */
-length: number | null, 
+length: number, 
 /**
  * Sorted by (tick, note).
  */

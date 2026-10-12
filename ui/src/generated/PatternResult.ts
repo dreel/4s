@@ -3,6 +3,6 @@ import type { TrackPattern } from "./TrackPattern";
 
 export type PatternResult = { instrument: string, 
 /**
- * Active length (`sequencer.length`).
+ * The selected clip's length in steps (rounded up).
  */
 length: number, tracks: Array<TrackPattern>, };

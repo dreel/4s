@@ -137,13 +137,10 @@
             "type": "string"
           },
           "length": {
-            "description": "Length in ticks; `None` follows `sequencer.length`.",
+            "description": "Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.",
             "format": "uint32",
             "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "name": {
             "type": "string"
@@ -153,6 +150,7 @@
           "instrument",
           "id",
           "name",
+          "length",
           "events"
         ],
         "type": "object"
@@ -206,10 +204,7 @@
           "length": {
             "format": "uint32",
             "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "name": {
             "type": "string"
@@ -217,7 +212,28 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "length"
+        ],
+        "type": "object"
+      },
+      "ClipPlayhead": {
+        "description": "Where a track is playing: the clip and the tick in it.",
+        "properties": {
+          "clip": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip",
+          "tick"
         ],
         "type": "object"
       },
@@ -553,8 +569,14 @@
             "type": "object"
           },
           {
-            "description": "A step started. `time` is engine time in seconds; `tick` is the song\ntick (in song mode, where the song plays; else from play).",
+            "description": "A step started. `time` is engine time in seconds; `tick` is the song\ntick and `step` the same in steps; `clips` where each track is\nplaying (as `TransportState`).",
             "properties": {
+              "clips": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/ClipPlayhead"
+                },
+                "type": "object"
+              },
               "step": {
                 "format": "uint32",
                 "minimum": 0,
@@ -578,12 +600,13 @@
               "type",
               "step",
               "tick",
-              "time"
+              "time",
+              "clips"
             ],
             "type": "object"
           },
           {
-            "description": "Song mode's start point moved (`transport.locate`).",
+            "description": "The start point moved (`transport.locate`).",
             "properties": {
               "tick": {
                 "format": "uint32",
@@ -1482,7 +1505,7 @@
         "type": "object"
       },
       "TakeNote": {
-        "description": "A note a take is recording, not written yet: where it will go (in\npattern mode, the selected clip; in song mode, the clip under it), at\nthe tick it was played (before quantize), held so far if still held.",
+        "description": "A note a take is recording, not written yet: where it will go (the\nlaunched clip it is playing, else the placement's clip under it), at\nthe tick it was played (before quantize), held so far if still held.",
         "properties": {
           "clip": {
             "format": "uint32",
@@ -1527,7 +1550,7 @@
         "type": "object"
       },
       "TrackInfo": {
-        "description": "An instrument's track: its clip pool, the selected clip, and its\narrangement (placements sorted by start, not overlapping).",
+        "description": "An instrument's track: its clip pool, the selected clip (what editors\nedit), its arrangement (placements sorted by start, not overlapping),\nand the clip it loops instead of its arrangement, if launched (RFC\n0009).",
         "properties": {
           "arrangement": {
             "items": {
@@ -1544,6 +1567,19 @@
           "instrument": {
             "type": "string"
           },
+          "launched": {
+            "description": "The launched clip the track plays instead of its arrangement; null\nfollows the arrangement.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pending": {
+            "description": "A launch or a return to the arrangement is waiting for its quantize\nboundary (while playing).",
+            "type": "boolean"
+          },
           "selected": {
             "format": "uint32",
             "minimum": 0,
@@ -1554,7 +1590,8 @@
           "instrument",
           "selected",
           "clips",
-          "arrangement"
+          "arrangement",
+          "pending"
         ],
         "type": "object"
       },
@@ -1835,7 +1872,7 @@
         "type": "object"
       },
       "ProjectClip": {
-        "description": "A clip in a project file: a step pattern when one says exactly the same\nthing (drum step strings per voice, `{\"kick\": \"x---x---\"}`, or a note\nstring, `\"C2 C2! D#2~ -\"`), else events in text form (`tick:note:len:vel`,\nsee `format_events`); both absent for an empty clip.",
+        "description": "A clip in a project file: its length, and a step pattern when one says\nexactly the same thing (drum step strings per voice, `{\"kick\":\n\"x---x---\"}`, or a note string, `\"C2 C2! D#2~ -\"`), else events in text\nform (`tick:note:len:vel`, see `format_events`); both absent for an\nempty clip.",
         "properties": {
           "events": {
             "type": [
@@ -1844,13 +1881,11 @@
             ]
           },
           "length": {
-            "description": "Ticks; absent follows `sequencer.length`.",
+            "default": 384,
+            "description": "Ticks (where it loops).",
             "format": "uint32",
             "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "name": {
             "description": "Default: the clip's id.",
@@ -1959,6 +1994,15 @@
               }
             },
             "type": "object"
+          },
+          "launched": {
+            "description": "The clip the track loops instead of its arrangement (RFC 0009).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "selected": {
             "description": "The selected clip's id.",
@@ -2079,7 +2123,7 @@
           "$ref": "#/$defs/ProjectTrack"
         },
         "default": {},
-        "description": "Per instrument id (RFC 0008): its clip pool, selected clip, and\narrangement. An instrument left out has one empty clip.",
+        "description": "Per instrument id (RFC 0008): its clip pool, selected clip,\narrangement, and launched clip. An instrument left out has one empty\none-bar clip and follows its (empty) arrangement.",
         "type": "object"
       }
     },
@@ -2094,8 +2138,8 @@
     "title": "ProjectFile",
     "type": "object"
   },
-  "project_format_version": 5,
-  "protocol_version": 7,
+  "project_format_version": 6,
+  "protocol_version": 8,
   "request": {
     "$defs": {
       "BatchParams": {
@@ -2343,6 +2387,38 @@
         },
         "type": "object"
       },
+      "ClipLaunchParams": {
+        "description": "Launch a clip (RFC 0009): its track loops it instead of following its\narrangement.",
+        "properties": {
+          "clip": {
+            "default": null,
+            "description": "Default: the selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "now": {
+            "default": null,
+            "description": "Switch on the next tick instead of waiting for `transport.launch_quantize`.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ClipLengthParams": {
         "properties": {
           "clip": {
@@ -2363,16 +2439,15 @@
             ]
           },
           "length": {
-            "default": null,
-            "description": "Ticks (1..`MAX_CLIP_TICKS`); omit to follow `sequencer.length`.",
+            "description": "Ticks (1..`MAX_CLIP_TICKS`).",
             "format": "uint32",
             "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           }
         },
+        "required": [
+          "length"
+        ],
         "type": "object"
       },
       "ClipNewParams": {
@@ -2387,7 +2462,7 @@
           },
           "length": {
             "default": null,
-            "description": "Ticks; default: follow `sequencer.length`.",
+            "description": "Ticks; default: one bar (`DEFAULT_CLIP_LENGTH`).",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -2888,7 +2963,7 @@
       "LocateParams": {
         "properties": {
           "tick": {
-            "description": "Song tick that song mode plays from.",
+            "description": "Song tick that play starts from.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
@@ -3408,7 +3483,7 @@
         "type": "object"
       },
       "ProjectClip": {
-        "description": "A clip in a project file: a step pattern when one says exactly the same\nthing (drum step strings per voice, `{\"kick\": \"x---x---\"}`, or a note\nstring, `\"C2 C2! D#2~ -\"`), else events in text form (`tick:note:len:vel`,\nsee `format_events`); both absent for an empty clip.",
+        "description": "A clip in a project file: its length, and a step pattern when one says\nexactly the same thing (drum step strings per voice, `{\"kick\":\n\"x---x---\"}`, or a note string, `\"C2 C2! D#2~ -\"`), else events in text\nform (`tick:note:len:vel`, see `format_events`); both absent for an\nempty clip.",
         "properties": {
           "events": {
             "type": [
@@ -3417,13 +3492,11 @@
             ]
           },
           "length": {
-            "description": "Ticks; absent follows `sequencer.length`.",
+            "default": 384,
+            "description": "Ticks (where it loops).",
             "format": "uint32",
             "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "name": {
             "description": "Default: the clip's id.",
@@ -3511,7 +3584,7 @@
               "$ref": "#/$defs/ProjectTrack"
             },
             "default": {},
-            "description": "Per instrument id (RFC 0008): its clip pool, selected clip, and\narrangement. An instrument left out has one empty clip.",
+            "description": "Per instrument id (RFC 0008): its clip pool, selected clip,\narrangement, and launched clip. An instrument left out has one empty\none-bar clip and follows its (empty) arrangement.",
             "type": "object"
           }
         },
@@ -3636,6 +3709,15 @@
               }
             },
             "type": "object"
+          },
+          "launched": {
+            "description": "The clip the track loops instead of its arrangement (RFC 0009).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "selected": {
             "description": "The selected clip's id.",
@@ -4205,6 +4287,28 @@
         ],
         "type": "object"
       },
+      "SongBackParams": {
+        "description": "Return tracks from launched clips to their arrangement.",
+        "properties": {
+          "instrument": {
+            "default": null,
+            "description": "Default: every track.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "now": {
+            "default": null,
+            "description": "Switch on the next tick instead of waiting for `transport.launch_quantize`.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "SongMoveParams": {
         "properties": {
           "instrument": {
@@ -4531,7 +4635,7 @@
         "type": "object"
       },
       {
-        "description": "Start the sequencer from step 1.",
+        "description": "Play the arrangement (and launched clips) from the start point.",
         "properties": {
           "method": {
             "const": "transport.play",
@@ -4582,7 +4686,7 @@
         "type": "object"
       },
       {
-        "description": "Set where song mode plays from (and jump there while playing).",
+        "description": "Set where play starts from (and jump there while playing).",
         "properties": {
           "method": {
             "const": "transport.locate",
@@ -5058,7 +5162,7 @@
         "type": "object"
       },
       {
-        "description": "Set a clip's own length, or follow `sequencer.length`.",
+        "description": "Set a clip's length (where it loops).",
         "properties": {
           "method": {
             "const": "clip.length",
@@ -5176,7 +5280,7 @@
         "type": "object"
       },
       {
-        "description": "Select the clip pattern mode plays and the step editors edit.",
+        "description": "Select the clip editors edit (the step views, the Block, and the\n`clip.*` defaults). It does not change what plays.",
         "properties": {
           "method": {
             "const": "clip.select",
@@ -5184,6 +5288,23 @@
           },
           "params": {
             "$ref": "#/$defs/ClipRefParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Launch a clip: its track loops it instead of its arrangement, from\nthe next `transport.launch_quantize` boundary while playing (RFC 0009).",
+        "properties": {
+          "method": {
+            "const": "clip.launch",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ClipLaunchParams"
           }
         },
         "required": [
@@ -5269,6 +5390,23 @@
           },
           "params": {
             "$ref": "#/$defs/SongMoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Return a track (default: every track) from its launched clip to its\narrangement, at the next `transport.launch_quantize` boundary while playing.",
+        "properties": {
+          "method": {
+            "const": "song.back",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SongBackParams"
           }
         },
         "required": [
@@ -6047,13 +6185,10 @@
             "type": "string"
           },
           "length": {
-            "description": "Length in ticks; `None` follows `sequencer.length`.",
+            "description": "Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.",
             "format": "uint32",
             "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "name": {
             "type": "string"
@@ -6063,6 +6198,7 @@
           "instrument",
           "id",
           "name",
+          "length",
           "events"
         ],
         "type": "object"
@@ -6116,10 +6252,7 @@
           "length": {
             "format": "uint32",
             "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "name": {
             "type": "string"
@@ -6127,7 +6260,28 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "length"
+        ],
+        "type": "object"
+      },
+      "ClipPlayhead": {
+        "description": "Where a track is playing: the clip and the tick in it.",
+        "properties": {
+          "clip": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip",
+          "tick"
         ],
         "type": "object"
       },
@@ -6802,7 +6956,7 @@
         "type": "object"
       },
       "TrackInfo": {
-        "description": "An instrument's track: its clip pool, the selected clip, and its\narrangement (placements sorted by start, not overlapping).",
+        "description": "An instrument's track: its clip pool, the selected clip (what editors\nedit), its arrangement (placements sorted by start, not overlapping),\nand the clip it loops instead of its arrangement, if launched (RFC\n0009).",
         "properties": {
           "arrangement": {
             "items": {
@@ -6819,6 +6973,19 @@
           "instrument": {
             "type": "string"
           },
+          "launched": {
+            "description": "The launched clip the track plays instead of its arrangement; null\nfollows the arrangement.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pending": {
+            "description": "A launch or a return to the arrangement is waiting for its quantize\nboundary (while playing).",
+            "type": "boolean"
+          },
           "selected": {
             "format": "uint32",
             "minimum": 0,
@@ -6829,7 +6996,8 @@
           "instrument",
           "selected",
           "clips",
-          "arrangement"
+          "arrangement",
+          "pending"
         ],
         "type": "object"
       },
@@ -6857,17 +7025,24 @@
       },
       "TransportState": {
         "properties": {
+          "clips": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ClipPlayhead"
+            },
+            "description": "Where each track is playing, by instrument id (tracks playing\nnothing are left out), while playing.",
+            "type": "object"
+          },
           "playing": {
             "type": "boolean"
           },
           "start": {
-            "description": "Song tick song mode plays from (`transport.locate`).",
+            "description": "Song tick play starts from (`transport.locate`).",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
           },
           "step": {
-            "description": "Current step while playing.",
+            "description": "The song position in steps, while playing.",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -6876,7 +7051,7 @@
             ]
           },
           "tick": {
-            "description": "Song tick playing (song mode), while playing.",
+            "description": "The song tick playing, while playing.",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -6887,7 +7062,8 @@
         },
         "required": [
           "playing",
-          "start"
+          "start",
+          "clips"
         ],
         "type": "object"
       },

@@ -313,7 +313,7 @@ pub struct PatternGetParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PatternResult {
     pub instrument: String,
-    /// Active length (`sequencer.length`).
+    /// The selected clip's length in steps (rounded up).
     pub length: u32,
     pub tracks: Vec<TrackPattern>,
 }
@@ -413,9 +413,8 @@ pub struct ClipLengthParams {
     /// Clip in the instrument's pool; default: its selected clip.
     #[serde(default)]
     pub clip: Option<u32>,
-    /// Ticks (1..`MAX_CLIP_TICKS`); omit to follow `sequencer.length`.
-    #[serde(default)]
-    pub length: Option<u32>,
+    /// Ticks (1..`MAX_CLIP_TICKS`).
+    pub length: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -443,7 +442,7 @@ pub struct ClipNewParams {
     /// Default: its id.
     #[serde(default)]
     pub name: Option<String>,
-    /// Ticks; default: follow `sequencer.length`.
+    /// Ticks; default: one bar (`DEFAULT_CLIP_LENGTH`).
     #[serde(default)]
     pub length: Option<u32>,
     /// Make it the selected clip (default true).
@@ -460,6 +459,32 @@ pub struct ClipRefParams {
     /// Default: the selected clip.
     #[serde(default)]
     pub clip: Option<u32>,
+}
+
+/// Launch a clip (RFC 0009): its track loops it instead of following its
+/// arrangement.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipLaunchParams {
+    /// Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Default: the selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
+    /// Switch on the next tick instead of waiting for `transport.launch_quantize`.
+    #[serde(default)]
+    pub now: Option<bool>,
+}
+
+/// Return tracks from launched clips to their arrangement.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SongBackParams {
+    /// Default: every track.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Switch on the next tick instead of waiting for `transport.launch_quantize`.
+    #[serde(default)]
+    pub now: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -520,7 +545,7 @@ pub struct SongInfo {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct LocateParams {
-    /// Song tick that song mode plays from.
+    /// Song tick that play starts from.
     pub tick: u32,
 }
 
@@ -595,7 +620,7 @@ pub struct RenderNote {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct NotesResult {
     pub instrument: String,
-    /// Active length (`sequencer.length`).
+    /// The selected clip's length in steps (rounded up).
     pub length: u32,
     /// All `MAX_STEPS` steps.
     pub steps: Vec<NoteStep>,
@@ -1008,14 +1033,14 @@ api! {
     /// Set one parameter (clamped to its range).
     ParamSet = "param.set" (ParamSetParams) -> ParamValue;
 
-    /// Start the sequencer from step 1.
+    /// Play the arrangement (and launched clips) from the start point.
     TransportPlay = "transport.play" (Empty) -> TransportState;
     /// Stop the sequencer.
     TransportStop = "transport.stop" (Empty) -> TransportState;
     /// Arm or end recording into an instrument's clip, or change record
     /// settings (mode, quantize, count-in).
     TransportRecord = "transport.record" (RecordParams) -> RecordState;
-    /// Set where song mode plays from (and jump there while playing).
+    /// Set where play starts from (and jump there while playing).
     TransportLocate = "transport.locate" (LocateParams) -> TransportState;
 
     /// Available instrument types, with their outputs and parameters.
@@ -1076,7 +1101,7 @@ api! {
     /// Remove and add events in one edit; recorded takes are journaled as
     /// this.
     ClipUpdate = "clip.update" (ClipUpdateParams) -> Clip;
-    /// Set a clip's own length, or follow `sequencer.length`.
+    /// Set a clip's length (where it loops).
     ClipLength = "clip.length" (ClipLengthParams) -> Clip;
     /// Remove every event.
     ClipClear = "clip.clear" (ClipGetParams) -> Clip;
@@ -1089,8 +1114,12 @@ api! {
     ClipRename = "clip.rename" (ClipRenameParams) -> Clip;
     /// Delete a clip and its placements (a track keeps at least one clip).
     ClipDelete = "clip.delete" (ClipRefParams) -> TrackInfo;
-    /// Select the clip pattern mode plays and the step editors edit.
+    /// Select the clip editors edit (the step views, the Block, and the
+    /// `clip.*` defaults). It does not change what plays.
     ClipSelect = "clip.select" (ClipRefParams) -> TrackInfo;
+    /// Launch a clip: its track loops it instead of its arrangement, from
+    /// the next `transport.launch_quantize` boundary while playing (RFC 0009).
+    ClipLaunch = "clip.launch" (ClipLaunchParams) -> TrackInfo;
 
     /// Several requests as one journal entry and undo step.
     Batch = "batch" (BatchParams) -> BatchResult;
@@ -1103,6 +1132,9 @@ api! {
     SongRemove = "song.remove" (SongRemoveParams) -> TrackInfo;
     /// Move a placement to another start.
     SongMove = "song.move" (SongMoveParams) -> TrackInfo;
+    /// Return a track (default: every track) from its launched clip to its
+    /// arrangement, at the next `transport.launch_quantize` boundary while playing.
+    SongBack = "song.back" (SongBackParams) -> SongInfo;
 
     /// Play a drum voice or a note immediately (audition).
     VoiceTrigger = "voice.trigger" (TriggerParams) -> Empty;

@@ -122,6 +122,9 @@ check "instrument types" "tb303  Bass   default id \`bass\`" s instrument types
 check "add a 303 on a new channel" "bass       tb303  Bass" s instrument add tb303
 check "its channel is in the mixer" "ch 2  Bass         vol 100%  pan C          <- bass" s mixer
 check "its params are registered" "bass.cutoff" s params bass
+# A new track follows its (empty) arrangement; launching its clip loops it
+# (RFC 0009), as the default project's drums do.
+check "launch the bass's clip" "bass: clips *1; plays clip 1 (launched)" s clip launch bass
 check "notes round trip" "bass: C2 C2! D#2~ - G1 - C3 - C2 - - - G1 G1 A#1 -" s notes bass "C2 C2! D#2~ - G1 - C3 - C2 - - - G1 G1 A#1 -"
 check "bad note" "out of range" s notes bass "C9"
 check "set one note step" "bass: C2 C2! D#2~ - G1 - C3 - C2 - - - G1 G1 A#1 G2!~" s note bass 16 "G2!~"
@@ -365,7 +368,7 @@ check "instrument list" "bass       tb303  Bass" s instrument list
 check "add onto an existing channel" "ch 2  Bass         vol 100%  pan C          <- bass, bass2" bash -c "$BIN/4s instrument add tb303 --channel 2 >/dev/null && $BIN/4s mixer"
 check "removing it keeps the shared channel" "ch 2  Bass         vol 100%  pan C          <- bass" bash -c "$BIN/4s instrument rm bass2 >/dev/null && $BIN/4s mixer"
 RMS_BEFORE=$(s --json render --bars 1 --out renders/nc1.wav | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])")
-s instrument add tb303 --id lead --no-channel >/dev/null
+s instrument add tb303 --id lead --no-channel >/dev/null; s clip launch lead >/dev/null
 s notes lead "C3 C3 C3 C3" >/dev/null
 check "--no-channel leaves the main out unrouted" "unrouted, 2 channels" python3 -c "
 import json, subprocess
@@ -499,6 +502,7 @@ check "no instruments left: note calls explain" "no instruments" s trigger --not
 check "controller has no focus" "focus: (none)" s controller
 check "no focus: grid is dark" "dark" bash -c "$BIN/4s controller | grep -q '#' && echo lit || echo dark"
 check "an added 808 is the focus" "focus: drums " bash -c "$BIN/4s instrument add tr808 >/dev/null && $BIN/4s controller"
+s clip launch drums >/dev/null
 s pattern set kick "X---x---X---x---" >/dev/null
 s pattern set snare "----x-------x---" >/dev/null
 s pattern step clap 13 on >/dev/null
@@ -512,6 +516,7 @@ echo '{"format_version": 1, "params": {}, "patterns": {}, "controller": {"knob_m
 check "v1 projects are rejected" "no longer supported" s project load old
 rm -rf "$FOURS_DATA_DIR/projects/old.4s"
 s instrument add tb303 >/dev/null
+s clip launch bass >/dev/null
 s notes bass "C2 - G1! C3~" >/dev/null
 s set bass.cutoff 0.25 >/dev/null
 # Seats (RFC 0007): each performer has a focus and bindings; the CLI joins
@@ -616,6 +621,7 @@ check "and focus" "focus: bass" bash -c "$BIN/4s seat | grep -A1 '^e2e'"
 # Clips (RFC 0007 phase 2): sequences are timed note events; step patterns
 # are views over them.
 s instrument add tb303 --id seq --no-channel >/dev/null
+s clip launch seq >/dev/null
 s notes seq "C2 - D#2~ G1" >/dev/null
 check "a note pattern is a clip: half-step notes, a slide overlaps the next" "0:C2:12:89 48:D#2:25:89 72:G1:12:89" s clip show seq
 check "add a note between steps" "36:C3:6:100" s clip add seq 36 C3 --len 6 --vel 100
@@ -632,12 +638,13 @@ r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--bars',
 print(len([x for x in r['triggers'] if x['instrument'] == 'seq']), 'notes')"
 check "an off-grid clip saves as events and loads back" "36:C3:6:100" bash -c "$BIN/4s project save clips >/dev/null && grep -q '\"clips\"' '$FOURS_DATA_DIR/projects/clips.4s/project.json' && $BIN/4s project new >/dev/null && $BIN/4s project load clips >/dev/null && $BIN/4s clip show seq"
 check "its own length too" "length 3 steps" s clip show seq
-s clip length seq auto >/dev/null
+check "and it is still launched" "seq: clips *1; plays clip 1 (launched)" s clip list seq
+s clip length seq 16 >/dev/null
 check "quantize moves it to the nearest 16th" "48:C3:6:100" s clip quantize seq 1/16
 check "undo takes back the quantize" "36:C3:6:100" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show seq"
 check "clip edits are journaled per event" "event:seq.1.36.48" s journal --limit 3
 check "quantize wraps a note at the loop's end to its start" "0:D2:6:89" bash -c "$BIN/4s clip set seq 70:D2:6 >/dev/null && $BIN/4s clip length seq 3 >/dev/null && $BIN/4s clip quantize seq 1/16 | tail -1"
-s clip length seq auto >/dev/null; s clip set seq "0:C2:12:89 36:C3:6:100 48:D#2:25:89 72:G1:12:89" >/dev/null
+s clip length seq 16 >/dev/null; s clip set seq "0:C2:12:89 36:C3:6:100 48:D#2:25:89 72:G1:12:89" >/dev/null
 check "remove a note" "0:C2:12:89 48:D#2:25:89 72:G1:12:89" bash -c "$BIN/4s clip rm seq 36 C3 >/dev/null && $BIN/4s clip show seq | tail -1"
 s clip set seq "0:C2:12:100 0:G2:12:89 48:D#2:6:89" >/dev/null
 check "a step edit leaves chords, velocities, and lengths on other steps alone" "0:C2:12:100 0:G2:12:89 48:D#2:6:89 96:C3:12:89" bash -c "$BIN/4s note seq 5 C3 >/dev/null && $BIN/4s clip show seq | tail -1"
@@ -699,38 +706,30 @@ check "a session with recorded takes replays" "replay matched" bash -c "$BIN/4s 
 check "record settings are checked" "strength must be 0..1" s record --show --strength 2
 s record --show --quantize off --count-in 1 >/dev/null
 s instrument rm seq >/dev/null
-# The loop while playing (at 30 bpm a step is 0.5 s): shortening it past
-# the playhead goes back to step 1, lengthening it continues, and the Block
-# grid's playhead follows a focus clip with its own length.
-cat > "$TMP/loop.py" <<PY
-import subprocess, sys
+# The Block grid's playhead follows the focus's selected clip where it
+# plays: a 3-step clip, launched, at 30 bpm (a step is 0.5 s).
+cat > "$TMP/grid.py" <<PY
+import subprocess
 def run(*a): return subprocess.check_output(['$BIN/4s', *a], text=True)
-# One stream, so no step is missed between reads; 0-based (watch shows
-# steps from 1).
+# One stream, so no step is missed between reads; the playhead event shows
+# each track's clip step from 1.
 watch = subprocess.Popen(['$BIN/4s', 'watch', '--type', 'playhead'], stdout=subprocess.PIPE, text=True)
-def step(): return int(watch.stdout.readline().split('step ')[1].split()[0]) - 1
-def until(ok):
-    while not ok(s := step()): pass
-    return s
-run('tempo', '30'); run('set', 'sequencer.length', sys.argv[1]); run('play')
+def step():
+    while 'gridd clip 1 step ' not in (line := watch.stdout.readline()): pass
+    return int(line.split('gridd clip 1 step ')[1].split()[0].rstrip(',')) - 1
+run('tempo', '30'); run('play')
 try:
-    if sys.argv[2] == 'shorten':
-        until(lambda s: s >= 13); run('set', 'sequencer.length', '12'); print('next step', step())
-    elif sys.argv[2] == 'lengthen':
-        until(lambda s: s == 11); until(lambda s: s == 3); run('set', 'sequencer.length', '16'); print('next step', step())
-    else:
-        s = until(lambda s: s >= 4)
-        col = run('controller').splitlines()[8].split()[s % 3]
-        print('grid playhead at clip step' if col == '#' else run('controller'))
+    while (s := step()) == 0: pass
+    col = run('controller').splitlines()[8].split()[s]
+    print('grid playhead at clip step' if col == '#' else run('controller'))
 finally:
-    watch.kill(); run('stop'); run('set', 'sequencer.length', '16'); run('tempo', '120')
+    watch.kill(); run('stop'); run('tempo', '120')
 PY
-check "shortening the loop past the playhead goes back to step 1" "next step 0" python3 "$TMP/loop.py" 16 shorten
-check "lengthening it continues" "next step 4" python3 "$TMP/loop.py" 12 lengthen
-s instrument add tr808 --id gridd --no-channel >/dev/null; s focus gridd >/dev/null; s clip length gridd 3 >/dev/null
-check "the Block grid's playhead follows a focus clip with its own length" "grid playhead at clip step" python3 "$TMP/loop.py" 16 grid
+s instrument add tr808 --id gridd --no-channel >/dev/null; s focus gridd >/dev/null; s clip length gridd 3 >/dev/null; s clip launch gridd >/dev/null
+check "the Block grid's playhead follows the focus clip where it plays" "grid playhead at clip step" python3 "$TMP/grid.py"
 s instrument rm gridd >/dev/null
-# --- The song (RFC 0008 phase B): clip pools, the arrangement, song mode ---
+# --- The song (RFC 0008 phase B, RFC 0009): clip pools, the arrangement,
+# launching ---
 # Renders list what the `song` 808 fired as voice@seconds (120 bpm: a bar
 # is 2 s).
 fired() { "$BIN/4s" --json render "$@" | python3 -c "import json,sys;print(' '.join(f\"{t['voice'] or t['note']}@{t['time']:.2f}\" for t in json.load(sys.stdin)['triggers'] if t['instrument'] == 'song'))"; }
@@ -740,18 +739,26 @@ s instrument add tr808 --id song --no-channel >/dev/null
 s focus song >/dev/null
 s pattern --instrument song set kick "x---x---x---x---" >/dev/null
 check "a new clip is selected, and the step editors edit it" 'song: clips 1, *2 "B"' bash -c "$BIN/4s clip new song --name B >/dev/null && $BIN/4s pattern --instrument song set snare '----x-------x---' >/dev/null && $BIN/4s clip list song"
-check "pattern mode plays the selected clip" "snare@0.50 snare@1.50" fired --bars 1
-check "selecting another plays that one" "kick@0.00 kick@0.50 kick@1.00 kick@1.50" bash -c "$BIN/4s clip select song 1 >/dev/null; fired --bars 1"
+check "a new track plays its arrangement, which is empty" "song: clips 1, *2 \"B\"; plays its arrangement" s clip list song
+check "launching a clip loops it" "snare@0.50 snare@1.50" bash -c "$BIN/4s clip launch song >/dev/null; fired --bars 1"
+check "selecting another clip does not change what plays" "snare@0.50 snare@1.50" bash -c "$BIN/4s clip select song 1 >/dev/null; fired --bars 1"
+check "launching it does" "kick@0.00 kick@0.50 kick@1.00 kick@1.50" bash -c "$BIN/4s clip launch song >/dev/null; fired --bars 1"
+check "launches are journaled with the clip they resolved to" 'clip.launch {"clip":1,"instrument":"song"' s journal --limit 2
+check "...but not undone" "nothing to undo" bash -c "$BIN/4s --user launcher clip launch song 2 >/dev/null; $BIN/4s --user launcher undo"
+check "back to the arrangement" "song: clips *1, 2 \"B\"; plays its arrangement" bash -c "$BIN/4s song back song | grep '^song:'"
 check "duplicate copies a clip into a new one" 'song clip 3 "1 copy": 4 notes' s clip dup song
 s clip del song --clip 3 >/dev/null
 s song place song --at 1 --bars 2 --clip 1 >/dev/null
 check "placing clips on the song" "bar 3       clip 2 (B), 1 bar" s song place song --at 3 --clip 2
-check "song mode plays the arrangement, then stops at its end" "kick@3.50 snare@4.50 snare@5.50" bash -c "$BIN/4s song mode song >/dev/null && $BIN/4s song loop off >/dev/null && fired --bars 4"
+check "the transport plays the arrangement" "kick@3.50 snare@4.50 snare@5.50" bash -c "$BIN/4s song loop off >/dev/null && fired --bars 4"
 check "looping bars 2 to 3 comes back to bar 2" "snare@5.50 kick@6.00 kick@6.50 kick@7.00 kick@7.50 snare@8.50" bash -c "$BIN/4s song loop 2 3 >/dev/null && fired --bars 5"
 check "render --from a bar" "snare@0.50 snare@1.50" fired --bars 1 --from 3
-check "locate sets where song mode plays from" "snare@0.50 snare@1.50" bash -c "$BIN/4s locate 3 >/dev/null && fired --bars 1"
+check "locate sets where play starts from" "snare@0.50 snare@1.50" bash -c "$BIN/4s locate 3 >/dev/null && fired --bars 1"
 s locate 1 >/dev/null
 s song loop off >/dev/null
+check "a launched clip plays instead of the track's arrangement" "kick@0.00 kick@0.50 kick@1.00 kick@1.50 kick@2.00" bash -c "$BIN/4s clip launch song 1 >/dev/null; fired --bars 2 --from 3 | cut -d' ' -f1-5"
+check "and records into that clip, at its loop" "recorded song clip 1: 5 notes" bash -c "$BIN/4s render --bars 1 --to song --input '0.25:39' | grep 'recorded song'"
+s song back song >/dev/null
 check "placing over a placement cuts it" "bar 1       clip 1 (1), 1 bar" s song place song --at 2 --clip 2
 check "...and undo puts it back" "bar 1       clip 1 (1), 2 bars" bash -c "$BIN/4s undo >/dev/null && $BIN/4s song"
 check "moving a placement" "bar 5       clip 2 (B), 1 bar" s song mv song 3 5
@@ -769,14 +776,19 @@ check "...undoing all of it" "transport.tempo = 120" s get transport.tempo
 check "batches cannot nest" "cannot be in a batch" s batch '[{"method":"batch","params":{"requests":[]}}]'
 # Recording in song mode: notes go into the clip under them; with nothing
 # under them, into a new clip made there.
-check "song-mode takes write into placements and make a clip past the end" "recorded song clip 3: 1 notes, length 16 steps" bash -c "$BIN/4s render --bars 4 --to song --input '0.25:39 4.25:39 6.5:39:0.1' | grep 'recorded song clip 3'"
+check "takes into the arrangement write into placements and make a clip past the end" "recorded song clip 3: 1 notes, length 16 steps" bash -c "$BIN/4s render --bars 4 --to song --input '0.25:39 4.25:39 6.5:39:0.1' | grep 'recorded song clip 3'"
 check "...the bar-3 note in clip 2 at its own tick" "48:D#2:24:100 96:D2:24:89 288:D2:24:89" bash -c "$BIN/4s render --bars 4 --to song --input '0.25:39 4.25:39 6.5:39:0.1' | grep -A4 'clip 2' | tail -1"
 check "notes past the end go in clips of whole bars, a new one past the longest" "recorded song clip 4: 1 notes" bash -c "$BIN/4s render --bars 12 --to song --input '8.5:39 14.5:39 20.5:39' | grep 'recorded song clip 4'"
 check "...the clip before it grew to hold both of its notes" "96:D#2:24:100 1248:D#2:24:100" bash -c "$BIN/4s render --bars 12 --to song --input '8.5:39 14.5:39 20.5:39' | grep -A3 'recorded song clip 3' | tail -1"
 # Live, at 240 bpm (a bar is 1 s): the song's end stops playback, unless
 # recording, which goes on past it.
 s tempo 240 >/dev/null
-check "song mode stops at the song's end" "transport: stopped" bash -c "$BIN/4s play >/dev/null && sleep 3.6 && $BIN/4s status | grep transport"
+check "the drums still loop their launched clip" "drums: clips *1; plays clip 1 (launched)" bash -c "$BIN/4s clip list drums"
+check "...so the song does not stop at its end" "transport: playing" bash -c "$BIN/4s play >/dev/null && sleep 3.6 && $BIN/4s status | grep transport"
+check "a launch while playing waits for the bar" "plays clip 2 (launched) (waiting for the boundary)" bash -c "$BIN/4s clip launch song 2 | grep '^song:'"
+check "...and lands on it (240 bpm: within a second)" "landed: song: clips *1, 2 \"B\"; plays clip 2 (launched)" bash -c "for i in \$(seq 40); do $BIN/4s clip list song | grep -q waiting || break; sleep 0.05; done; $BIN/4s clip list song | grep -q waiting || echo landed: \$($BIN/4s clip list song)"
+check "back to the arrangement for every track" "plays its arrangement" bash -c "$BIN/4s song back --now >/dev/null && sleep 0.2 && $BIN/4s clip list drums"
+check "with nothing launched, the song stops at its end" "transport: stopped" bash -c "$BIN/4s stop >/dev/null && $BIN/4s play >/dev/null && sleep 3.6 && $BIN/4s status | grep transport"
 s locate 3 >/dev/null
 s record --to song --count-in 0 >/dev/null
 sleep 1.2
@@ -789,7 +801,18 @@ check "...journaled as one batch" "batch {\"requests\":[{\"method\":\"clip.new\"
 check "...that replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/song.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/song.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 check "...and is one undo step" "undid: batch: clip.new, clip.update, song.place" s undo
 s tempo 120 >/dev/null
-s song mode pattern >/dev/null
+# A v5 project saved in pattern mode launches each track's selected clip
+# (RFC 0009), so it plays as before: the drums' clip, at sequencer.length.
+mkdir -p "$FOURS_DATA_DIR/projects/v5.4s"
+cat > "$FOURS_DATA_DIR/projects/v5.4s/project.json" <<'JSON'
+{"format_version": 5, "instruments": [{"id": "drums", "type": "tr808", "name": "Drums"}],
+ "channels": [{"n": 1, "name": "Drums"}], "routes": {"drums": 1}, "controller": {"follow": true},
+ "params": {"song.mode": 0, "sequencer.length": 8},
+ "tracks": {"drums": {"selected": 1, "clips": {"1": {"pattern": {"kick": "x---x---"}}}}}}
+JSON
+check "a v5 pattern-mode project launches its selected clips" "drums: clips *1; plays clip 1 (launched)" bash -c "$BIN/4s project load v5 >/dev/null && $BIN/4s clip list drums"
+check "...which loop at its sequencer.length" "kick@0.00 kick@0.50 kick@1.00 kick@1.50" bash -c "$BIN/4s --json render --bars 1 | python3 -c \"import json,sys;print(' '.join(f\\\"{t['voice']}@{t['time']:.2f}\\\" for t in json.load(sys.stdin)['triggers']))\""
+s project load song >/dev/null
 s instrument rm song >/dev/null
 # The clip table is full: undoing an instrument's removal (it needs a clip)
 # fails cleanly instead of taking the daemon down.

@@ -249,9 +249,9 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
   included).
 - **Recording isn't re-armed.** Replay sends `transport.record` without
   `arm`, so replayed notes are not recorded again; each recorded pass is
-  its own entry (a `clip.update` with `recorded: true`, or in song mode a
-  `batch` that can also make and place a clip, RFC 0008), replayed like
-  any edit.
+  its own entry (a `clip.update` with `recorded: true`, or into the
+  arrangement a `batch` that can also make and place a clip, RFC 0008),
+  replayed like any edit.
 - **Replay into a daemon with the recording's host user.** Each entry
   records its caller's seat, and replay joins it, but `controller.*` and a
   Block act on the host seat, the daemon's own user (`FOURS_USER`, else the

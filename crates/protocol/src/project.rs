@@ -10,7 +10,7 @@ use ts_rs::TS;
 
 /// Current project format version. Bump and add a migration when the format
 /// changes incompatibly.
-pub const PROJECT_FORMAT_VERSION: u32 = 5;
+pub const PROJECT_FORMAT_VERSION: u32 = 6;
 /// Oldest version this build can load. Version 1 (the fixed 8-track kit)
 /// was dropped with RFC 0004, without a migration.
 pub const OLDEST_PROJECT_FORMAT_VERSION: u32 = 2;
@@ -29,8 +29,9 @@ pub struct ProjectFile {
     /// Parameter values by path. Unknown paths are ignored on load; missing
     /// paths take their defaults.
     pub params: BTreeMap<String, f64>,
-    /// Per instrument id (RFC 0008): its clip pool, selected clip, and
-    /// arrangement. An instrument left out has one empty clip.
+    /// Per instrument id (RFC 0008): its clip pool, selected clip,
+    /// arrangement, and launched clip. An instrument left out has one empty
+    /// one-bar clip and follows its (empty) arrangement.
     #[serde(default)]
     pub tracks: BTreeMap<String, ProjectTrack>,
     pub controller: ProjectController,
@@ -66,24 +67,39 @@ pub struct ProjectTrack {
     /// Placements on the song timeline, by start.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub arrangement: Vec<Placement>,
+    /// The clip the track loops instead of its arrangement (RFC 0009).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launched: Option<u32>,
 }
 
-/// A clip in a project file: a step pattern when one says exactly the same
-/// thing (drum step strings per voice, `{"kick": "x---x---"}`, or a note
-/// string, `"C2 C2! D#2~ -"`), else events in text form (`tick:note:len:vel`,
-/// see `format_events`); both absent for an empty clip.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+/// A clip in a project file: its length, and a step pattern when one says
+/// exactly the same thing (drum step strings per voice, `{"kick":
+/// "x---x---"}`, or a note string, `"C2 C2! D#2~ -"`), else events in text
+/// form (`tick:note:len:vel`, see `format_events`); both absent for an
+/// empty clip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ProjectClip {
     /// Default: the clip's id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Ticks; absent follows `sequencer.length`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub length: Option<u32>,
+    /// Ticks (where it loops).
+    #[serde(default = "default_clip_length")]
+    pub length: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern: Option<ProjectPattern>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events: Option<String>,
+}
+
+impl Default for ProjectClip {
+    /// An empty one-bar clip.
+    fn default() -> Self {
+        Self { name: None, length: default_clip_length(), pattern: None, events: None }
+    }
+}
+
+fn default_clip_length() -> u32 {
+    crate::clip::DEFAULT_CLIP_LENGTH
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -96,7 +112,56 @@ pub struct ProjectController {
 /// `MIGRATIONS[0]` upgrades `OLDEST_PROJECT_FORMAT_VERSION` to the next one,
 /// and so on.
 type Migration = fn(Value) -> Result<Value, String>;
-const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4, v4_to_v5];
+const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6];
+
+/// v6 (RFC 0009): one transport that always plays the arrangement, and clip
+/// launching instead of pattern mode. `song.mode` and `sequencer.length`
+/// go. A project saved in pattern mode launches each track's selected clip
+/// (an instrument with no track gets its empty clip, launched), so it plays
+/// as it did. A clip without a length gets `sequencer.length` (in ticks),
+/// which it followed.
+fn v5_to_v6(mut v: Value) -> Result<Value, String> {
+    let params = v.get_mut("params").and_then(Value::as_object_mut);
+    let (song_mode, steps) = match params {
+        Some(p) => (
+            p.remove("song.mode").and_then(|m| m.as_f64()).unwrap_or(0.0),
+            p.remove("sequencer.length").and_then(|l| l.as_f64()).unwrap_or(16.0),
+        ),
+        None => (0.0, 16.0),
+    };
+    let length = ((steps.round() as i64).clamp(1, MAX_STEPS as i64) as u32) * crate::clip::TICKS_PER_STEP;
+    let pattern = song_mode < 0.5;
+    let ids: Vec<String> = v
+        .get("instruments")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|i| i.get("id").and_then(Value::as_str).map(str::to_string)).collect())
+        .unwrap_or_default();
+    if !v.get("tracks").is_some_and(Value::is_object) {
+        v["tracks"] = Value::Object(Default::default());
+    }
+    let tracks = v["tracks"].as_object_mut().expect("an object");
+    if pattern {
+        for id in &ids {
+            tracks.entry(id.clone()).or_insert_with(|| serde_json::json!({ "selected": 1, "clips": { "1": {} } }));
+        }
+    }
+    for t in tracks.values_mut() {
+        if let Some(clips) = t.get_mut("clips").and_then(Value::as_object_mut) {
+            for c in clips.values_mut() {
+                if let Some(c) = c.as_object_mut()
+                    && c.get("length").is_none_or(Value::is_null)
+                {
+                    c.insert("length".into(), length.into());
+                }
+            }
+        }
+        if pattern && let Some(selected) = t.get("selected").cloned() {
+            t["launched"] = selected;
+        }
+    }
+    v["format_version"] = 6.into();
+    Ok(v)
+}
 
 /// v5 (RFC 0008 phase B): each instrument has a track with a pool of clips.
 /// An instrument's pattern or clip becomes clip 1 of its pool, selected.
@@ -177,8 +242,9 @@ pub fn project_to_json(p: &ProjectFile) -> String {
     s
 }
 
-/// Format a track's steps for a project file: the active length, extended to
-/// the next multiple of 16 if notes exist beyond it (so they are not lost).
+/// Format a track's steps for a project file: the clip's length in steps,
+/// extended to the next multiple of 16 if notes exist beyond it (so they
+/// are not lost).
 pub fn steps_for_file(steps: &[u8], length: usize) -> String {
     let last = steps.iter().rposition(|s| *s != STEP_OFF).map(|i| i + 1).unwrap_or(0);
     let mut end = length.max(1);
@@ -197,16 +263,48 @@ mod tests {
     #[test]
     fn v2_fixture_loads() {
         let p = parse_project(V2_FIXTURE).unwrap();
-        assert_eq!(p.format_version, 5);
+        assert_eq!(p.format_version, 6);
         assert!(p.seats.is_empty());
         assert!(p.controller.follow);
         let drums = &p.tracks["drums"];
         assert_eq!(drums.selected, 1);
+        // Saved in pattern mode: it launches its clip, which loops at the
+        // project's `sequencer.length`.
+        assert_eq!(drums.launched, Some(1));
+        assert_eq!(drums.clips[&1].length, 16 * crate::clip::TICKS_PER_STEP);
+        assert!(!p.params.contains_key("sequencer.length"));
         let Some(ProjectPattern::Drums(d)) = &drums.clips[&1].pattern else { panic!("drums pattern") };
         assert_eq!(d[&Voice::Kick], "X---x---X---x---");
         assert!(matches!(&p.tracks["bass"].clips[&1].pattern, Some(ProjectPattern::Notes(n)) if n.starts_with("C2")));
         assert_eq!(p.routes["bass"], 2);
         assert_eq!(p.params["transport.tempo"], 118.0);
+    }
+
+    /// v6 (RFC 0009): a project saved in song mode launches nothing; one
+    /// saved in pattern mode launches every track's selected clip, an
+    /// instrument without a track included. Clips that followed
+    /// `sequencer.length` get it as their length.
+    #[test]
+    fn v5_pattern_mode_launches_selected_clips() {
+        let v5 = |mode: f64| {
+            format!(
+                r#"{{"format_version": 5,
+                "instruments": [{{"id": "drums", "type": "tr808", "name": "Drums"}}, {{"id": "bass", "type": "tb303", "name": "Bass"}}],
+                "channels": [], "routes": {{}}, "controller": {{"follow": true}},
+                "params": {{"song.mode": {mode}, "sequencer.length": 12, "transport.tempo": 100}},
+                "tracks": {{"drums": {{"selected": 2, "clips": {{"1": {{}}, "2": {{"length": 48}}}},
+                    "arrangement": [{{"clip": 1, "start": 0, "length": 384}}]}}}}}}"#
+            )
+        };
+        let pattern = parse_project(&v5(0.0)).unwrap();
+        assert_eq!(pattern.tracks["drums"].launched, Some(2));
+        assert_eq!(pattern.tracks["bass"].launched, Some(1));
+        assert_eq!(pattern.tracks["drums"].clips[&1].length, 12 * crate::clip::TICKS_PER_STEP);
+        assert_eq!(pattern.tracks["drums"].clips[&2].length, 48);
+        assert_eq!(pattern.params.keys().collect::<Vec<_>>(), ["transport.tempo"]);
+        let song = parse_project(&v5(1.0)).unwrap();
+        assert_eq!(song.tracks["drums"].launched, None);
+        assert!(!song.tracks.contains_key("bass"));
     }
 
     #[test]

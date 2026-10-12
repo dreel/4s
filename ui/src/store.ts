@@ -14,7 +14,7 @@ import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
 import { RpcClient, type ConnectionState } from "./rpc";
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 export type AppState = {
   connection: ConnectionState;
@@ -299,12 +299,13 @@ function apply(env: EventEnvelope) {
             playing: ev.playing,
             step: ev.playing ? s.transport.step : null,
             tick: ev.playing ? s.transport.tick : null,
+            clips: ev.playing ? s.transport.clips : {},
           },
         },
       });
       break;
     case "playhead":
-      app.set({ snapshot: { ...s, transport: { ...s.transport, step: ev.step, tick: ev.tick } } });
+      app.set({ snapshot: { ...s, transport: { ...s.transport, step: ev.step, tick: ev.tick, clips: ev.clips } } });
       break;
     case "record":
       app.set({ snapshot: { ...s, record: ev.state } });
@@ -346,6 +347,28 @@ export async function undo(redo = false) {
     const what = r.changed.length === 0 ? `could not ${redo ? "redo" : "undo"}` : `${redo ? "redo" : "undo"}: kept`;
     app.set({ error: `${what} ${r.skipped.join(", ")} (changed by someone else)` });
   }
+}
+
+/** Where an instrument is playing its selected clip: the tick in it, or
+ * null when it is not playing that clip (RFC 0009: the selected clip is
+ * only the edit target; the track plays a launched clip or its
+ * arrangement). */
+export function useSelectedClipTick(id: string): number | null {
+  return useApp((s) => {
+    const at = s.snapshot?.transport.clips[id];
+    const selected = s.snapshot?.tracks.find((t) => t.instrument === id)?.selected;
+    return s.snapshot?.transport.playing && at && at.clip === selected ? at.tick : null;
+  });
+}
+
+/** The selected clip's length in whole steps (rounded up): what the step
+ * editors show. */
+export function useSelectedClipSteps(id: string): number {
+  return useApp((s) => {
+    const selected = s.snapshot?.tracks.find((t) => t.instrument === id)?.selected;
+    const clip = s.snapshot?.clips.find((c) => c.instrument === id && c.id === selected);
+    return Math.min(64, Math.ceil((clip?.length ?? 384) / 24));
+  });
 }
 
 export function param(path: string): number {

@@ -2,6 +2,6 @@
 
 export type LocateParams = { 
 /**
- * Song tick that song mode plays from.
+ * Song tick that play starts from.
  */
 tick: number, };

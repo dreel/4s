@@ -1,9 +1,6 @@
 # RFC 0009: One transport, clip launching, and a generic step view
 
-- Status: proposed (the direction was approved by Sam in the project
-  thread on 2026-10-11: one transport that always plays the arrangement,
-  plus Ableton-style clip launching in place of pattern mode; the details
-  are for review on this PR, and merging it accepts them)
+- Status: accepted (phase 1 implemented; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-11
 - Discussion: the PR that introduces this RFC.
@@ -279,3 +276,50 @@ This RFC changes none of that; it only keeps instruments behind the
   only sets what plays.
 - A "stop clip" (a track silent, neither arrangement nor a clip) is left
   out until someone needs it.
+
+## Implementation notes (phase 1: one transport and clip launching)
+
+Where these differ from the sections above, these win:
+
+- **Undo and launches.** `launched:<id>` is an undo key, but `clip.launch`
+  and `song.back` do not build the doc (`changes_doc`), so launching never
+  makes an undo step. Changes other requests make to it are undone like
+  any key: undoing the removal of an instrument, or the deletion of a
+  launched clip, launches it again. (Section 2 said such an undo would not
+  relaunch; with it, undoing a removal left a silent instrument.)
+- **Parameters and state.** `transport.launch_quantize` (the path is under
+  `transport.`, a reserved id, so no instrument can shadow it) is an
+  ordinary parameter: saved and undone. Removing an instrument resets its
+  engine slot (launch and pending switch included) and drops its track; a
+  project load or new sets every track's launch from the file (the
+  default project launches its drums). The daemon
+  keeps each track's `launched` (asked for) and what the engine plays
+  (`Feedback::Launched`: clip and start tick); `pending` is the two
+  differing while playing. Play and stop settle every track at once, as
+  the engine does.
+- **Playheads.** `TransportState.clips` and the `playhead` event's `clips`
+  map each playing track to `{clip, tick}`; editors draw the playhead only
+  when the track plays their (selected) clip. The Block grid edits the
+  selected clip until phase 2, and shows its playhead the same way.
+- **Recording.** A take's target is what its track plays at that moment:
+  `TakeTarget::Clip { clip, length, start }` for a launched clip (start:
+  the tick it started), else the arrangement. When the track switches
+  during a take, the take writes what was played up to the switch and goes
+  on into the new target. A render (`render --record`) records into the
+  launched clip from tick 0, or the arrangement.
+- **Project format v6, protocol 8** as in "Migration". The default project
+  launches its drums' clip; `instrument.add` launches nothing (the open
+  question stands). Clip lengths are always saved; step patterns are used
+  only for clips a whole number of steps long.
+- **CLI**: `4s clip launch [instrument] [clip] [--now]`, `4s song back
+  [instrument] [--now]`; `4s clip list` and `4s song` say what each track
+  plays and whether it is waiting for its boundary; `4s watch --type
+  playhead` shows each track's clip and step.
+- **UI**: the transport loses the pattern/song toggle and the global
+  length; it gains "back to song" (every track) and the launch quantize.
+  The editor's clip bar launches the selected clip and goes back, and the
+  selected clip's length is set there in steps (8, 16, 32, 64). In the
+  arrangement each pool clip has a launch triangle, the launched clip and
+  its lane show it (pulsing while it waits), the header has "back", and
+  "loop" (or L) sets the loop brace over the selected placements.
+

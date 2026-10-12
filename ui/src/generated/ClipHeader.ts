@@ -3,4 +3,4 @@
 /**
  * A clip without its events.
  */
-export type ClipHeader = { id: number, name: string, length: number | null, };
+export type ClipHeader = { id: number, name: string, length: number, };

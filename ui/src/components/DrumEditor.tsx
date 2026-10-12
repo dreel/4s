@@ -5,7 +5,7 @@
 
 import type { TrackPattern } from "../generated/TrackPattern";
 import type { Voice } from "../generated/Voice";
-import { act, client, setParam, useApp, useLive } from "../store";
+import { act, client, setParam, useApp, useLive, useSelectedClipSteps, useSelectedClipTick } from "../store";
 import { BlockMirror } from "./BlockMirror";
 import { Toggle } from "./controls";
 import { ParamKnob, pan, pct, st } from "./ParamKnob";
@@ -117,9 +117,9 @@ function VoiceStrip({ id, voice }: { id: string; voice: Voice }) {
 
 export function DrumEditor({ id }: { id: string }) {
   const pattern = useApp((s) => s.snapshot?.patterns.find((p) => p.instrument === id)?.pattern);
-  const length = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
-  const playhead = useApp((s) => s.snapshot?.transport.step ?? null);
-  const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
+  const length = useSelectedClipSteps(id);
+  const at = useSelectedClipTick(id);
+  const playhead = at === null ? null : Math.floor(at / 24);
   const isTarget = useApp((s) => s.snapshot?.controller.focus === id);
   const blockSeat = useApp((s) => s.snapshot?.controller.seat ?? null);
   if (!pattern || pattern.kind !== "drums") return null;
@@ -132,7 +132,7 @@ export function DrumEditor({ id }: { id: string }) {
             <span>click: on/off - shift/right-click: accent</span>
           </div>
           {pattern.tracks.map((t) => (
-            <Row key={t.voice} id={id} track={t} length={length} playhead={playing ? playhead : null} />
+            <Row key={t.voice} id={id} track={t} length={length} playhead={playhead} />
           ))}
         </section>
         {isTarget ? (

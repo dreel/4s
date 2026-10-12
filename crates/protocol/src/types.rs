@@ -327,12 +327,15 @@ pub struct InstrumentPattern {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct TransportState {
     pub playing: bool,
-    /// Current step while playing.
+    /// The song position in steps, while playing.
     pub step: Option<u32>,
-    /// Song tick playing (song mode), while playing.
+    /// The song tick playing, while playing.
     pub tick: Option<u32>,
-    /// Song tick song mode plays from (`transport.locate`).
+    /// Song tick play starts from (`transport.locate`).
     pub start: u32,
+    /// Where each track is playing, by instrument id (tracks playing
+    /// nothing are left out), while playing.
+    pub clips: BTreeMap<String, crate::clip::ClipPlayhead>,
 }
 
 /// How a recording pass treats the notes already in the clip.
@@ -823,9 +826,10 @@ pub enum Event {
     /// Recording started or ended, or its settings changed.
     Record { state: RecordState },
     /// A step started. `time` is engine time in seconds; `tick` is the song
-    /// tick (in song mode, where the song plays; else from play).
-    Playhead { step: u32, tick: u32, time: f64 },
-    /// Song mode's start point moved (`transport.locate`).
+    /// tick and `step` the same in steps; `clips` where each track is
+    /// playing (as `TransportState`).
+    Playhead { step: u32, tick: u32, time: f64, clips: BTreeMap<String, crate::clip::ClipPlayhead> },
+    /// The start point moved (`transport.locate`).
     Located { tick: u32 },
     /// An instrument played (from the sequencer, a pad, MIDI, or an
     /// audition). Drums set `voice`; note instruments set `note`.

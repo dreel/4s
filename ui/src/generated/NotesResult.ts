@@ -3,7 +3,7 @@ import type { NoteStep } from "./NoteStep";
 
 export type NotesResult = { instrument: string, 
 /**
- * Active length (`sequencer.length`).
+ * The selected clip's length in steps (rounded up).
  */
 length: number, 
 /**

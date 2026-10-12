@@ -121,11 +121,16 @@ export function barBeat(tick: number) {
   return `${Math.floor(tick / 384) + 1}.${Math.floor((tick % 384) / 96) + 1}`;
 }
 
-/** Song mode (RFC 0008): pattern or song, what song mode loops, and where it
- * plays from. */
+/** Launch quantize choices (`transport.launch_quantize`). */
+const QUANTIZE = ["none", "1 beat", "1 bar", "2 bars", "4 bars"];
+
+/** The song (RFC 0008, RFC 0009): play always plays the arrangement; what it
+ * loops, where it plays from, where clip launches land, and back to the
+ * arrangement for every track playing a launched clip. */
 function SongControls() {
   const p = (k: string) => (s: AppSnapshot) => s.snapshot?.params[k] ?? 0;
-  const song = useApp(p("song.mode")) >= 0.5;
+  const quantize = useApp(p("transport.launch_quantize"));
+  const launched = useApp((s) => (s.snapshot?.tracks ?? []).filter((t) => t.launched !== null).length);
   const loop = useApp(p("song.loop"));
   const loopStart = useApp(p("song.loop_start"));
   const loopEnd = useApp(p("song.loop_end"));
@@ -134,16 +139,36 @@ function SongControls() {
   return (
     <div className="flex items-end gap-2" data-testid="song-controls">
       <button
-        data-testid="mode-toggle"
-        data-song={song}
-        title="pattern mode loops each instrument's selected clip; song mode plays the arrangement"
-        onClick={() => void setParam("song.mode", song ? 0 : 1)}
+        data-testid="back-all"
+        data-launched={launched}
+        disabled={launched === 0}
+        title={
+          launched === 0
+            ? "every track plays the arrangement"
+            : `${launched} track${launched === 1 ? "" : "s"} play${launched === 1 ? "s" : ""} a launched clip; click to go back to the arrangement`
+        }
+        onClick={() => void act(client.call("song.back", { instrument: null, now: null }))}
         className={`h-10 px-3 rounded text-xs border ${
-          song ? "bg-violet-500 text-zinc-950 border-violet-400" : "bg-zinc-900 border-zinc-700 hover:border-zinc-500"
+          launched > 0 ? "bg-emerald-500 text-zinc-950 border-emerald-400" : "bg-zinc-900 border-zinc-700 text-zinc-500"
         }`}
       >
-        {song ? "song" : "pattern"}
+        back to song
       </button>
+      <label className="flex flex-col text-[10px] text-zinc-500" title="where clip launches and returns to the arrangement land while playing">
+        launch
+        <select
+          className={selectCls}
+          value={quantize}
+          data-testid="launch-quantize"
+          onChange={(e) => void setParam("transport.launch_quantize", Number(e.target.value))}
+        >
+          {QUANTIZE.map((q, i) => (
+            <option key={q} value={i}>
+              {q}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="flex flex-col text-[10px] text-zinc-500">
         loop
         <select className={selectCls} value={loop} data-testid="song-loop" onChange={(e) => void setParam("song.loop", Number(e.target.value))}>
@@ -178,7 +203,7 @@ function SongControls() {
           </label>
         </>
       )}
-      <label className="flex flex-col text-[10px] text-zinc-500" title="where song mode plays from">
+      <label className="flex flex-col text-[10px] text-zinc-500" title="where play starts from">
         start bar
         <input
           type="number"
@@ -195,11 +220,8 @@ function SongControls() {
 
 export function Transport() {
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
-  const step = useApp((s) => s.snapshot?.transport.step ?? null);
   const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
-  const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
   const tempo = useApp((s) => s.snapshot?.params["transport.tempo"] ?? 120);
-  const length = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   return (
     <div className="flex items-center gap-5" data-testid="transport">
       <button
@@ -215,9 +237,9 @@ export function Transport() {
       <RecordControls />
       <SongControls />
       <div className="w-16 text-center">
-        <div className="text-[10px] text-zinc-500">{song ? "bar" : "step"}</div>
+        <div className="text-[10px] text-zinc-500">bar</div>
         <div className="text-lg tabular-nums" data-testid="playhead" data-tick={tick ?? ""}>
-          {!playing || step === null ? "-" : song && tick !== null ? barBeat(tick) : step + 1}
+          {!playing || tick === null ? "-" : barBeat(tick)}
         </div>
       </div>
       <label className="flex flex-col text-[10px] text-zinc-500">
@@ -238,23 +260,6 @@ export function Transport() {
       </label>
       <ParamKnob path="transport.tempo" label="tempo" format={(v) => v.toFixed(0)} />
       <ParamKnob path="transport.swing" label="swing" format={(v) => `${Math.round(50 + v * 25)}%`} />
-      <label className="flex flex-col text-[10px] text-zinc-500">
-        length (steps)
-        <div className="flex gap-1 mt-0.5">
-          {[8, 16, 32, 64].map((n) => (
-            <button
-              key={n}
-              data-testid={`length-${n}`}
-              onClick={() => void setParam("sequencer.length", n)}
-              className={`px-2 py-1 rounded text-xs border ${
-                length === n ? "bg-amber-500 text-zinc-950 border-amber-400" : "bg-zinc-900 border-zinc-700 hover:border-zinc-500"
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      </label>
     </div>
   );
 }

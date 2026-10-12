@@ -1,8 +1,11 @@
-// The arrangement view (RFC 0008 phase C): the song left to right, one lane
-// per track (= instrument). Track headers select the instrument for the
-// editor and arm it (the seat's focus, which routes MIDI input and sets the
-// record target). The ruler shows bars, the loop range, the song's end, and
-// where song mode plays from; click it to locate. Placements show their
+// The arrangement view (RFC 0008 phase C, RFC 0009): the song left to
+// right, one lane per track (= instrument); play always plays it. Track
+// headers select the instrument for the editor and arm it (the seat's
+// focus, which routes MIDI input and sets the record target), and launch a
+// clip from the pool (the track loops it instead of its lane, dimmed, until
+// "back"). The ruler shows bars, the loop range, the song's end, and where
+// play starts from; click it to locate. "loop" sets the loop brace over the
+// selected placements. Placements show their
 // clip's name and a note preview, with looped repeats marked. Drag a
 // placement to move it (alone, onto another track's lane too: its clip is
 // copied into that pool), its right edge to resize it (longer loops the
@@ -19,8 +22,7 @@ import type { MethodName } from "../generated/methods";
 import { act, client, mySeat, select, useApp, useSelected } from "../store";
 import { PianoRoll } from "./PianoRoll";
 
-/** Ticks per step, beat, and bar, as in the protocol. */
-const STEP = 24;
+/** Ticks per beat and bar, as in the protocol. */
 const BEAT = 96;
 const BAR = 384;
 const LANE = 44;
@@ -111,13 +113,13 @@ function NotePreview({ placement, clip, clipLength, px }: { placement: Placement
 function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars: number; drag: Drag | null; picked: Set<string>; h: Handlers }) {
   const track = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id));
   const clips = useApp((s) => s.snapshot?.clips);
-  const stepsLength = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
-  const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
   const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
   if (!track) return null;
+  // A launched clip plays instead of the lane, which is dimmed.
+  const launched = track.launched !== null;
   const clipOf = (n: number, from = id) => clips?.find((c) => c.instrument === from && c.id === n);
-  const lengthOf = (n: number, from = id) => clipOf(n, from)?.length ?? stepsLength * STEP;
+  const lengthOf = (n: number, from = id) => clipOf(n, from)?.length ?? BAR;
   const mine = drag?.id === id ? drag : null;
   // A move or copy carries this lane's selected placements too.
   const group = drag?.kind === "move" || drag?.kind === "copy" ? drag.group.filter((g) => g.id === id) : [];
@@ -138,7 +140,7 @@ function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars:
 
   const block = (p: Placement, at: number | null, from = id) => {
     const clip = clipOf(p.clip, from);
-    const live = at !== null && playing && song && tick !== null && p.start <= tick && tick < p.start + p.length;
+    const live = at !== null && playing && !launched && tick !== null && p.start <= tick && tick < p.start + p.length;
     const sel = at !== null && picked.has(pickKey(id, at));
     return (
       <div
@@ -147,7 +149,7 @@ function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars:
           at === null
             ? "border-dashed border-violet-200 bg-violet-500/25 pointer-events-none"
             : `cursor-grab ${p.clip === track.selected ? "bg-violet-500/35 border-violet-300" : "bg-violet-500/20 border-violet-500/60"}`
-        } ${sel ? "outline outline-1 outline-zinc-50" : ""} ${live ? "ring-1 ring-zinc-100" : ""}`}
+        } ${sel ? "outline outline-1 outline-zinc-50" : ""} ${live ? "ring-1 ring-zinc-100" : ""} ${launched && at !== null ? "opacity-40" : ""}`}
         style={{ left: p.start * px, width: Math.max(2, p.length * px) }}
         title={`${clip?.name ?? `clip ${p.clip}`}: bar ${p.start / BAR + 1}, ${p.length / BAR} bars${p.offset ? `, from tick ${p.offset}` : ""}`}
         data-testid={at === null ? `placement-ghost-${id}` : `placement-${id}-${at}`}
@@ -175,7 +177,13 @@ function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars:
   };
 
   return (
-    <div className="relative border-b border-zinc-800" style={{ height: LANE, width: bars * BAR * px }} data-testid={`lane-${id}`} data-lane={id}>
+    <div
+      className={`relative border-b border-zinc-800 ${launched ? "bg-emerald-950/30" : ""}`}
+      style={{ height: LANE, width: bars * BAR * px }}
+      data-testid={`lane-${id}`}
+      data-lane={id}
+      data-launched={launched}
+    >
       {track.arrangement.map((p) => block(shown(p), p.start))}
       {ghosts.map((g) => block(g, null))}
       {away && cross && block(away, null, cross.id)}
@@ -195,7 +203,9 @@ const resized = (d: { p: Placement; dl: number }) => Math.min(MAX_TICKS - d.p.st
 
 function TrackHeader({ id, name, type, armed, selected, seated, h }: { id: string; name: string; type: string; armed: boolean; selected: boolean; seated: boolean; h: Handlers }) {
   const clips = useApp((s) => s.snapshot?.clips);
+  const track = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id));
   const pool = useMemo(() => (clips ?? []).filter((c) => c.instrument === id), [clips, id]);
+  const launched = track?.launched ?? null;
   return (
     <div
       className={`flex flex-col justify-center gap-0.5 px-2 border-b border-zinc-800 text-xs ${selected ? "bg-zinc-800" : ""}`}
@@ -224,23 +234,52 @@ function TrackHeader({ id, name, type, armed, selected, seated, h }: { id: strin
         >
           <span className={`w-2 h-2 rounded-full ${armed ? "bg-white" : "bg-red-500/70"}`} />
         </button>
+        <button
+          className={`px-1 h-5 shrink-0 rounded border text-[9px] ${
+            launched !== null ? "border-emerald-500 text-emerald-300 hover:border-emerald-300" : "border-zinc-700 text-zinc-600"
+          } ${launched !== null && track?.pending ? "animate-pulse" : ""}`}
+          disabled={launched === null}
+          title={launched === null ? "plays the arrangement" : "back to the arrangement (from the next bar while playing)"}
+          data-testid={`track-back-${id}`}
+          data-pending={track?.pending ?? false}
+          onClick={() => void act(client.call("song.back", { instrument: id, now: null }))}
+        >
+          back
+        </button>
       </div>
-      {/* The clip pool: drag a clip into the lane to place it. */}
+      {/* The clip pool: drag a clip into the lane to place it; its
+          triangle launches it (green while launched, pulsing while it waits
+          for its bar). */}
       <div className="flex gap-0.5 overflow-hidden" data-testid={`pool-${id}`}>
-        {pool.map((c) => (
-          <div
-            key={c.id}
-            className="max-w-12 px-1 rounded-sm bg-violet-500/25 border border-violet-500/50 text-[9px] leading-3 text-violet-200 truncate cursor-grab touch-none select-none"
-            title={`${c.name}: drag into the lane to place it`}
-            data-testid={`pool-${id}-${c.id}`}
-            onPointerDown={(e) => h.down(e, { kind: "pool", id, clip: c.id, start: null })}
-            onPointerMove={h.move}
-            onPointerUp={h.up}
-            onPointerCancel={h.cancel}
-          >
-            {c.name}
-          </div>
-        ))}
+        {pool.map((c) => {
+          const on = launched === c.id;
+          return (
+            <div
+              key={c.id}
+              className={`flex items-center gap-0.5 max-w-14 pr-1 rounded-sm border text-[9px] leading-3 truncate cursor-grab touch-none select-none ${
+                on ? "bg-emerald-500/30 border-emerald-400 text-emerald-100" : "bg-violet-500/25 border-violet-500/50 text-violet-200"
+              } ${on && track?.pending ? "animate-pulse" : ""}`}
+              title={`${c.name}: drag into the lane to place it`}
+              data-testid={`pool-${id}-${c.id}`}
+              data-launched={on}
+              onPointerDown={(e) => h.down(e, { kind: "pool", id, clip: c.id, start: null })}
+              onPointerMove={h.move}
+              onPointerUp={h.up}
+              onPointerCancel={h.cancel}
+            >
+              <button
+                className="shrink-0 h-3 px-0.5 flex items-center"
+                title={`launch ${c.name}: the track loops it instead of its lane (from the next bar while playing)`}
+                data-testid={`launch-${id}-${c.id}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => void act(client.call("clip.launch", { instrument: id, clip: c.id, now: null }))}
+              >
+                <span className={`w-0 h-0 border-y-[3px] border-y-transparent border-l-[5px] ${on ? "border-l-emerald-200" : "border-l-violet-300"}`} />
+              </button>
+              <span className="truncate">{c.name}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -357,10 +396,8 @@ export function Arrangement() {
   const instruments = useApp((s) => s.snapshot?.graph.instruments ?? []);
   const tracks = useApp((s) => s.snapshot?.tracks);
   const clips = useApp((s) => s.snapshot?.clips);
-  const stepsLength = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
   const seat = useApp(mySeat);
   const selected = useSelected();
-  const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
   const loop = useApp((s) => s.snapshot?.params["song.loop"] ?? 0);
   const loopStart = useApp((s) => s.snapshot?.params["song.loop_start"] ?? 0);
   const loopEnd = useApp((s) => s.snapshot?.params["song.loop_end"] ?? 4);
@@ -389,7 +426,7 @@ export function Arrangement() {
   const bars = Math.max(MIN_BARS, Math.ceil(Math.max(end, start, loopEnd * BAR) / BAR) + TAIL);
   const width = bars * BAR * px;
   const focus = seat ? (seat.config.focus ?? instruments[0]?.id ?? null) : null;
-  const head = playing && song && tick !== null ? tick : null;
+  const head = playing && tick !== null ? tick : null;
 
   /** Play from `x` pixels into the timeline, snapped. */
   const locateAt = (x: number) => void act(client.call("transport.locate", { tick: Math.max(0, Math.round(x / px / snap) * snap) }));
@@ -428,7 +465,7 @@ export function Arrangement() {
     const r = lane?.getBoundingClientRect();
     const x = r ? e.clientX - r.left : -1;
     const on = !!r && x >= 0 && x < r.width && e.clientY >= r.top && e.clientY < r.bottom;
-    const length = clips?.find((c) => c.instrument === drag.id && c.id === drag.clip)?.length ?? stepsLength * STEP;
+    const length = clips?.find((c) => c.instrument === drag.id && c.id === drag.clip)?.length ?? BAR;
     return { ...drag, start: on ? Math.min(Math.floor((MAX_TICKS - length) / snap) * snap, Math.floor(x / px / snap) * snap) : null };
   };
 
@@ -537,8 +574,23 @@ export function Arrangement() {
     },
   };
 
+  /** Loop the selected placements: the brace over the whole bars they
+   * cover, turned on (one `batch` of the `param.set`s, one undo step). */
+  const loopSelection = () => {
+    const ps = [...picked].flatMap((k) => {
+      const { id, start } = unpick(k);
+      const p = placementAt(id, start);
+      return p ? [p] : [];
+    });
+    if (!ps.length) return;
+    const from = Math.floor(Math.min(...ps.map((p) => p.start)) / BAR);
+    const to = Math.ceil(Math.max(...ps.map((p) => p.start + p.length)) / BAR);
+    const set = (path: string, value: number) => ({ method: "param.set", params: { path, value } });
+    void act(client.call("batch", { requests: [set("song.loop_start", from), set("song.loop_end", to), set("song.loop", 2)] }));
+  };
+
   // Delete removes the selected placements (one undo step); Escape clears
-  // the selection.
+  // the selection; L loops them.
   const key = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
     // Only for the section itself (focused by a placement), not its buttons
@@ -555,6 +607,7 @@ export function Arrangement() {
       if (requests.length) void send(requests);
       none();
     } else if (e.key === "Escape") none();
+    else if (e.key === "l" || e.key === "L") loopSelection();
   };
 
   const line = (every: number, color: string) => `repeating-linear-gradient(to right, ${color} 0 1px, transparent 1px ${every * px}px)`;
@@ -575,7 +628,15 @@ export function Arrangement() {
     >
       <div className="flex items-center gap-3 text-xs text-zinc-400">
         <span className="text-zinc-300">arrangement</span>
-        {!song && <span className="text-zinc-500">pattern mode: the song plays in song mode</span>}
+        <button
+          className="px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:text-zinc-600 disabled:border-zinc-800"
+          disabled={picked.size === 0}
+          title="loop the selected placements: the loop brace over the bars they cover (L)"
+          data-testid="arr-loop-selection"
+          onClick={loopSelection}
+        >
+          loop
+        </button>
         <label className="flex items-center gap-1">
           snap
           <select className={sel} value={snap} data-testid="arr-snap" onChange={(e) => setSnap(Number(e.target.value))}>
@@ -596,7 +657,7 @@ export function Arrangement() {
             ))}
           </select>
         </label>
-        <span className="ml-auto text-zinc-500">ruler: play from there - top strip: drag a loop, click it on/off - drag: move (to another lane too) - edge: length - alt-drag: copy - Delete: remove - double-click: piano roll - drag a clip from the pool into its lane</span>
+        <span className="ml-auto text-zinc-500">ruler: play from there - top strip: drag a loop, click it on/off - drag: move (to another lane too) - edge: length - alt-drag: copy - Delete: remove - L: loop it - double-click: piano roll - drag a clip from the pool into its lane - pool triangle: launch</span>
       </div>
       <div className="flex overflow-x-auto rounded border border-zinc-800 bg-zinc-950" data-testid="arr-scroll">
         {/* Track headers, sticky on the left. */}
@@ -633,7 +694,7 @@ export function Arrangement() {
             <div
               className="absolute bottom-0 w-0 h-0 border-x-[5px] border-x-transparent border-b-[7px] border-b-sky-400 -translate-x-1/2"
               style={{ left: start * px }}
-              title={`song mode plays from bar ${start / BAR + 1}`}
+              title={`play starts from bar ${start / BAR + 1}`}
               data-testid="arr-start"
               data-tick={start}
             />

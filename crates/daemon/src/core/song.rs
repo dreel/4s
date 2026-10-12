@@ -1,7 +1,11 @@
-//! The song (RFC 0008 phase B): each track's arrangement of clip placements
-//! on a timeline in ticks, and where song mode plays from. Song mode and its
-//! loop are parameters (`song.mode`, `song.loop`, `song.loop_start`,
-//! `song.loop_end`), read by the engine directly.
+//! The song (RFC 0008 phase B, RFC 0009): each track's arrangement of clip
+//! placements on a timeline in ticks, where play starts from, and clip
+//! launching. The transport always plays the arrangement; its loop is
+//! parameters (`song.loop`, `song.loop_start`, `song.loop_end`), read by the
+//! engine directly. A track can loop a launched clip instead (`clip.launch`)
+//! until it goes back (`song.back`); while playing, both land on the next
+//! `transport.launch_quantize` boundary, which the engine reports
+//! (`Feedback::Launched`).
 
 use super::*;
 
@@ -18,12 +22,78 @@ impl Core {
         }
     }
 
-    /// Whether song mode is on.
-    pub(super) fn song_mode(&self) -> bool {
-        self.global(params::SONG_MODE) >= 0.5
+    /// Launch a clip on a track (or, `None`, go back to its arrangement):
+    /// at once while stopped, else at the next quantize boundary (`now`: the
+    /// next tick).
+    pub(super) fn launch(&mut self, id: &str, clip: Option<u32>, now: bool) -> Result<(), RpcError> {
+        self.ensure_room(1)?;
+        let slot = self.slot(id)?;
+        let engine = clip.map(|n| self.track(id).clips[&n].engine);
+        self.send(Command::Launch { slot, clip: engine, now });
+        let playing = self.playing;
+        let t = self.tracks.get_mut(id).expect("checked");
+        t.launched = clip;
+        if !playing {
+            t.playing = clip.map(|n| (n, 0));
+        }
+        Ok(())
     }
 
-    /// The span song mode loops, as the engine sees it.
+    /// A track's launch state changed: it is saved, but not undone.
+    pub(super) fn launch_changed(&mut self, id: &str, origin: &str) {
+        self.track_changed(id, origin);
+    }
+
+    /// The engine switched a slot to a launched clip (or back) at `tick`
+    /// from play. A take into it writes what was played into the old
+    /// target and goes on into the new one.
+    pub(super) fn launched(&mut self, slot: u8, clip: Option<u16>, tick: u64) {
+        let Some(id) = self.instruments.iter().find(|i| i.slot == slot).map(|i| i.id.clone()) else { return };
+        let t = self.track(&id);
+        let clip = clip.and_then(|e| t.clips.iter().find(|(_, c)| c.engine == e).map(|(n, _)| *n));
+        if t.playing == clip.map(|n| (n, tick)) {
+            return;
+        }
+        let recording = self.playing && self.starting == 0 && self.take.as_ref().is_some_and(|t| t.slot == slot);
+        let pos = self.song_pos.map(|p| p as f64 + tick as f64 - self.play_tick as f64).unwrap_or(self.locate as f64);
+        if recording {
+            self.write_take(tick as f64, pos, true);
+        }
+        self.tracks.get_mut(&id).expect("found").playing = clip.map(|n| (n, tick));
+        if recording && let Some(t) = self.take.as_mut() {
+            t.take = record::Take::new(tick as f64, pos);
+        }
+        let track = self.track_info(&id);
+        self.emit("engine", Event::Track { track });
+    }
+
+    /// Where a track is playing now (while playing): its launched clip, from
+    /// where it started, else the placement under the song position.
+    pub(super) fn track_playhead(&self, id: &str) -> Option<ClipPlayhead> {
+        if !self.playing || self.starting > 0 {
+            return None;
+        }
+        let t = self.track(id);
+        match t.playing {
+            Some((n, since)) => {
+                let len = self.clip_len(id, n).max(1) as u64;
+                Some(ClipPlayhead { clip: n, tick: (self.play_tick.saturating_sub(since) % len) as u32 })
+            }
+            None => {
+                let pos = self.song_pos?;
+                let p = t.placements.iter().find(|p| p.start <= pos && pos < p.end())?;
+                let len = self.clip_len(id, p.clip).max(1);
+                Some(ClipPlayhead { clip: p.clip, tick: (pos - p.start + p.offset) % len })
+            }
+        }
+    }
+
+    /// Every track's playhead, by instrument.
+    pub(super) fn playheads(&self) -> BTreeMap<String, ClipPlayhead> {
+        self.instruments.iter().filter_map(|i| Some((i.id.clone(), self.track_playhead(&i.id)?))).collect()
+    }
+
+    /// The span the transport loops, as the engine sees it.
     pub(super) fn song_loop(&self) -> Option<(u32, u32)> {
         match self.global(params::LOOP).round() as i32 {
             1 => Some((0, self.song_length())).filter(|(_, e)| *e > 0),
@@ -133,6 +203,27 @@ impl Core {
                 self.set_arrangement(&id, place(&rest, Placement { start: p.to, ..q }))?;
                 self.track_changed(&id, origin);
                 Ok(self.track_info(&id))
+            })()
+            .and_then(ok),
+            Request::SongBack(p) => (|| {
+                let ids: Vec<String> = match p.instrument.as_deref() {
+                    Some(id) => vec![self.find_instrument(id)?.id.clone()],
+                    None => self
+                        .instruments
+                        .iter()
+                        .filter(|i| {
+                            let t = self.track(&i.id);
+                            t.launched.is_some() || t.playing.is_some()
+                        })
+                        .map(|i| i.id.clone())
+                        .collect(),
+                };
+                self.ensure_room(ids.len())?;
+                for id in &ids {
+                    self.launch(id, None, p.now.unwrap_or(false))?;
+                    self.launch_changed(id, origin);
+                }
+                Ok(self.song_info())
             })()
             .and_then(ok),
             Request::TransportLocate(p) => {

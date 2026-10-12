@@ -3,7 +3,7 @@
 // `pattern.set_note`; the daemon's `notes_changed` event confirms them.
 
 import type { NoteStep } from "../generated/NoteStep";
-import { act, client, mySeat, setNote, setParam, useApp, useLive } from "../store";
+import { act, client, mySeat, setNote, setParam, useApp, useLive, useSelectedClipSteps, useSelectedClipTick } from "../store";
 import { BlockMirror } from "./BlockMirror";
 import { Toggle } from "./controls";
 import { ParamKnob, pct, st } from "./ParamKnob";
@@ -29,9 +29,10 @@ function NoteLight({ id }: { id: string }) {
 
 export function BassEditor({ id }: { id: string }) {
   const pattern = useApp((s) => s.snapshot?.patterns.find((p) => p.instrument === id)?.pattern);
-  const length = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
-  const playhead = useApp((s) => s.snapshot?.transport.step ?? null);
-  const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
+  const length = useSelectedClipSteps(id);
+  const at = useSelectedClipTick(id);
+  const playhead = at === null ? null : Math.floor(at / 24);
+  const playing = playhead !== null;
   const square = useApp((s) => (s.snapshot?.params[`${id}.waveform`] ?? 0) >= 0.5);
   // The Block (and this engine's devices) follow the host seat; the button
   // focuses this UI's own seat, so it shows by that seat's focus.

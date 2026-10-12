@@ -82,21 +82,20 @@ pub struct Core {
     instruments: Vec<InstrumentState>,
     channels: Vec<ChannelInfo>,
     routes: BTreeMap<String, u32>,
-    /// Each instrument's clip (RFC 0007).
-    /// Each instrument's track: clip pool, selection, arrangement (RFC 0008).
+    /// Each instrument's track: clip pool, selection, arrangement, and
+    /// launched clip (RFC 0008, RFC 0009).
     tracks: HashMap<String, TrackState>,
     /// Entries of the engine's clip table in use.
     clip_used: [bool; MAX_CLIPS],
-    /// Where song mode plays from (`transport.locate`).
+    /// Where play starts from (`transport.locate`).
     locate: u32,
-    /// The song tick playing (song mode), while playing.
+    /// The song tick of the last step, while playing.
     song_pos: Option<u32>,
     slot_used: [bool; MAX_INSTRUMENTS],
     /// Removed instruments not yet handed back by the audio thread.
     in_flight: usize,
     sample_rate: u32,
     playing: bool,
-    playhead: Option<u32>,
     /// Engine tick (from play, after any count-in) of the last playhead
     /// step.
     play_tick: u64,
@@ -173,7 +172,6 @@ impl Core {
             in_flight: 0,
             sample_rate: audio.sample_rate,
             playing: false,
-            playhead: None,
             play_tick: 0,
             starting: 0,
             record: RecordSettings::default(),
@@ -271,30 +269,18 @@ impl Core {
         self.params[index].value
     }
 
-    fn length(&self) -> u32 {
-        self.global(params::LENGTH) as u32
-    }
-
-    /// The host focus's selected clip's own length, if it has one.
-    fn focus_clip_length(&self) -> Option<u32> {
-        self.drum_focus(&self.host_seat).and_then(|id| self.tracks.get(&id).and_then(|t| t.selected().length))
-    }
-
-    /// Steps the Block grid shows: the host focus clip's own length (whole
-    /// steps, rounded up), else `sequencer.length`.
+    /// Steps the Block grid shows: the host focus's selected clip's length
+    /// (whole steps, rounded up).
     fn grid_length(&self) -> u32 {
-        let own = self.focus_clip_length();
-        own.map(|l| l.div_ceil(TICKS_PER_STEP).min(MAX_STEPS as u32)).unwrap_or_else(|| self.length())
+        self.drum_focus(&self.host_seat).map_or(16, |id| self.steps_len(&id))
     }
 
-    /// The Block grid's playhead: the step of the host's focus clip, which
-    /// loops from play at its own length when it has one.
+    /// The Block grid's playhead: the step the host focus's selected clip
+    /// is playing, if it is playing.
     fn grid_playhead(&self) -> Option<u32> {
-        let own = self.focus_clip_length();
-        match own {
-            Some(l) => self.playhead.map(|_| (self.play_tick % l.max(1) as u64) as u32 / TICKS_PER_STEP),
-            None => self.playhead,
-        }
+        let id = self.drum_focus(&self.host_seat)?;
+        let at = self.track_playhead(&id).filter(|p| p.clip == self.track(&id).selected)?;
+        Some(at.tick / TICKS_PER_STEP)
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -480,7 +466,7 @@ impl Core {
             slot,
             outputs: instrument::outputs(kind, id, name),
         });
-        self.add_track_unchecked(id, kind, slot);
+        self.add_track_unchecked(id, kind);
     }
 
     /// Send every parameter of an instrument to the engine.
@@ -798,7 +784,7 @@ impl Core {
     }
 
     fn pattern_result(&self, id: &str, voice: Option<Voice>) -> PatternResult {
-        PatternResult { instrument: id.to_string(), length: self.length(), tracks: self.track_patterns(id, voice) }
+        PatternResult { instrument: id.to_string(), length: self.steps_len(id), tracks: self.track_patterns(id, voice) }
     }
 
     /// Everything an offline render needs, copied out of the core.
@@ -846,7 +832,8 @@ impl Core {
                         clip: t.clips[&p.clip].engine,
                     })
                     .collect();
-                RenderInstrument { id: i.id.clone(), kind: i.kind, params, routes, selected: Some(t.selected().engine), placements }
+                let launched = t.launched.map(|n| t.clips[&n].engine);
+                RenderInstrument { id: i.id.clone(), kind: i.kind, params, routes, launched, placements }
             })
             .collect();
         // The clips keep their indexes in the engine's table.
@@ -879,9 +866,6 @@ impl Core {
             self.send(Command::SetParam { target, value: value as f32 });
             self.emit(origin, Event::ParamChanged { path: path.to_string(), value });
             self.mark_dirty(origin);
-            if target == ParamTarget::Global(params::LENGTH) {
-                self.refresh_controller(origin, false);
-            }
         }
         Ok(ParamValue { path: path.to_string(), value })
     }
@@ -889,11 +873,13 @@ impl Core {
     // ---- transport ---------------------------------------------------------
 
     fn transport_state(&self) -> TransportState {
+        let tick = self.song_pos.filter(|_| self.playing);
         TransportState {
             playing: self.playing,
-            step: self.playhead,
-            tick: self.song_pos.filter(|_| self.playing),
+            step: tick.map(|t| t / TICKS_PER_STEP),
+            tick,
             start: self.locate,
+            clips: self.playheads(),
         }
     }
 
@@ -910,11 +896,31 @@ impl Core {
         }
         self.play_tick = 0;
         self.song_pos = None;
+        // Launched clips start with the song; waiting switches land.
+        self.settle_launches(origin);
         if !self.playing {
             self.playing = true;
             self.emit(origin, Event::Transport { playing: true });
         }
         self.transport_state()
+    }
+
+    /// Every track plays what it was asked to from the song's start (on
+    /// play and stop, as the engine does).
+    fn settle_launches(&mut self, origin: &str) {
+        let ids: Vec<String> = self.instruments.iter().map(|i| i.id.clone()).collect();
+        for id in ids {
+            let t = self.tracks.get_mut(&id).expect("every instrument has a track");
+            let now = t.launched.map(|n| (n, 0));
+            if t.playing != now {
+                let was_pending = t.launched != t.playing.map(|p| p.0);
+                t.playing = now;
+                if was_pending && self.playing {
+                    let track = self.track_info(&id);
+                    self.emit(origin, Event::Track { track });
+                }
+            }
+        }
     }
 
     fn stop(&mut self, origin: &str) -> TransportState {
@@ -924,9 +930,9 @@ impl Core {
             self.record_changed(origin);
         }
         self.send(Command::Stop);
+        self.settle_launches(origin);
         if self.playing {
             self.playing = false;
-            self.playhead = None;
             self.song_pos = None;
             self.emit(origin, Event::Transport { playing: false });
             self.refresh_controller(origin, false);
@@ -1228,22 +1234,23 @@ impl Core {
 
     pub fn handle_feedback(&mut self, fb: Feedback) {
         match fb {
-            Feedback::Step { step, tick, pos, time } => {
+            Feedback::Step { tick, pos, time } => {
                 if !self.playing || self.starting > 0 {
                     return;
                 }
                 self.play_tick = tick;
-                self.song_pos = self.song_mode().then_some(pos as u32);
+                self.song_pos = Some(pos as u32);
                 self.record_step(tick, pos);
-                self.playhead = Some(step);
                 if self.controller.follow
                     && let Some(at) = self.grid_playhead()
                 {
                     self.controller.page = at / crate::controller::GRID as u32;
                 }
-                self.emit("engine", Event::Playhead { step, tick: pos as u32, time });
+                let clips = self.playheads();
+                self.emit("engine", Event::Playhead { step: pos as u32 / TICKS_PER_STEP, tick: pos as u32, time, clips });
                 self.refresh_controller("engine", false);
             }
+            Feedback::Launched { slot, clip, tick, .. } => self.launched(slot, clip, tick),
             Feedback::Trigger { slot, voice, note, velocity, time, .. } => {
                 if let Some(inst) = self.instruments.iter().find(|i| i.slot == slot) {
                     let instrument = inst.id.clone();
@@ -1255,7 +1262,7 @@ impl Core {
                 self.record_note(slot, note, velocity, on, gate, tick, pos);
             }
             Feedback::Started { .. } => self.starting = self.starting.saturating_sub(1),
-            // Song mode without a loop stops at the song's end, unless
+            // Playing without a loop stops at the song's end, unless
             // recording (which can go on past it, making the song longer).
             Feedback::SongEnd { .. } => {
                 if self.playing && self.starting == 0 && self.take.is_none() {
@@ -1305,21 +1312,24 @@ impl Core {
     }
 
     fn to_project_file(&self) -> ProjectFile {
-        let length = self.length() as usize;
         let tracks = self
             .instruments
             .iter()
             .filter_map(|i| {
                 let t = self.track(&i.id);
                 let clips: BTreeMap<u32, ProjectClip> =
-                    t.clips.iter().map(|(n, c)| (*n, clips::project_entry(i.kind, *n, c, length))).collect();
+                    t.clips.iter().map(|(n, c)| (*n, clips::project_entry(i.kind, *n, c))).collect();
                 // A new instrument's track (one empty clip) is left out.
                 let untouched = t.selected == 1
                     && t.placements.is_empty()
+                    && t.launched.is_none()
                     && clips.len() == 1
                     && clips.get(&1).is_some_and(|c| *c == ProjectClip::default());
-                (!untouched)
-                    .then(|| (i.id.clone(), ProjectTrack { selected: t.selected, clips, arrangement: t.placements.clone() }))
+                (!untouched).then(|| {
+                    let track =
+                        ProjectTrack { selected: t.selected, clips, arrangement: t.placements.clone(), launched: t.launched };
+                    (i.id.clone(), track)
+                })
             })
             .collect();
         ProjectFile {
@@ -1608,7 +1618,7 @@ impl Core {
     fn journal_context(&self, client: &str) -> JournalContext {
         JournalContext {
             playing: self.playing,
-            step: self.playhead,
+            step: self.song_pos.filter(|_| self.playing).map(|t| t / TICKS_PER_STEP),
             page: self.controller.page,
             seat: self.client_seat(client),
         }
@@ -1721,7 +1731,7 @@ impl Core {
                 "channels" => serde_json::from_value(v.clone()).ok().map(|o| order = Some(o)),
                 "route" => Some(routes.push((rest.to_string(), v.as_u64().map(|n| n as u32)))),
                 "param" => Some(params.push((rest.to_string(), v.as_f64()))),
-                "clip" | "event" | "selected" | "place" => clip_sets.parse(kind, rest, v),
+                "clip" | "event" | "selected" | "place" | "launched" => clip_sets.parse(kind, rest, v),
                 "seat" => match v {
                     Value::Null => Some(seats.push((rest.to_string(), SeatConfig::default()))),
                     v => serde_json::from_value(v.clone()).ok().map(|c| seats.push((rest.to_string(), c))),
@@ -1922,6 +1932,16 @@ impl Core {
                     (p.model, p.ports) = (Some(model), ports);
                 }
                 Request::SeatApplyLayout(p)
+            }
+            // A launch is journaled with the clip it resolves to, so a replay
+            // launches the same clip whatever its focus (RFC 0009).
+            Request::ClipLaunch(mut p) => {
+                if let Ok(id) = self.clip_target(p.instrument.as_deref(), client)
+                    && let Ok(n) = self.clip_id(&id, p.clip)
+                {
+                    (p.instrument, p.clip) = (Some(id), Some(n));
+                }
+                Request::ClipLaunch(p)
             }
             req => req,
         };
@@ -2214,12 +2234,14 @@ impl Core {
             | Request::SongPlace(_)
             | Request::SongRemove(_)
             | Request::SongMove(_)
+            | Request::SongBack(_)
             | Request::TransportLocate(_) => unreachable!("handled by handle_song"),
             Request::ClipNew(_)
             | Request::ClipDuplicate(_)
             | Request::ClipRename(_)
             | Request::ClipDelete(_)
             | Request::ClipSelect(_)
+            | Request::ClipLaunch(_)
             | Request::ClipGet(_)
             | Request::ClipSet(_)
             | Request::ClipAdd(_)
@@ -2273,7 +2295,8 @@ fn read_only(req: &Request) -> bool {
         | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
         | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
-        | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | SongPlace(_) | SongRemove(_) | SongMove(_)
+        | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | ClipLaunch(_) | SongPlace(_) | SongRemove(_)
+        | SongMove(_) | SongBack(_)
         | Batch(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
         | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
         | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
@@ -2301,6 +2324,9 @@ impl Core {
                     | Request::TransportStop(_)
                     | Request::TransportRecord(_)
                     | Request::TransportLocate(_)
+                    // Launching is saved but not undone (RFC 0009).
+                    | Request::ClipLaunch(_)
+                    | Request::SongBack(_)
                     | Request::VoiceTrigger(_)
                     | Request::VoiceNoteOn(_)
                     | Request::VoiceNoteOff(_)
@@ -2330,15 +2356,22 @@ fn check_name(name: Option<String>) -> Result<Option<String>, RpcError> {
     }
 }
 
-/// A new project: one `tr808` (`drums`) on channel 1, "Drums".
+/// A new project: one `tr808` (`drums`) on channel 1, "Drums", with its
+/// first clip launched, so play loops it (RFC 0009).
 fn default_project() -> ProjectFile {
+    let drums = ProjectTrack {
+        selected: 1,
+        clips: BTreeMap::from([(1, ProjectClip::default())]),
+        arrangement: Vec::new(),
+        launched: Some(1),
+    };
     ProjectFile {
         format_version: PROJECT_FORMAT_VERSION,
         instruments: vec![ProjectInstrument { id: "drums".into(), kind: InstrumentType::Tr808, name: "Drums".into() }],
         channels: vec![ChannelInfo { n: 1, name: "Drums".into() }],
         routes: BTreeMap::from([("drums".to_string(), 1)]),
         params: BTreeMap::new(),
-        tracks: BTreeMap::new(),
+        tracks: BTreeMap::from([("drums".to_string(), drums)]),
         controller: ProjectController { follow: true },
         seats: BTreeMap::new(),
     }

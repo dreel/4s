@@ -1,7 +1,8 @@
 // The instrument editor below the console: a tab per instrument (in creation
 // order, each with a remove button that asks once), the selected instrument's
 // output channel, its clip pool (RFC 0008: the step editors edit the
-// selected clip, which pattern mode plays), and its panel.
+// selected clip; RFC 0009: launching a clip makes the track loop it instead
+// of its arrangement), the selected clip's length, and its panel.
 
 import { useEffect, useState } from "react";
 import type { InstrumentInfo } from "../generated/InstrumentInfo";
@@ -15,25 +16,52 @@ import { GM_NOTES } from "./voices";
 const TICKS_PER_STEP = 24;
 
 /** What the step editor cannot show of a clip (RFC 0007): notes between
- * steps or outside the drum voices, and a loop length of its own. */
+ * steps or outside the drum voices, and a length that is not whole steps. */
 function ClipNote({ id, drums }: { id: string; drums: boolean }) {
   const selected = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id)?.selected);
   const clip = useApp((s) => s.snapshot?.clips.find((c) => c.instrument === id && c.id === selected));
   if (!clip) return null;
   const hidden = clip.events.filter((e) => e.tick % TICKS_PER_STEP !== 0 || (drums && !GM_NOTES.includes(e.note))).length;
-  const loop = clip.length === null ? null : clip.length / TICKS_PER_STEP;
-  if (!hidden && loop === null) return null;
+  const odd = clip.length % TICKS_PER_STEP !== 0;
+  if (!hidden && !odd) return null;
   return (
     <div className="text-xs text-amber-400" data-testid={`clip-note-${id}`} title={`see them with: 4s clip show ${id}`}>
       {hidden ? `${hidden} note${hidden === 1 ? "" : "s"} off the step grid (not shown here)` : ""}
-      {hidden && loop !== null ? " - " : ""}
-      {loop !== null ? `loops every ${loop} steps` : ""}
+      {hidden && odd ? " - " : ""}
+      {odd ? `loops every ${clip.length} ticks` : ""}
+    </div>
+  );
+}
+
+/** The selected clip's length in steps (`clip.length`). */
+function ClipLength({ id }: { id: string }) {
+  const selected = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id)?.selected);
+  const length = useApp((s) => s.snapshot?.clips.find((c) => c.instrument === id && c.id === selected)?.length ?? null);
+  if (length === null) return null;
+  return (
+    <div className="flex items-center gap-1 text-xs" title="the selected clip's length: where it loops">
+      <span className="text-zinc-500 mr-1">steps</span>
+      {[8, 16, 32, 64].map((n) => (
+        <button
+          key={n}
+          data-testid={`length-${n}`}
+          data-on={length === n * TICKS_PER_STEP}
+          onClick={() => void act(client.call("clip.length", { instrument: id, clip: selected ?? null, length: n * TICKS_PER_STEP }))}
+          className={`px-2 py-0.5 rounded border ${
+            length === n * TICKS_PER_STEP ? "bg-amber-500 text-zinc-950 border-amber-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+          }`}
+        >
+          {n}
+        </button>
+      ))}
     </div>
   );
 }
 
 /** The instrument's clip pool: select a clip (double-click to rename), add,
- * duplicate, or delete (asks once). */
+ * duplicate, or delete (asks once); launch the selected clip, or go back to
+ * the arrangement. The launched clip is green (pulsing while it waits for
+ * its bar). */
 function ClipBar({ id }: { id: string }) {
   const track = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id));
   const [armed, setArmed] = useState(false);
@@ -47,6 +75,7 @@ function ClipBar({ id }: { id: string }) {
   const ref = { instrument: id, clip: track.selected };
   const btn = "px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:border-zinc-500";
   const placed = new Set(track.arrangement.map((p) => p.clip));
+  const launched = (n: number) => track.launched === n;
   return (
     <div className="flex items-center gap-1 text-xs" data-testid={`clips-${id}`}>
       <span className="text-zinc-500 mr-1">clips</span>
@@ -75,10 +104,11 @@ function ClipBar({ id }: { id: string }) {
             key={c.id}
             className={`px-2 py-0.5 rounded border ${
               c.id === track.selected ? "bg-zinc-200 text-zinc-950 border-zinc-100" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
-            }`}
-            title={`clip ${c.id}${placed.has(c.id) ? " (in the song)" : ""}; double-click to rename`}
+            } ${launched(c.id) ? "ring-2 ring-emerald-400" : ""} ${launched(c.id) && track.pending ? "animate-pulse" : ""}`}
+            title={`clip ${c.id}${placed.has(c.id) ? " (in the song)" : ""}${launched(c.id) ? " (launched)" : ""}; double-click to rename`}
             data-testid={`clip-${id}-${c.id}`}
             data-selected={c.id === track.selected}
+            data-launched={launched(c.id)}
             onClick={() => void act(client.call("clip.select", { instrument: id, clip: c.id }))}
             onDoubleClick={() => setRenaming({ clip: c.id, name: c.name })}
           >
@@ -97,6 +127,23 @@ function ClipBar({ id }: { id: string }) {
       </button>
       <button className={btn} title="duplicate the selected clip" data-testid={`clip-dup-${id}`} onClick={() => void act(client.call("clip.duplicate", ref))}>
         dup
+      </button>
+      <button
+        className={`${btn} ${launched(track.selected) ? "text-emerald-400 border-emerald-500" : ""}`}
+        title="launch the selected clip: the track loops it instead of its arrangement, from the next bar while playing"
+        data-testid={`clip-launch-${id}`}
+        onClick={() => void act(client.call("clip.launch", { ...ref, now: null }))}
+      >
+        launch
+      </button>
+      <button
+        className={btn}
+        disabled={track.launched === null}
+        title="back to the arrangement (from the next bar while playing)"
+        data-testid={`clip-back-${id}`}
+        onClick={() => void act(client.call("song.back", { instrument: id, now: null }))}
+      >
+        back
       </button>
       <button
         className={`${btn} ${armed ? "text-red-500 border-red-500" : ""}`}
@@ -201,8 +248,9 @@ export function Editor() {
       </div>
       {!current && <div className="text-xs text-zinc-500">No instruments. Add one from the console.</div>}
       {current && (
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <ClipBar id={current.id} />
+          <ClipLength id={current.id} />
           <div className="flex gap-1 text-xs">
             <button className={`${view} ${roll ? off : on}`} data-testid="view-steps" onClick={() => setRolls({ ...rolls, [current.id]: false })}>
               steps

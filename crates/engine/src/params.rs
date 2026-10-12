@@ -3,26 +3,29 @@
 //! registry from the pieces here: the globals, each active channel, and each
 //! instrument's parameters (`instrument::params`).
 
-use fours_protocol::{ParamInfo, ParamKind};
+use fours_protocol::{PPQ, ParamInfo, ParamKind, TICKS_PER_BAR};
 
 /// Global parameters, indexed by `ParamTarget::Global`.
 pub const TEMPO: usize = 0;
 pub const SWING: usize = 1;
-pub const LENGTH: usize = 2;
-pub const MASTER_VOLUME: usize = 3;
+pub const MASTER_VOLUME: usize = 2;
 /// The metronome clicks while the transport plays (it always clicks during
 /// a count-in).
-pub const METRONOME: usize = 4;
-pub const METRONOME_LEVEL: usize = 5;
-/// Song mode (RFC 0008): on plays the arrangement, off loops each track's
-/// selected clip (pattern mode).
-pub const SONG_MODE: usize = 6;
-/// What song mode loops: 0 nothing (stop at the song's end), 1 the whole
-/// song, 2 the range `LOOP_START..LOOP_END` (bars).
-pub const LOOP: usize = 7;
-pub const LOOP_START: usize = 8;
-pub const LOOP_END: usize = 9;
-pub const NUM_GLOBALS: usize = 10;
+pub const METRONOME: usize = 3;
+pub const METRONOME_LEVEL: usize = 4;
+/// What the transport loops (RFC 0008): 0 nothing (stop at the song's end),
+/// 1 the whole song, 2 the range `LOOP_START..LOOP_END` (bars).
+pub const LOOP: usize = 5;
+pub const LOOP_START: usize = 6;
+pub const LOOP_END: usize = 7;
+/// Where a clip launch or a return to the arrangement lands while playing
+/// (RFC 0009): an index into `LAUNCH_QUANTIZE_TICKS`.
+pub const LAUNCH_QUANTIZE: usize = 8;
+pub const NUM_GLOBALS: usize = 9;
+
+/// `transport.launch_quantize` values in ticks: none (the next tick), a
+/// beat, a bar, two bars, four bars.
+pub const LAUNCH_QUANTIZE_TICKS: [u32; 5] = [0, PPQ, TICKS_PER_BAR, 2 * TICKS_PER_BAR, 4 * TICKS_PER_BAR];
 
 /// Channel parameters, indexed by `ParamTarget::Channel`.
 pub const CH_VOLUME: usize = 0;
@@ -54,20 +57,13 @@ pub fn globals() -> Vec<ParamInfo> {
     vec![
         cont("transport.tempo".into(), "Tempo".into(), 20.0, 300.0, 120.0, Some("bpm")),
         cont("transport.swing".into(), "Swing".into(), 0.0, 1.0, 0.0, None),
-        ParamInfo {
-            path: "sequencer.length".into(),
-            label: "Length".into(),
-            kind: ParamKind::Integer { min: 1, max: fours_protocol::MAX_STEPS as i32 },
-            default: 16.0,
-            unit: Some("steps".into()),
-        },
         cont("mixer.master.volume".into(), "Master Volume".into(), 0.0, 1.0, 0.8, None),
         toggle("metronome.on".into(), "Metronome".into()),
         cont("metronome.level".into(), "Metronome Level".into(), 0.0, 1.0, 0.6, None),
-        toggle("song.mode".into(), "Song Mode".into()),
         integer("song.loop", "Song Loop", 0, 2, 1.0, None),
         integer("song.loop_start", "Loop Start", 0, 998, 0.0, Some("bar")),
         integer("song.loop_end", "Loop End", 1, 999, 4.0, Some("bar")),
+        integer("transport.launch_quantize", "Launch Quantize", 0, 4, 2.0, None),
     ]
 }
 

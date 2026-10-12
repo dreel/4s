@@ -67,7 +67,7 @@ daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md
 ### Generic parameters
 
 Everything that is a value is a parameter with a stable path, e.g.
-`transport.tempo`, `sequencer.length`, `drums.kick.decay`, `bass.cutoff`,
+`transport.tempo`, `song.loop`, `drums.kick.decay`, `bass.cutoff`,
 `mixer.2.volume`, `mixer.master.volume`. Three methods cover them all:
 
 - `param.list {prefix?}` -- the registry: path, label, kind (continuous /
