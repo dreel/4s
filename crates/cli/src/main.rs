@@ -200,8 +200,8 @@ enum Cmd {
         cmd: Option<ModCmd>,
     },
     /// A sampler's pads (RFC 0010): `4s sampler` lists them; `4s sampler
-    /// load pads 1 kick.wav` loads a WAV into pad 1 (pads 1-16 play notes
-    /// 36-51). A file on this machine is sent to the engine; a path that
+    /// load 1 kick.wav [--instrument pads]` loads a WAV into pad 1 (pads
+    /// 1-16 play notes 36-51). A file on this machine is sent to the engine; a path that
     /// is not here is read on the engine host.
     Sampler {
         #[command(subcommand)]

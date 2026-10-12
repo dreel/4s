@@ -269,7 +269,10 @@ impl Core {
                     *path = format!("samples/{}", inside.to_string_lossy());
                     continue;
                 }
-                let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sample.wav".into());
+                let file_name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sample.wav".into());
+                // From another bundle: its `<id>.<pad>.` prefix does not stack.
+                let prefix = format!("{id}.{pad}.");
+                let name = file_name.strip_prefix(&prefix).map(str::to_string).unwrap_or(file_name);
                 // `<id>.<pad>.<file>`: ids have no dots, so names never clash.
                 let rel = format!("samples/{id}.{pad}.{name}");
                 let dst = bundle.join(&rel);
@@ -282,6 +285,20 @@ impl Core {
             }
         }
         Ok(())
+    }
+}
+
+impl Core {
+    /// After a save: the samples are the bundle's copies now, so later
+    /// saves (and a deleted original) do not depend on where they came from.
+    pub(super) fn adopt_bundle_samples(&mut self, bundle: &Path, file: &ProjectFile) {
+        for (id, pads) in &file.samples {
+            for (pad, rel) in pads {
+                if let Some(s) = self.samples.get_mut(id).and_then(|p| p.get_mut(pad)) {
+                    s.path = bundle.join(rel);
+                }
+            }
+        }
     }
 }
 

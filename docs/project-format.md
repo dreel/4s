@@ -34,7 +34,7 @@ It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010)
   empty.
 - Samplers' samples under `samples`: instrument id -> pad -> path. Saving
   copies each sample into the bundle's `samples/` folder and stores the
-  path inside the bundle (`samples/<id>-<pad>-<file>.wav`), so a bundle
+  path inside the bundle (`samples/<id>.<pad>.<file>`), so a bundle
   moves between machines whole; a missing file leaves its pad empty with
   a warning.
 - Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,

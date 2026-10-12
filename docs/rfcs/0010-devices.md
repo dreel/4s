@@ -361,7 +361,9 @@ instruments.
   `sampler` event. `sampler.upload` stores the file under
   `<data dir>/samples/` and is journaled as the `sampler.load` of it, so
   the journal holds no audio and a replay needs no upload. Uploads are at
-  most 16 MB, samples 60 s.
+  most 11 MB (their base64 fits a 16 MiB WebSocket frame), samples 60 s,
+  and an upload cannot go in a `batch` (it is rewritten as a load before
+  it is journaled).
 - Engine: `Instrument::set_sample` takes and hands back `Arc<[f32]>`
   buffers (`Command::SetSample`, `Returned::Sample`), so the audio thread
   never frees a sample; `no_alloc` plays one.
