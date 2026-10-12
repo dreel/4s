@@ -361,8 +361,18 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   check the lanes first. Undoing a duplicate with lanes has no e2e check.
 - (2026-10-12, automation lanes) lanes: the step views (drum grid, 303
   editor, sampler) show no lanes; only the piano roll edits them. Points
-  are linear only (no curves or steps), and there is no way to record a
-  knob's moves into a lane.
+  are linear only (no curves or steps).
+- (2026-10-12, knob recording) lanes: a knob moved before a take's first
+  step is not recorded (no playhead yet, `record_move`); moves are on the
+  1/16 grid; a recorded lane plays back over the knob while the take goes
+  on recording the next pass (no "touch" mode that lets go while a knob is
+  held). Moves on a track with nothing under the playhead are not
+  recorded (no clip is made for them, unlike notes).
+- (2026-10-12, #46 review) moving: a report from before a graph change can
+  land on the slot's new occupant for one meter period (tag reports with
+  a graph generation); filter `moving` by the registry on rebuild;
+  `docs/rpc.md` could say `moving` streams at ~30 Hz while any LFO route
+  exists, even stopped.
 
 ## Mismatches
 

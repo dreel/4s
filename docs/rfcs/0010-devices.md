@@ -428,3 +428,17 @@ instruments.
 - CLI: `4s get` prints `(now <value>: modulated or automated)`.
 - UI: knobs show a sky dot and faders a sky bar at the moving value, with
   it in the tooltip; the handle stays at the value set by hand.
+
+## Implementation notes (recording knob moves)
+
+- While a take records (`transport.record`), a parameter set by hand
+  (`param.set`, a CC, a controller knob; not undo or a load) that a lane
+  can take is recorded into the clip the recorded track plays under the
+  playhead, on the 1/16 grid (the last move in a 16th wins, so the
+  longest clip fits a lane's 64 points). Each pass (and the take's end)
+  writes them as `clip.lane.set` requests in the same journal entry as
+  the pass's notes: one undo step, and a replay writes the same lanes.
+  Recorded points replace the lane's points in the span they cover;
+  other points stay (a full lane gives up those farthest from it).
+- The value set by hand follows the knob as usual; after the take the
+  lane plays the recorded moves.

@@ -999,6 +999,14 @@ impl Core {
         })
     }
 
+    /// Set a parameter from a hand (a request, a CC, a controller knob),
+    /// which a take records into a lane; undo and loads use `set_param`.
+    pub fn set_param_by_hand(&mut self, path: &str, value: f64, origin: &str) -> Result<ParamValue, RpcError> {
+        let set = self.set_param(path, value, origin)?;
+        self.record_move(path, set.value);
+        Ok(set)
+    }
+
     pub fn set_param(&mut self, path: &str, value: f64, origin: &str) -> Result<ParamValue, RpcError> {
         let id = self.param_id(path)?;
         if !value.is_finite() {
@@ -2436,7 +2444,7 @@ impl Core {
                 let moving = self.moving.get(&p.path).copied();
                 ok(ParamValue { path: p.path, value: self.params[id].value, moving })
             }
-            Request::ParamSet(p) => ok(self.set_param(&p.path, p.value, origin)?),
+            Request::ParamSet(p) => ok(self.set_param_by_hand(&p.path, p.value, origin)?),
             Request::TransportPlay(_) => ok(self.play(origin)),
             Request::TransportStop(_) => ok(self.stop(origin)),
             Request::TransportRecord(p) => ok(self.transport_record(p, origin, client, user)?),

@@ -81,7 +81,8 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   listening. `ui/test-results/groove.png` (from the Electron e2e) shows the UI.
 - `4s render --input "0.5:C2 1.0:D#2" --record --quantize 1/16` plays notes
   into a render and shows the clip a recording would leave (RFC 0008);
-  `4s record` / `4s record --off` record live into your focus.
+  `4s record` / `4s record --off` record live into your focus (notes,
+  and knob moves made meanwhile into the clip's automation lanes).
 - `4s song` shows the arrangement, which play always plays;
   `4s song place drums --at 1 --bars 4`, `4s song loop 2 5`, `4s locate 3`,
   and `4s render --from 3` work with it; `4s clip list|new|dup|select`
