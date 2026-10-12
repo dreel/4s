@@ -972,7 +972,7 @@ pub struct RenderParams {
     pub path: Option<String>,
     #[serde(default)]
     pub sample_rate: Option<u32>,
-    /// Song tick to start from, in song mode (default: the locate point).
+    /// Song tick to start from (default: the locate point).
     #[serde(default)]
     pub from: Option<u32>,
     /// Include the metronome click (default off, whatever `metronome.on` is).
@@ -1002,7 +1002,7 @@ pub struct RenderResult {
     pub onsets: Vec<f64>,
     /// What the sequencer actually fired, for comparison with `onsets`.
     pub triggers: Vec<RenderTrigger>,
-    /// With `record`: the clips the take would leave (in song mode, a take
+    /// With `record`: the clips the take would leave (into the arrangement, a take
     /// can write several, and new ones).
     #[serde(default)]
     pub recorded: Vec<Clip>,

@@ -3872,7 +3872,7 @@
           },
           "from": {
             "default": null,
-            "description": "Song tick to start from, in song mode (default: the locate point).",
+            "description": "Song tick to start from (default: the locate point).",
             "format": "uint32",
             "minimum": 0,
             "type": [
