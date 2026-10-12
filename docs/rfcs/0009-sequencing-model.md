@@ -54,8 +54,8 @@ its own RFC.
   `song.loop_end`, bars). The arrangement view's playhead and loop brace
   always apply.
 - An empty song plays on (silence, or launched clips) until stopped, as
-  today. Playing from past a bar loop's end goes on without looping, as
-  today, so the stop rule below applies there too.
+  today. Playing from past a bar loop's end goes on without looping or
+  stopping, as today: the stop rule below applies only without a loop.
 - Playback without a loop stops at the song's end, unless recording (as
   today) or **any track is playing a launched clip** (a launched clip plays
   until stopped). A return to the arrangement that is still waiting for
@@ -81,8 +81,9 @@ clip**:
   every track when no instrument is named (Ableton's "back to
   arrangement").
 - **Quantized.** While playing, a launch or a back waits for the next
-  multiple of `transport.launch_quantize` on the song timeline: a parameter, 0 none
-  (the next tick), 1 a beat, 2 a bar (default), 3 two bars, 4 four bars.
+  multiple of `transport.launch_quantize` on the song timeline: a
+  parameter, 0 none (the next tick), 1 a beat, 2 a bar (default), 3 two
+  bars, 4 four bars.
   `now: true` ignores it. While stopped it takes effect at once, and every
   launched clip starts from its beginning when the transport starts
   (after any count-in). The boundary is counted on the song position:
@@ -141,7 +142,6 @@ target, as a locate does today.
 
 ### 5. One step view (phase 2)
 
-
 - `DrumEditor` and `BassEditor` become one `StepView` over any clip: a
   grid of steps at a resolution (1/16 default, 1/8, 1/32, triplets) over
   the clip's length, scrolling and paging like the piano roll.
@@ -194,8 +194,8 @@ This RFC changes none of that; it only keeps instruments behind the
   `clip.launch` and `song.back` and draws `launched`, `pending`, and the
   playhead's `clips`.
 - **API parity**: `clip.launch` -> `4s clip launch`, `song.back` -> `4s
-  song back`; `transport.launch_quantize` is a parameter (`4s set`). The parity test
-  covers them.
+  song back`; `transport.launch_quantize` is a parameter (`4s set`). The
+  parity test covers them.
 - **Real-time safety**: a launch is a small command; the engine keeps a
   pending switch per slot in preallocated state and resolves it on the
   tick it lands (`no_alloc` covers launching and coming back).
