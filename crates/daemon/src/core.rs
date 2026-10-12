@@ -1717,7 +1717,7 @@ impl Core {
             match file.tracks.get(&i.id).map(|t| clips::load_track(i.kind, t)) {
                 None => {}
                 Some(Ok(t)) => {
-                    if let Err(e) = self.load_track(&i.id, t) {
+                    if let Err(e) = self.load_track(&i.id, t, &mut warnings) {
                         warnings.push(format!("{}: {}", i.id, e.message));
                     }
                 }

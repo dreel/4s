@@ -410,8 +410,9 @@ impl Core {
     }
 
     /// Replace a new instrument's track with a loaded one. The caller checked
-    /// clip table and queue room (`validate_project`).
-    pub(super) fn load_track(&mut self, id: &str, t: LoadedTrack) -> Result<(), RpcError> {
+    /// clip table and queue room (`validate_project`). Lanes that do not
+    /// check out (an unknown parameter) are dropped with a warning.
+    pub(super) fn load_track(&mut self, id: &str, t: LoadedTrack, warnings: &mut Vec<String>) -> Result<(), RpcError> {
         let kind = self.track(id).kind;
         self.remove_track(id);
         let track =
@@ -423,8 +424,14 @@ impl Core {
             lanes.push((n, l));
         }
         for (n, l) in lanes.into_iter().filter(|(_, l)| !l.is_empty()) {
-            if let Err(e) = self.set_lanes(id, n, l, "") {
-                return Err(RpcError::invalid(format!("clip {n}: {}", e.message)));
+            let mut kept = Vec::new();
+            for lane in l {
+                let mut with = kept.clone();
+                with.push(lane.clone());
+                match self.set_lanes(id, n, with, "") {
+                    Ok(_) => kept.push(lane),
+                    Err(e) => warnings.push(format!("{id}: clip {n}: ignored the lane for '{}': {}", lane.path, e.message)),
+                }
             }
         }
         if let Some(n) = t.launched {

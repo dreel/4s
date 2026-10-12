@@ -295,8 +295,8 @@ impl LaneStore {
     }
 }
 
-/// Most parameters automated at once.
-const MAX_AUTOMATED: usize = 64;
+/// Most parameters automated at once: every lane of a clip on every track.
+const MAX_AUTOMATED: usize = MAX_INSTRUMENTS * MAX_LANES;
 
 impl ClipStore {
     fn position(&self, e: &ClipEvent) -> Result<usize, usize> {
@@ -896,6 +896,11 @@ impl Engine {
             }
             Command::Play { count_in } => {
                 self.release_clip_notes(None);
+                // No clip plays (nor automates) until the first tick after
+                // any count-in.
+                for t in self.tracks.iter_mut() {
+                    t.at = None;
+                }
                 // Waiting switches land; launched clips start with the song.
                 for slot in 0..self.tracks.len() {
                     let t = &self.tracks[slot];
@@ -1002,10 +1007,12 @@ impl Engine {
                 }
             }
         }
-        // What automation let go of goes back to its value set by hand.
+        // What automation let go of goes back to its value set by hand (a
+        // modulated one is already there, moved by its routes this block).
         for i in 0..MAX_AUTOMATED {
             if let Some((target, base)) = self.automated[i]
                 && !now[..count].iter().flatten().any(|a| a.0 == target)
+                && !self.routes.iter().flatten().any(|r| r.target == target)
             {
                 self.write_param(target, base);
             }
@@ -1815,6 +1822,10 @@ pub(crate) mod tests {
         apply(&mut e, Command::Stop);
         render_secs(&mut e, 0.1, &mut vec![]);
         assert_eq!(e.channels[0].params[CH_PAN], 0.25, "let go: back to the value set by hand");
+        // A count-in plays no clip, so nothing is automated yet.
+        apply(&mut e, Command::Play { count_in: TICKS_PER_BAR });
+        render_secs(&mut e, 0.5, &mut vec![]);
+        assert_eq!(e.channels[0].params[CH_PAN], 0.25, "counting in");
     }
 
     /// A waiting launch lands on a loop's wrap: a one-bar loop over bar 2

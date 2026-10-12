@@ -1020,6 +1020,9 @@ s clip select drums 1 >/dev/null
 s clip del drums --clip 2 >/dev/null
 check "removing a lane is one undo step" "undid: clip.lane.remove" bash -c "$BIN/4s clip lane drums mixer.1.volume --rm >/dev/null && $BIN/4s undo"
 check "lanes save with the project and load back" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s project save lanes >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load lanes >/dev/null && $BIN/4s clip show drums"
+check "a lane on an unknown parameter is dropped on load (a warning in the log), and the rest loads" "1
+ignored the lane for 'mixer.9.pan'" bash -c "sed -i.bak 's/mixer.1.pan/mixer.9.pan/' '$FOURS_DATA_DIR/projects/lanes.4s/project.json' && $BIN/4s project load lanes >/dev/null && $BIN/4s clip show drums | grep -c 'lane ' && $BIN/4s daemon logs | grep -o \"ignored the lane for 'mixer.9.pan'\" | tail -1; mv '$FOURS_DATA_DIR/projects/lanes.4s/project.json.bak' '$FOURS_DATA_DIR/projects/lanes.4s/project.json'"
+s project load lanes >/dev/null
 check "a lane on an effect goes with the effect" "no lane" bash -c "$BIN/4s device add filter --on 1 >/dev/null && $BIN/4s clip lane drums filter.cutoff '0:0.1' >/dev/null && $BIN/4s device rm filter >/dev/null && ($BIN/4s clip show drums | grep -q filter.cutoff || echo no lane)"
 check "...and undo brings both back" "lane filter.cutoff: 0:0.1" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show drums"
 check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null && python3 '$TMP/lr.py'"

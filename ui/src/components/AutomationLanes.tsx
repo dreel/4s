@@ -13,6 +13,9 @@ import type { ParamInfo } from "../generated/ParamInfo";
 import { act, client, useApp } from "../store";
 
 export const LANE_H = 48;
+/** The protocol's `MAX_CLIP_TICKS` and `MAX_LANES`. */
+const MAX_CLIP_TICKS = 64 * 24;
+const MAX_LANES = 8;
 
 /** A parameter's range (from the registry); 0..1 if unknown. */
 function rangeOf(registry: ParamInfo[], path: string): [number, number] {
@@ -67,7 +70,7 @@ export function LaneStrip({ clip, lane, px, snap, width }: { clip: Clip; lane: L
   const span = max - min || 1;
   const yOf = (v: number) => (1 - (v - min) / span) * (LANE_H - 4) + 2;
   const valueAt = (y: number) => Math.min(max, Math.max(min, min + (1 - (y - 2) / (LANE_H - 4)) * span));
-  const end = Math.min(clip.length, 64 * 24) - 1;
+  const end = Math.min(clip.length, MAX_CLIP_TICKS) - 1;
   const tickAt = (x: number) => Math.min(end, Math.max(0, Math.round(x / px / snap) * snap));
   const rel = (e: React.PointerEvent) => {
     const r = (e.currentTarget as HTMLElement).closest("[data-lane]")!.getBoundingClientRect();
@@ -156,7 +159,7 @@ export function AddLane({ clip }: { clip: Clip }) {
         list={`lane-params-${clip.instrument}`}
         placeholder="+ lane (parameter)"
         value={text}
-        disabled={clip.lanes.length >= 8}
+        disabled={clip.lanes.length >= MAX_LANES}
         data-testid="lane-add"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && add()}

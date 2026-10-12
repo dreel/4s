@@ -1171,7 +1171,6 @@ fn step_index(n: u32) -> Result<u32> {
     Ok(n - 1)
 }
 
-/// Parse `0.35`, `35%`, `on`/`off`, `true`/`false`.
 /// `tick:value` tokens.
 fn lane_points(s: &str) -> Result<Vec<LanePoint>> {
     s.split_whitespace()
@@ -1183,6 +1182,7 @@ fn lane_points(s: &str) -> Result<Vec<LanePoint>> {
         .collect()
 }
 
+/// Parse `0.35`, `35%`, `on`/`off`, `true`/`false`.
 fn parse_value(s: &str) -> Result<f64> {
     let t = s.trim().to_ascii_lowercase();
     match t.as_str() {
