@@ -276,6 +276,16 @@ impl Core {
                 // `<id>.<pad>.<file>`: ids have no dots, so names never clash.
                 let rel = format!("samples/{id}.{pad}.{name}");
                 let dst = bundle.join(&rel);
+                // The original may be gone since the last save: the copy in
+                // this bundle (or the project's current one) stands in.
+                let current = self.project.path.as_ref().map(|b| PathBuf::from(b).join(&rel));
+                let src = if src.exists() {
+                    src
+                } else if dst.exists() {
+                    dst.clone()
+                } else {
+                    current.filter(|c| c.exists()).unwrap_or(src)
+                };
                 if src != dst {
                     std::fs::create_dir_all(&dir)
                         .and_then(|_| std::fs::copy(&src, &dst))
@@ -285,20 +295,6 @@ impl Core {
             }
         }
         Ok(())
-    }
-}
-
-impl Core {
-    /// After a save: the samples are the bundle's copies now, so later
-    /// saves (and a deleted original) do not depend on where they came from.
-    pub(super) fn adopt_bundle_samples(&mut self, bundle: &Path, file: &ProjectFile) {
-        for (id, pads) in &file.samples {
-            for (pad, rel) in pads {
-                if let Some(s) = self.samples.get_mut(id).and_then(|p| p.get_mut(pad)) {
-                    s.path = bundle.join(rel);
-                }
-            }
-        }
     }
 }
 

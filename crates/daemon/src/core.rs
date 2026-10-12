@@ -1768,7 +1768,7 @@ impl Core {
         let json = project_to_json(&project);
         let file = bundle.join(PROJECT_FILE_NAME);
         std::fs::write(&file, json).map_err(|e| RpcError::failed(format!("write {}: {e}", file.display())))?;
-        self.adopt_bundle_samples(&bundle, &project);
+
         self.project = ProjectInfo { path: Some(bundle.to_string_lossy().into_owned()), dirty: false };
         let info = self.project.clone();
         self.emit(origin, Event::Project { info: info.clone() });
