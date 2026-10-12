@@ -368,6 +368,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   on recording the next pass (no "touch" mode that lets go while a knob is
   held). Moves on a track with nothing under the playhead are not
   recorded (no clip is made for them, unlike notes).
+- (2026-10-12, knob recording review) a pass whose notes are refused as
+  invalid (e.g. past `MAX_EVENTS`) also drops that pass's knob moves
+  (`write_take`); write the lanes alone then. The loop-crossing e2e check
+  relies on wall-clock sleeps; poll the playhead if it gets flaky.
 - (2026-10-12, knob recording review) only requests record knob moves
   (`acting` is unset otherwise): pitch bend, which is not a request, never
   reaches a lane (it is not a parameter today).

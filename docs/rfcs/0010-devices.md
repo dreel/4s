@@ -440,7 +440,8 @@ instruments.
   the pass's notes: one undo step, and a replay writes the same lanes.
   Recorded moves run forward until the clip loops (a pass written one
   step before the loop's end can cross it); each run replaces the lane's
-  points in the span it covers, and other points stay (a full lane gives
+  points from its first move to its last (gaps between moves included),
+  and other points stay (a full lane gives
   up those farthest from the runs).
 - The value set by hand follows the knob as usual; after the take the
   lane plays the recorded moves. Only the recorder's moves are recorded

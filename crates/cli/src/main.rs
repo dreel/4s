@@ -84,8 +84,8 @@ enum Cmd {
     /// starts (playing after the count-in if stopped), `4s record --off`
     /// ends it, keeping what was played. Your knob moves meanwhile (`4s set`,
     /// CCs, the UI) go into the clip's automation lanes (RFC 0010), replacing
-    /// a lane's points where you moved the knob (on each side of the loop
-    /// point when a pass crosses it).
+    /// a lane's points from your first move to your last in each pass (on
+    /// each side of the loop point when a pass crosses it).
     /// Settings stay for the next take.
     Record {
         /// End the take.
