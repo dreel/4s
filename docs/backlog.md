@@ -221,7 +221,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   at pointer-down; if another client moves or removes one of them during
   the drag, the `batch` stops at that request (it does not roll back), so
   some move and some do not. An atomic `batch` (or a `song.move` taking
-  several placements) would fix it.
+  several placements) would fix it. The same holds for a move to another
+  track: if its `song.place` fails (a full track), the new clip stays in
+  that pool, selected (the batch stops before `clip.select`), and the
+  placement where it was.
 - (2026-10-11, #33 review) a piano roll that is mounted but draws nothing
   (its clip briefly missing) can still hold Delete and Escape; Delete
   right after double-clicking a placement removes the placement (the
@@ -252,8 +255,21 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-11, arrangement-loop branch) `ui/package-lock.json` lacks the
   `"license": "MIT"` that `ui/package.json` has, so any `npm install`
   adds it and leaves the tree dirty; commit the regenerated lockfile.
-- (2026-10-10, arrangement-edit branch) moving a placement to another
-  track (copying its clip into that pool) is not built (RFC 0008 phase C).
+- (2026-10-11, #34 review) a selection dragged further against the song's
+  start or end gets no distance, so the drag counts as a click and the
+  selection shrinks to the grabbed placement; the multi-select e2e drags
+  placements on one track only.
+- (2026-10-11, arrangement-cross review) moving a placement to another
+  track is five requests the UI composes (agents reach it only as a raw
+  `4s batch`), and the batch makes the new clip the target's selected clip
+  for a moment (a playing pattern-mode track can switch to it). A daemon
+  `clip.copy { from, clip, instrument, select }` returning the new id,
+  with a CLI command, would make it one request. A drop whose clip or
+  track has just gone does nothing.
+- (2026-10-11, arrangement-cross branch) only a placement dragged alone
+  goes to another track (a selection stays on its tracks), and each move
+  or copy there adds a clip to that pool, even if it already has the same
+  notes; a drum clip's notes on a 303 play as pitches (and the reverse).
 
 ## Mismatches
 

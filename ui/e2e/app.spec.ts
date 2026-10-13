@@ -738,6 +738,80 @@ test("arrangement multi-select: shift-click across tracks; drag moves and alt-dr
   await oneStep(deleted, { drums: [one(0), one(384), one(1536)], bass: [] });
 });
 
+test("arrangement: drag a placement to another track (its clip is copied into that pool), alt-drag copies it there; one undo step each", async () => {
+  const { page, rpc } = h;
+  type P = { clip: number; start: number; length: number; offset: number };
+  const track = async (id: string) => (await rpc("song.get", {})).tracks.find((t: { instrument: string }) => t.instrument === id)!;
+  const pool = async (id: string) =>
+    (await rpc("state.get", {})).clips
+      .filter((c: { instrument: string }) => c.instrument === id)
+      .map((c: { id: number; name: string; length: number | null; events: unknown[] }) => ({ id: c.id, name: c.name, length: c.length, events: c.events }));
+  const all = async () => ({
+    drums: (await track("drums")).arrangement as P[],
+    bass: (await track("bass")).arrangement as P[],
+    bassPool: await pool("bass"),
+    bassSelected: (await track("bass")).selected,
+  });
+  await rpc("instrument.add", { type: "tb303", id: "bass", name: null, channel: null, no_channel: false });
+  const notes = [
+    { tick: 0, len: 24, note: 36, velocity: 100 },
+    { tick: 96, len: 48, note: 43, velocity: 90 },
+  ];
+  await rpc("clip.new", { instrument: "drums", name: "Fill", length: 384, select: false });
+  await rpc("clip.add", { instrument: "drums", clip: 2, events: notes });
+  await rpc("song.place", { instrument: "drums", clip: 2, start: 384, length: 768, offset: 96 });
+  await page.getByTestId("arr-zoom").selectOption("96");
+  await page.getByTestId("arr-snap").selectOption("384");
+  const bar = 96;
+  const drag = async (testid: string, dx: number, toLane: string, alt = false) => {
+    await page.getByTestId("arrangement").scrollIntoViewIfNeeded();
+    const b = (await page.getByTestId(testid).boundingBox())!;
+    const lane = (await page.getByTestId(toLane).boundingBox())!;
+    const from = { x: b.x + 20, y: b.y + b.height / 2 };
+    const to = { x: from.x + dx, y: lane.y + lane.height / 2 };
+    await page.mouse.move(from.x, from.y);
+    if (alt) await page.keyboard.down("Alt");
+    await page.mouse.down();
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2);
+    await page.mouse.move(to.x, to.y);
+    await page.mouse.up();
+    if (alt) await page.keyboard.up("Alt");
+  };
+  const oneStep = async (before: object, after: object) => {
+    await expect.poll(all).toEqual(after);
+    await page.getByTestId("undo").click();
+    await expect.poll(all).toEqual(before);
+    await page.getByTestId("redo").click();
+    await expect.poll(all).toEqual(after);
+  };
+  const fill = (start: number, clip: number) => ({ clip, start, length: 768, offset: 96 });
+  const bassClip1 = { id: 1, name: "1", length: null, events: [] };
+  const fillIn = (id: number) => ({ id, name: "Fill", length: 384, events: notes });
+  const start = { drums: [fill(384, 2)], bass: [], bassPool: [bassClip1], bassSelected: 1 };
+  await expect(page.getByTestId("placement-drums-384")).toBeVisible();
+  await expect.poll(all).toEqual(start);
+
+  // Drag it down onto the bass lane and a bar later: the bass pool gets a
+  // copy of Fill (its notes, length, and the placement's offset), the drums
+  // lose the placement, and the bass keeps its selected clip.
+  await drag("placement-drums-384", bar, "lane-bass");
+  const moved = { drums: [], bass: [fill(768, 2)], bassPool: [bassClip1, fillIn(2)], bassSelected: 1 };
+  await oneStep(start, moved);
+  // Alt-drag it back up to the drums, three bars later: a copy; the bass
+  // keeps its own.
+  await expect(page.getByTestId("placement-bass-768")).toBeVisible();
+  await drag("placement-bass-768", 3 * bar, "lane-drums", true);
+  const copied = { ...moved, drums: [fill(1920, 3)] };
+  await oneStep(moved, copied);
+  const drumsPool = await pool("drums");
+  expect(drumsPool.map((c: { id: number; name: string }) => [c.id, c.name])).toEqual([[1, "1"], [2, "Fill"], [3, "Fill"]]);
+  expect(drumsPool[2].events).toEqual(notes);
+  // Straight down (no distance in time) still goes to the other track.
+  await expect(page.getByTestId("placement-drums-1920")).toBeVisible();
+  await drag("placement-drums-1920", 0, "lane-bass");
+  await oneStep(copied, { ...copied, drums: [], bass: [fill(768, 2), fill(1920, 3)], bassPool: [bassClip1, fillIn(2), fillIn(3)] });
+});
+
 test("arrangement loop brace: draw, move, resize, and toggle by dragging the ruler, one undo step each; clicks still locate", async () => {
   const { page, rpc } = h;
   type L = { on: number; start: number; end: number };
