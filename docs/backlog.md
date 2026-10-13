@@ -336,10 +336,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   commands did not fit the queue is marked unsent and resent only at the
   next edit or graph change (`sync_lanes`); until then it may play stale
   points. Resend unsent lanes when the queue drains.
-- (2026-10-12, automation lanes review) lanes: a point dragged in the UI
-  is remembered by index (`AutomationLanes.tsx`, `onPointerUp`); a
-  concurrent edit can make the release move another point. Remember its
-  tick and look it up on release.
 - (2026-10-12, live values review) moving: `note_moved` scans the block's
   list on each write (up to ~192x192 a block when routes and lanes are
   full; bounded, no allocation); key it by route/lane slot if profiling
@@ -352,9 +348,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   let-go loop is quadratic in `MAX_AUTOMATED` and routes. Bounded and
   real-time safe, but worth a per-target "automated" count or bitset
   before dense CC input or more instruments.
-- (2026-10-12, automation lanes review) lanes: `clip.dup` makes the copy
-  before setting its lanes, so a failure there leaves a lane-less copy;
-  check the lanes first. Undoing a duplicate with lanes has no e2e check.
 - (2026-10-12, automation lanes) lanes: the step views (drum grid, 303
   editor, sampler) show no lanes; only the piano roll edits them. Points
   are linear only (no curves or steps).
@@ -364,10 +357,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   on recording the next pass (no "touch" mode that lets go while a knob is
   held). Moves on a track with nothing under the playhead are not
   recorded (no clip is made for them, unlike notes).
-- (2026-10-12, knob recording review) a pass whose notes are refused as
-  invalid (e.g. past `MAX_EVENTS`) also drops that pass's knob moves
-  (`write_take`); write the lanes alone then. The loop-crossing e2e check
-  relies on wall-clock sleeps; poll the playhead if it gets flaky.
+- (2026-10-12, knob recording review) the loop-crossing e2e check relies
+  on wall-clock sleeps; poll the playhead if it gets flaky. Unwritten knob
+  moves have no preview (notes have `take_notes`), so a take's automation
+  shows up only when its pass is written.
 - (2026-10-12, knob recording review) only requests record knob moves
   (`acting` is unset otherwise): pitch bend, which is not a request, never
   reaches a lane (it is not a parameter today).
@@ -377,9 +370,7 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   user from the seat the device plays in.
 - (2026-10-12, #46 review) moving: a report from before a graph change can
   land on the slot's new occupant for one meter period (tag reports with
-  a graph generation); filter `moving` by the registry on rebuild;
-  `docs/rpc.md` could say `moving` streams at ~30 Hz while any LFO route
-  exists, even stopped.
+  a graph generation).
 
 ## Mismatches
 

@@ -58,7 +58,9 @@ export function LaneLabel({ clip, lane }: { clip: Clip; lane: Lane }) {
   );
 }
 
-type Drag = { index: number; tick: number; value: number; x: number; y: number };
+/** A point being dragged: the tick it started at (how it is found again,
+ * since someone else may change the lane meanwhile) and where it is now. */
+type Drag = { from: number; tick: number; value: number; x: number; y: number };
 
 /** One lane's strip, `px` pixels per tick, snapping to `snap` ticks. */
 export function LaneStrip({ clip, lane, px, snap, width }: { clip: Clip; lane: Lane; px: number; snap: number; width: number }) {
@@ -75,7 +77,7 @@ export function LaneStrip({ clip, lane, px, snap, width }: { clip: Clip; lane: L
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   // Where the points are while dragging (the daemon gets them on release).
-  const points = lane.points.map((p, i) => (drag && drag.index === i ? { tick: drag.tick, value: drag.value } : p));
+  const points = lane.points.map((p) => (drag && drag.from === p.tick ? { tick: drag.tick, value: drag.value } : p));
   const sorted = [...points].sort((a, b) => a.tick - b.tick);
   const line = sorted.length
     ? [`0,${yOf(sorted[0].value)}`, ...sorted.map((p) => `${p.tick * px},${yOf(p.value)}`), `${clip.length * px},${yOf(sorted[sorted.length - 1].value)}`].join(" ")
@@ -104,10 +106,10 @@ export function LaneStrip({ clip, lane, px, snap, width }: { clip: Clip; lane: L
         if (!drag) return;
         setDrag(null);
         // Someone else may have changed the lane meanwhile.
-        const was = lane.points[drag.index];
+        const was = lane.points.find((q) => q.tick === drag.from);
         if (!was || (was.tick === drag.tick && was.value === drag.value)) return;
         // A point dropped on another's tick replaces it.
-        const next = lane.points.filter((q, i) => i !== drag.index && q.tick !== drag.tick);
+        const next = lane.points.filter((q) => q.tick !== drag.from && q.tick !== drag.tick);
         void setLane(clip, lane.path, [...next, { tick: drag.tick, value: drag.value }]);
       }}
     >
@@ -131,7 +133,7 @@ export function LaneStrip({ clip, lane, px, snap, width }: { clip: Clip; lane: L
             }
             (e.currentTarget.parentElement as HTMLElement).setPointerCapture(e.pointerId);
             const r = rel(e);
-            setDrag({ index: i, tick: p.tick, value: p.value, x: r.x, y: r.y });
+            setDrag({ from: p.tick, tick: p.tick, value: p.value, x: r.x, y: r.y });
           }}
         />
       ))}

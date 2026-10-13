@@ -390,8 +390,11 @@ impl Core {
             .collect();
         self.index = self.params.iter().enumerate().map(|(i, p)| (p.info.path.clone(), i)).collect();
         self.by_target = self.params.iter().enumerate().map(|(i, p)| (p.target, i)).collect();
-        // A report in flight may name slots the change gave to others.
+        // A report in flight may name slots the change gave to others, and
+        // parameters that went are not moving.
         self.moving_next.clear();
+        let index = &self.index;
+        self.moving.retain(|path, _| index.contains_key(path));
     }
 
     fn find_instrument(&self, id: &str) -> Result<&InstrumentState, RpcError> {

@@ -797,6 +797,10 @@ impl Core {
                 let (name, length, list, lanes) = (format!("{} copy", c.name), c.length, c.events.clone(), c.lanes.clone());
                 let name: String = name.chars().take(32).collect();
                 self.ensure_room(lanes::lane_commands(&lanes) + list.len() + 4)?;
+                // Checked before the copy is made, so it is all or nothing.
+                for l in &lanes {
+                    self.check_lane(l.clone())?;
+                }
                 let copy = self.new_clip(&id, None, Some(name), length, list, true, origin)?;
                 if lanes.is_empty() { Ok(copy) } else { self.set_lanes(&id, copy.id, lanes, origin) }
             })),

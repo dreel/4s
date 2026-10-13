@@ -1020,8 +1020,7 @@ check "nor does modulation" "the transport's" bash -c "$BIN/4s device add lfo >/
 check "nor do toggles" "is a toggle" s clip lane drums mixer.1.mute "0:1"
 check "values are clamped to the parameter's range" "lane mixer.1.volume: 0:1" s clip lane drums mixer.1.volume "0:9"
 check "a duplicate copies the lanes" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s clip dup drums | grep pan"
-s clip select drums 1 >/dev/null
-s clip del drums --clip 2 >/dev/null
+check "undoing a duplicate takes the copy and its lanes, and leaves the original's" "drums: clips *1;" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip list drums && $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' && echo kept"
 check "removing a lane is one undo step" "undid: clip.lane.remove" bash -c "$BIN/4s clip lane drums mixer.1.volume --rm >/dev/null && $BIN/4s undo"
 check "lanes save with the project and load back" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s project save lanes >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load lanes >/dev/null && $BIN/4s clip show drums"
 check "a lane on an unknown parameter is dropped on load (a warning in the log), and the rest loads" "1
@@ -1036,7 +1035,7 @@ check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip 
 # (on the 1/16 grid), written with the pass: one undo step.
 cat > "$TMP/autorec.sh" <<SH
 $BIN/4s tempo 240 >/dev/null
-$BIN/4s clip length drums 32 >/dev/null
+$BIN/4s clip length drums 64 >/dev/null
 $BIN/4s record --count-in 0 >/dev/null
 sleep 0.2
 for v in -1 -0.5 0 0.5 1; do $BIN/4s set mixer.1.pan \$v >/dev/null; sleep 0.15; done

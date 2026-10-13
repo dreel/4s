@@ -447,5 +447,8 @@ instruments.
   up those farthest from the runs).
 - The value set by hand follows the knob as usual; after the take the
   lane plays the recorded moves. Only the recorder's moves are recorded
-  (the user of the request, as the journal has it); other players' moves
-  only change the value set by hand.
+  (the user of the request, as the journal has it; hardware MIDI acts as
+  the host user, see the backlog); other players' moves only change the
+  value set by hand. Moves in another placement of the same clip are a
+  separate run, and a pass whose notes are refused for good (too many
+  events) still writes its moves.

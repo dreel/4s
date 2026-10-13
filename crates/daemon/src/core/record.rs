@@ -578,9 +578,10 @@ pub(super) struct LiveTake {
     pub client: String,
     pub origin: String,
     /// Knob moves made by hand while recording (RFC 0010): (clip, path) ->
-    /// (clip tick on the 1/16 grid, value) in the order played, written as
-    /// lanes with each pass.
-    pub moves: BTreeMap<(u32, String), Vec<(u32, f64)>>,
+    /// (clip tick on the 1/16 grid, value, where the clip started playing:
+    /// a placement's start, or `u32::MAX` for a launched clip) in the order
+    /// played, written as lanes with each pass.
+    pub moves: BTreeMap<(u32, String), Vec<(u32, f64, u32)>>,
 }
 
 /// Knob moves are recorded on this grid (a 16th): the longest clip then
@@ -802,14 +803,20 @@ impl Core {
         }
         let Some(at) = self.track_playhead(&id) else { return };
         let tick = at.tick / MOVE_GRID * MOVE_GRID;
+        // Moves in another placement of the same clip are another run.
+        let t = self.track(&id);
+        let from = match (t.playing, self.song_pos) {
+            (None, Some(pos)) => t.placements.iter().find(|p| p.start <= pos && pos < p.end()).map_or(u32::MAX, |p| p.start),
+            _ => u32::MAX,
+        };
         if let Some(t) = self.take.as_mut() {
-            t.moves.entry((at.clip, path.to_string())).or_default().push((tick, value));
+            t.moves.entry((at.clip, path.to_string())).or_default().push((tick, value, from));
         }
     }
 
     /// The `clip.lane.set` requests that write a take's knob moves. Moves
     /// run forward through the clip until it loops (a pass can cross the
-    /// loop point); each run replaces the lane's points in the span it
+    /// loop point) or another placement of it plays; each run replaces the lane's points in the span it
     /// covers, others stay (a lane full of other points gives up those
     /// farthest from the runs);
     /// a clip with no room for another lane is skipped.
@@ -837,9 +844,9 @@ impl Core {
             // Runs (spans [lo, hi)) and the last value in each 16th.
             let mut spans: Vec<(u32, u32)> = Vec::new();
             let mut recorded: BTreeMap<u32, f64> = BTreeMap::new();
-            for (i, (tick, value)) in moves.iter().enumerate() {
+            for (i, (tick, value, from)) in moves.iter().enumerate() {
                 match spans.last_mut() {
-                    Some(s) if i > 0 && *tick >= moves[i - 1].0 => s.1 = tick + MOVE_GRID,
+                    Some(s) if i > 0 && *tick >= moves[i - 1].0 && *from == moves[i - 1].2 => s.1 = tick + MOVE_GRID,
                     _ => spans.push((*tick, tick + MOVE_GRID)),
                 }
                 recorded.insert(*tick, *value);
@@ -858,6 +865,28 @@ impl Core {
             out.push(Request::ClipLaneSet(LaneSetParams { instrument: Some(t.instrument.clone()), clip: Some(*clip), path: path.clone(), points }));
         }
         out
+    }
+
+    /// Dispatch a take's requests as one journal entry (one request as
+    /// itself, more as a `batch`): one undo step, replayed the same.
+    fn journal_requests(&mut self, mut requests: Vec<Request>, user: &str, client: &str, origin: &str) -> Result<(), RpcError> {
+        let (method, params) = if requests.len() == 1 {
+            let r = requests.remove(0);
+            let method = r.method();
+            let mut v = serde_json::to_value(&r).expect("request serializes");
+            let params = v.get_mut("params").map(Value::take).unwrap_or(Value::Null);
+            requests.push(r);
+            (method, params)
+        } else {
+            let list: Vec<Value> = requests.iter().map(|r| serde_json::to_value(r).expect("request serializes")).collect();
+            ("batch", json!({ "requests": list }))
+        };
+        self.journaled(user, client, origin, method, params, |c| {
+            for r in requests {
+                c.dispatch(r, origin, client, user)?;
+            }
+            Ok(())
+        })
     }
 
     pub(super) fn write_take(&mut self, upto: f64, upto_pos: f64, end: bool) {
@@ -879,29 +908,21 @@ impl Core {
             // notes and lanes, and a pass is one undo step.
             // Lanes first: setting one again gives the same lane, so if the
             // notes then fail and are written next pass, nothing doubles.
-            let mut requests = moves;
+            let mut requests = moves.clone();
             if !writes.is_empty() {
                 requests.extend(write_requests(&id, &writes, &existing));
             }
-            let (method, params) = if requests.len() == 1 {
-                let r = requests.remove(0);
-                let method = r.method();
-                let mut v = serde_json::to_value(&r).expect("request serializes");
-                let params = v.get_mut("params").map(Value::take).unwrap_or(Value::Null);
-                requests.push(r);
-                (method, params)
-            } else {
-                let list: Vec<Value> = requests.iter().map(|r| serde_json::to_value(r).expect("request serializes")).collect();
-                ("batch", json!({ "requests": list }))
-            };
-            let result = self.journaled(&user, &client, &origin, method, params, |c| {
-                for r in requests {
-                    c.dispatch(r, &origin, &client, &user)?;
-                }
-                Ok(())
-            });
-            if let Err(e) = result {
+            let lanes_only = requests.len() > moves.len() && !moves.is_empty();
+            let mut result = self.journal_requests(requests, &user, &client, &origin);
+            if let Err(e) = &result {
                 tracing::warn!("recording into {id}: {}", e.message);
+                // Notes refused for good (too many events) keep the pass's
+                // knob moves: they are written alone.
+                if e.code == RpcError::invalid("").code && lanes_only {
+                    result = self.journal_requests(moves, &user, &client, &origin);
+                }
+            }
+            if let Err(e) = result {
                 // A busy engine may take it next pass; an invalid clip (too
                 // many events) never will.
                 if e.code != RpcError::invalid("").code {

@@ -133,7 +133,8 @@ current parameter set.
   local client (see [topology.md](topology.md)).
 - High-rate events: `playhead` (per step), `trigger` (per hit), `meters`
   (~30 Hz, suppressed while silent), `moving` (~30 Hz while modulation or
-  automation moves anything, once when it stops). JSON is fine at these
+  automation moves anything, which an LFO route does even while stopped;
+  once when it stops). JSON is fine at these
   rates.
 
 ## Parity guarantees
