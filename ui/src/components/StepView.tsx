@@ -31,6 +31,9 @@ const RESOLUTIONS: [string, number][] = [
 const DEFAULT_LOW = 24;
 const DEFAULT_HIGH = 60;
 
+// The reading below mirrors `crates/protocol/src/layout.rs` (`NoteLayout::has`,
+// `shows`, `step_cells`); change them together.
+
 /** Whether an expression is on in an event, as the layout declares it. */
 function has(x: NoteExpression, e: ClipEvent, res: number) {
   return x.kind === "velocity" ? e.velocity >= x.min : e.len > res;

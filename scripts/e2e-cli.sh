@@ -762,6 +762,10 @@ s tempo 60 >/dev/null
 check "a take into a launched clip deleted mid-take writes nothing elsewhere" "clean" bash -c "$BIN/4s record --to sv --count-in 0 >/dev/null; sleep 0.3; $BIN/4s key C2 --instrument sv --for 0.1 >/dev/null; $BIN/4s clip del sv --clip 3 >/dev/null; $BIN/4s record --off >/dev/null; $BIN/4s stop >/dev/null; L=\$($BIN/4s clip list sv); [[ \"\$L\" == 'sv: clips *1, 2; plays its arrangement' ]] && echo clean || echo \"\$L\""
 s tempo 120 >/dev/null
 check "step expressions only go with a note turned on" "not off" s step sv 1 C2 --off --set accent
+check "steps past the clip's end are refused" "past the clip's end" s step sv 17 C2
+check "a step of the focus" "C2 D2 G2 -" bash -c "$BIN/4s step 3 G2 | tail -1"
+s step 3 --off >/dev/null
+check "the Block comes back to its step page after launch mode" "page: 2" bash -c "$BIN/4s clip length sv 32 >/dev/null; $BIN/4s controller mode --page 2 >/dev/null; $BIN/4s controller mode --grid launch >/dev/null; $BIN/4s controller mode --grid steps | head -1"
 s focus drums >/dev/null
 s instrument rm sv >/dev/null
 # --- The song (RFC 0008 phase B, RFC 0009): clip pools, the arrangement,
@@ -824,7 +828,7 @@ check "...so the song does not stop at its end" "transport: playing" bash -c "$B
 check "a launch while playing waits for the bar" "plays clip 2 (launched) (waiting for the boundary)" bash -c "$BIN/4s clip launch song 2 | grep '^song:'"
 check "...and lands on it (240 bpm: within a second)" "landed: song: clips *1, 2 \"B\"; plays clip 2 (launched)" bash -c "for i in \$(seq 40); do $BIN/4s clip list song | grep -q waiting || break; sleep 0.05; done; $BIN/4s clip list song | grep -q waiting || echo landed: \$($BIN/4s clip list song)"
 check "relaunching the clip a track plays waits for the boundary too" "plays clip 2 (launched) (waiting for the boundary)" bash -c "$BIN/4s clip launch song 2 | grep '^song:'"
-sleep 1.1
+check "...and stops waiting when it restarts" "landed" bash -c "for i in \$(seq 40); do $BIN/4s clip list song | grep -q waiting || break; sleep 0.05; done; $BIN/4s clip list song | grep -q waiting && echo still waiting || echo landed"
 check "back to the arrangement for every track" "plays its arrangement" bash -c "$BIN/4s song back --now >/dev/null && sleep 0.2 && $BIN/4s clip list drums"
 check "with a one-bar loop and a two-bar quantum, a launch lands on the loop's wrap" "landed" bash -c "$BIN/4s stop >/dev/null; $BIN/4s set transport.launch_quantize 3 >/dev/null; $BIN/4s song loop 2 2 >/dev/null; $BIN/4s locate 2 >/dev/null; $BIN/4s play >/dev/null; $BIN/4s clip launch song 2 >/dev/null; sleep 1.5; $BIN/4s clip list song | grep -q waiting && echo still waiting || echo landed; $BIN/4s stop >/dev/null; $BIN/4s song back --now >/dev/null; $BIN/4s song loop off >/dev/null; $BIN/4s locate 1 >/dev/null; $BIN/4s set transport.launch_quantize 2 >/dev/null"
 check "with nothing launched, the song stops at its end" "transport: stopped" bash -c "$BIN/4s stop >/dev/null && $BIN/4s play >/dev/null && sleep 3.6 && $BIN/4s status | grep transport"

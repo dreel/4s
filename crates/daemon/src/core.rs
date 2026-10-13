@@ -973,8 +973,16 @@ impl Core {
         if let Some(f) = p.follow {
             self.controller.follow = f;
         }
-        if let Some(g) = p.grid {
-            self.controller.grid = g;
+        if let Some(g) = p.grid.filter(|g| *g != self.controller.grid) {
+            // Launch mode is one page; the step page comes back after it.
+            let c = &mut self.controller;
+            if g == GridMode::Launch {
+                c.steps_page = c.page;
+                c.page = 0;
+            } else {
+                c.page = c.steps_page;
+            }
+            c.grid = g;
         }
         if let Some(n) = p.base_note {
             self.controller.base_note = n;
@@ -1478,6 +1486,7 @@ impl Core {
 
         self.controller.follow = file.controller.follow;
         self.controller.page = 0;
+        self.controller.steps_page = 0;
 
         // Seats: the project's, plus session-only seats someone sits in.
         let occupied: Vec<String> = self.clients.values().filter_map(|c| c.seat.clone()).collect();

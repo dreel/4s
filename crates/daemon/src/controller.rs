@@ -20,6 +20,8 @@ pub type Leds = [[u8; GRID]; GRID];
 
 pub struct Controller {
     pub page: u32,
+    /// The step page to come back to after launch mode.
+    pub steps_page: u32,
     pub follow: bool,
     pub grid: GridMode,
     /// A pitched focus's bottom row.
@@ -35,6 +37,7 @@ impl Default for Controller {
     fn default() -> Self {
         Self {
             page: 0,
+            steps_page: 0,
             follow: true,
             grid: GridMode::Steps,
             base_note: BASE_NOTE,
