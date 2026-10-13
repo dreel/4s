@@ -1034,8 +1034,9 @@ check "...and undo brings both back" "lane filter.cutoff: 0:0.1" bash -c "$BIN/4
 check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null && python3 '$TMP/lr.py'"
 # Wait for the playhead (instead of sleeping, so slow machines land the
 # same): `at.py song <tick>` for a song tick, `at.py clip <tick> [--wrap]`
-# for the drums clip's tick (after it next loops, with --wrap). It returns
-# once the playhead is at or just past the tick (within a beat).
+# for the drums clip's tick (after it next loops, with --wrap). A song tick
+# only grows, so it returns once the playhead is at or past it; a clip loops,
+# so it waits for the beat from the tick (a miss comes round again).
 cat > "$TMP/at.py" <<PY
 import json, subprocess, sys, time
 kind, want, wrap = sys.argv[1], int(sys.argv[2]), "--wrap" in sys.argv
@@ -1046,7 +1047,7 @@ while time.time() < end:
     if now is not None:
         if wrap and last is not None and now < last:
             wrap = False
-        if not wrap and want <= now < want + 96:
+        if not wrap and want <= now and (kind == "song" or now < want + 96):
             sys.exit(0)
         last = now
     time.sleep(0.005)
@@ -1065,7 +1066,7 @@ SH
 check "knob moves while recording become a lane, rising with the knob" "rising" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null 2>&1; bash '$TMP/autorec.sh'; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; v=[p[\"value\"] for p in l]; t=[p[\"tick\"] for p in l]; print(\"rising\" if len(v)>=3 and v==sorted(v) and all(x%24==0 for x in t) else l)'"
 check "...written with the pass, one undo step" "undid: clip.lane.set" s undo
 check "...which removes the lane" "no lane" bash -c "$BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || echo no lane"
-check "a pass across the loop point keeps the earlier pass's points" "kept" bash -c "$BIN/4s clip length drums 16 >/dev/null; $BIN/4s record --count-in 0 >/dev/null; for v in 48:0.2 144:0.4 240:0.6 312:0.8; do python3 '$TMP/at.py' clip \${v%%:*} >/dev/null && $BIN/4s set mixer.1.pan \${v#*:} >/dev/null; done; python3 '$TMP/at.py' clip 24 --wrap >/dev/null && $BIN/4s set mixer.1.pan -0.5 >/dev/null; python3 '$TMP/at.py' clip 72 >/dev/null && $BIN/4s set mixer.1.pan -0.5 >/dev/null; $BIN/4s stop >/dev/null; $BIN/4s clip length drums 32 >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; print(\"kept\" if any(p[\"tick\"]>=192 and p[\"value\"]>0 for p in l) and any(p[\"value\"]==-0.5 for p in l) else l)'"
+check "a pass across the loop point keeps the earlier pass's points" "kept" bash -c "$BIN/4s clip length drums 16 >/dev/null; $BIN/4s record --count-in 0 >/dev/null; for v in 48:0.2 144:0.4 240:0.6 288:0.8; do python3 '$TMP/at.py' clip \${v%%:*} >/dev/null && $BIN/4s set mixer.1.pan \${v#*:} >/dev/null; done; python3 '$TMP/at.py' clip 24 --wrap >/dev/null && $BIN/4s set mixer.1.pan -0.5 >/dev/null; python3 '$TMP/at.py' clip 72 >/dev/null && $BIN/4s set mixer.1.pan -0.5 >/dev/null; $BIN/4s stop >/dev/null; $BIN/4s clip length drums 32 >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; print(\"kept\" if any(p[\"tick\"]>=192 and p[\"value\"]>0 for p in l) and any(p[\"value\"]==-0.5 for p in l) else l)'"
 s clip lane drums mixer.1.pan --rm >/dev/null
 s set mixer.1.pan 0 >/dev/null
 check "another player's moves meanwhile are not recorded, only the recorder's" "lane mixer.1.volume" bash -c "$BIN/4s record --count-in 0 >/dev/null; python3 '$TMP/at.py' song 24 >/dev/null; $BIN/4s --user bob set mixer.1.pan 0.7 >/dev/null; $BIN/4s set mixer.1.volume 0.5 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || $BIN/4s clip show drums | grep lane"
