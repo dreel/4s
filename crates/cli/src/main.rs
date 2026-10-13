@@ -113,6 +113,31 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<PatternCmd>,
     },
+    /// A clip as steps through its instrument's note layout (RFC 0009):
+    /// `4s step bass` shows its selected clip; `4s step bass 3 C2 --set
+    /// accent` turns a note on at step 3 (1-based) with an accent; `--off`
+    /// turns it off (on a mono instrument `4s step bass 3 --off` makes a
+    /// rest); `--clear slide` clears an expression. Notes are pitches
+    /// (`C2`), drum voices (`kick`), or MIDI numbers.
+    Step {
+        instrument: Option<String>,
+        step: Option<u32>,
+        note: Option<String>,
+        #[arg(long)]
+        off: bool,
+        /// Expressions to set (`accent`, `slide`); repeatable.
+        #[arg(long = "set")]
+        set_expr: Vec<String>,
+        /// Expressions to clear; repeatable.
+        #[arg(long)]
+        clear: Vec<String>,
+        /// Ticks a step: 1/16 (default), 1/8, 1/32, 1/16t, ...
+        #[arg(long)]
+        res: Option<String>,
+        /// Which clip (default: the selected one).
+        #[arg(long)]
+        clip: Option<u32>,
+    },
     /// Show or set a note pattern, e.g. `4s notes bass "C2 C2! D#2~ - G1"`.
     /// Tokens: `C2` note, `!` accent, `~` slide into the next step, `-` rest.
     Notes {
@@ -819,14 +844,26 @@ enum ControllerCmd {
         #[arg(allow_hyphen_values = true)]
         value: String,
     },
-    /// Change the grid page (1-based) or follow. Focus and knob page are
-    /// your seat's: `4s focus`, `4s knobs page`.
+    /// Change the grid page (1-based), follow, what the grid shows
+    /// (`--grid steps` or `launch`), or a pitched focus's bottom row
+    /// (`--base C2`). Focus and knob page are your seat's: `4s focus`,
+    /// `4s knobs page`.
     Mode {
         #[arg(long)]
         page: Option<u32>,
         #[arg(long)]
         follow: Option<bool>,
+        #[arg(long, value_enum)]
+        grid: Option<GridArg>,
+        #[arg(long)]
+        base: Option<String>,
     },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy)]
+enum GridArg {
+    Steps,
+    Launch,
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
@@ -1097,6 +1134,31 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 voice: v.as_deref().map(voice).transpose()?,
             })],
         },
+        Cmd::Step { instrument, step, note, off, set_expr, clear, res, clip } => {
+            let resolution = res.as_deref().map(grid_arg).transpose()?.flatten();
+            match step {
+                None => vec![Request::StepGet(StepGetParams { instrument: instrument.clone(), clip: *clip, resolution })],
+                Some(s) => {
+                    let mut expressions = std::collections::BTreeMap::new();
+                    for x in set_expr {
+                        expressions.insert(x.clone(), true);
+                    }
+                    for x in clear {
+                        expressions.insert(x.clone(), false);
+                    }
+                    let note = note.as_deref().map(|n| Voice::parse(n).filter(|_| n.parse::<u8>().is_err()).map_or_else(|| note_arg(n), |v| Ok(v.gm_note()))).transpose()?;
+                    vec![Request::StepSet(StepSetParams {
+                        instrument: instrument.clone(),
+                        clip: *clip,
+                        resolution,
+                        step: one_based(*s, "step")?,
+                        note,
+                        on: Some(!off),
+                        expressions,
+                    })]
+                }
+            }
+        }
         Cmd::Notes { instrument, pattern } => match pattern {
             None => vec![Request::PatternGetNotes(NotesGetParams { instrument: Some(instrument.clone()) })],
             Some(p) => vec![Request::PatternSetNotes(NotesSetParams {
@@ -1249,9 +1311,14 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 index: one_based(index, "knob")?,
                 value: parse_value(&value)?,
             })],
-            ControllerCmd::Mode { page, follow } => vec![Request::ControllerSetMode(ControllerModeParams {
+            ControllerCmd::Mode { page, follow, grid, base } => vec![Request::ControllerSetMode(ControllerModeParams {
                 page: page.map(|p| one_based(p, "page")).transpose()?,
                 follow,
+                grid: grid.map(|g| match g {
+                    GridArg::Steps => GridMode::Steps,
+                    GridArg::Launch => GridMode::Launch,
+                }),
+                base_note: base.as_deref().map(note_arg).transpose()?,
             })],
         },
         Cmd::Clip { clip, cmd } => vec![match cmd.clone().unwrap_or(ClipCmd::Show { instrument: None }) {
@@ -1487,19 +1554,64 @@ fn print_pattern(p: &PatternResult) {
     }
 }
 
+/// A step grid: one line per named row (`x` on, `X` with an expression),
+/// or a token per step for a pitched instrument (`C2!~`: `!` a velocity
+/// expression, `~` an overlap, `-` a rest; chords joined by `/`).
+fn print_steps(g: &StepGrid) {
+    println!("{} clip {}: {} steps of {} ticks", g.instrument, g.clip, g.steps, g.resolution);
+    let marks = |c: &StepCell| -> String {
+        g.layout
+            .expressions
+            .iter()
+            .filter(|x| c.expressions.contains(&x.id))
+            .map(|x| match x.kind {
+                ExpressionKind::Velocity { .. } => '!',
+                ExpressionKind::Overlap => '~',
+            })
+            .collect()
+    };
+    if g.layout.rows.is_empty() {
+        let tokens: Vec<String> = (0..g.steps)
+            .map(|s| {
+                let notes: Vec<String> =
+                    g.cells.iter().filter(|c| c.step == s).map(|c| format!("{}{}", note_name(c.note), marks(c))).collect();
+                if notes.is_empty() { "-".into() } else { notes.join("/") }
+            })
+            .collect();
+        println!("  {}", tokens.join(" "));
+        return;
+    }
+    for r in &g.layout.rows {
+        let line: String = (0..g.steps)
+            .map(|s| match g.cells.iter().find(|c| c.step == s && c.note == r.note) {
+                Some(c) if !c.expressions.is_empty() => 'X',
+                Some(_) => 'x',
+                None => '-',
+            })
+            .collect();
+        let chunks: Vec<String> = line.as_bytes().chunks(4).map(|c| String::from_utf8_lossy(c).into_owned()).collect();
+        println!("  {:<4} {}", r.short, chunks.join(" "));
+    }
+}
+
 fn print_leds(c: &ControllerState) {
     let page = c.page + 1;
     println!(
-        "focus: {}  knobs: {}  page: {page}  follow: {}  device: {}  seat: {}",
+        "focus: {}  knobs: {}  page: {page}  follow: {}  device: {}  seat: {}  grid: {}",
         c.focus.as_deref().unwrap_or("(none)"),
         c.knob_page.as_deref().unwrap_or("-"),
         c.follow,
         c.device.as_deref().unwrap_or("(virtual only)"),
-        c.seat
+        c.seat,
+        match (c.grid, c.clip) {
+            (GridMode::Launch, _) => "launch".to_string(),
+            (GridMode::Steps, Some(n)) => format!("steps (clip {n})"),
+            (GridMode::Steps, None) => "steps".to_string(),
+        }
     );
     for (r, row) in c.leds.iter().enumerate() {
         let cells: String = row.iter().map(|v| if *v != 0 { "# " } else { ". " }).collect();
-        let label = Voice::from_index(r).map(|v| v.id()).unwrap_or("");
+        let label = c.rows.get(r).map(String::as_str).unwrap_or("");
         println!("  {cells} {label}");
     }
 }
@@ -1895,6 +2007,7 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
                 );
             }
         },
+        Cmd::Step { .. } => print_steps(&serde_json::from_value(last)?),
         Cmd::Notes { .. } | Cmd::Note { .. } => {
             let n: NotesResult = serde_json::from_value(last)?;
             let last_note = n.steps.iter().rposition(|s| s.note.is_some()).map(|i| i + 1).unwrap_or(0);
@@ -2482,6 +2595,7 @@ mod tests {
             "clip", "clip show bass", "clip set bass 0:C2:12", "clip add bass 36 C3 --len 6", "clip rm bass 36 C3",
             "clip length bass 12", "clip clear bass", "clip quantize bass 1/8", "clip update bass --rm 0:C2", "clip new bass", "clip dup bass",
             "clip rename bass B --clip 2", "clip del bass --clip 2", "clip select bass 1", "clip launch bass 2", "clip list", "song",
+            "step bass", "step bass 3 C2 --set accent",
             "song place drums --at 1 --bars 4", "song rm drums 1", "song mv drums 1 3", "song back", "locate 5",
             "batch []", "record", "record --off",
             "metronome on", "render --record --input 0.5:C2",

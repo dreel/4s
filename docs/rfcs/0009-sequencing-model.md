@@ -1,6 +1,6 @@
 # RFC 0009: One transport, clip launching, and a generic step view
 
-- Status: accepted (phase 1 implemented; see "Implementation notes")
+- Status: accepted (phases 1 and 2 implemented; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-11
 - Discussion: the PR that introduces this RFC.
@@ -329,4 +329,31 @@ Where these differ from the sections above, these win:
   arrangement each pool clip has a launch triangle, the launched clip and
   its lane show it (pulsing while it waits), the header has "back", and
   "loop" (or L) sets the loop brace over the selected placements.
+
+## Implementation notes (phase 2: the step view and the Block on clips)
+
+- **Layouts** are declared in `crates/protocol/src/layout.rs`
+  (`InstrumentType::layout`) and sent with every instrument
+  (`InstrumentInfo.layout`, `instrument.types`): named `rows`, a pitch
+  range (`low`, `high`), `mono`, a new note's `gate` (fraction of a step)
+  and `velocity`, and `expressions` (`velocity` kind with a threshold and
+  the values it writes, or `overlap`). `step_cells` and `set_step` there
+  are the one reading and editing of a step, used by the daemon and the
+  Block; the old `pattern.*` methods still work on 16ths and agree with
+  them (a unit test checks the declared layouts write the same events).
+- **RPC**: `step.get { instrument?, clip?, resolution? } -> StepGrid` and
+  `step.set { instrument?, clip?, resolution?, step, note?, on?,
+  expressions? } -> StepGrid`. CLI: `4s step [instrument] [step] [note]
+  [--off] [--set x] [--clear x] [--res 1/8] [--clip n]`.
+- **UI**: `StepView.tsx` replaces the drum and bass step grids: rows for
+  named notes (the 808 panel puts audition, mute, and output beside each),
+  a column per step with a note and a toggle per expression for mono
+  instruments, and a row per pitch otherwise; a resolution select (1/8,
+  1/16, 1/16t, 1/32). The instrument panels keep their knobs.
+- **The Block**: `ControllerState` gains `grid` (`steps` or `launch`),
+  `clip` (the clip the step grid edits), `rows` (each row's label),
+  `length`, and `base_note`; `controller.set_mode` takes `grid` and
+  `base_note`. The mode is session state (not saved), like the page. No
+  hardware button switches the mode or moves the pitch rows yet; the knobs
+  keep the focus's knob page.
 

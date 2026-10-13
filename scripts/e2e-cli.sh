@@ -728,6 +728,42 @@ PY
 s instrument add tr808 --id gridd --no-channel >/dev/null; s focus gridd >/dev/null; s clip length gridd 3 >/dev/null; s clip launch gridd >/dev/null
 check "the Block grid's playhead follows the focus clip where it plays" "grid playhead at clip step" python3 "$TMP/grid.py"
 s instrument rm gridd >/dev/null
+# --- Step views and the Block on clips (RFC 0009 phase 2) ---
+s instrument add tb303 --id sv --no-channel >/dev/null
+s clip launch sv >/dev/null
+s step sv 1 C2 --set accent >/dev/null
+check "step set writes notes through the instrument's layout" "C2! - D#2~ -" bash -c "$BIN/4s step sv 3 D#2 --set slide | tail -1"
+check "...the same events the note view reads" "sv: C2! - D#2~" s notes sv
+check "a mono step takes a new pitch, keeping its expressions" "C2! - G2~ -" bash -c "$BIN/4s step sv 3 G2 | tail -1"
+check "--off makes a mono step a rest" "C2! - - -" bash -c "$BIN/4s step sv 3 --off | tail -1"
+check "clearing an expression" "C2 - - -" bash -c "$BIN/4s step sv 1 C2 --clear accent | tail -1"
+check "steps at another resolution" "8 steps of 48 ticks" s step sv --res 1/8
+check "drum rows, an accent as X" "SD   ---- X---" bash -c "$BIN/4s step drums 5 snare --set accent | grep SD; $BIN/4s step drums 5 snare --off >/dev/null"
+check "expressions are the instrument's own" "no expression 'slide' (this instrument has: accent)" s step drums 1 kick --set slide
+check "notes off the instrument's grid are refused" "not on this instrument's grid" s step drums 1 C5
+s focus sv >/dev/null
+check "the Block shows a pitched focus as pitch rows" ".  C2" bash -c "$BIN/4s controller mode --base C2 | tail -1"
+check "...edits the clip the armed track plays" "grid: steps (clip 1)" s controller
+check "a pad puts its row's pitch on its step" "C2 D2 - -" bash -c "$BIN/4s controller press 6 2 >/dev/null && $BIN/4s step sv | tail -1"
+s clip new sv --keep >/dev/null
+s clip launch sv 2 >/dev/null
+check "launching another clip retargets the grid" "grid: steps (clip 2)" s controller
+check "launch mode: a row per track, its launched clip and back pad lit" ". # . . . . . #  sv" bash -c "$BIN/4s controller mode --grid launch | grep ' sv'"
+SV_ROW=$(s controller | awk '/ sv$/ {print NR - 1}')
+check "...a pad launches the row's clip" "sv: clips *1, 2; plays clip 1 (launched)" bash -c "$BIN/4s controller press $SV_ROW 1 >/dev/null && $BIN/4s clip list sv"
+check "...the last pad goes back to the arrangement" "sv: clips *1, 2; plays its arrangement" bash -c "$BIN/4s controller press $SV_ROW 8 >/dev/null && $BIN/4s clip list sv"
+s controller mode --grid steps >/dev/null
+# A take into a launched clip that is deleted mid-take writes nothing into
+# the arrangement (the notes went with the clip). At 60 bpm no pass is
+# written in the first second.
+s clip new sv --keep >/dev/null
+s clip launch sv 3 >/dev/null
+s tempo 60 >/dev/null
+check "a take into a launched clip deleted mid-take writes nothing elsewhere" "clean" bash -c "$BIN/4s record --to sv --count-in 0 >/dev/null; sleep 0.3; $BIN/4s key C2 --instrument sv --for 0.1 >/dev/null; $BIN/4s clip del sv --clip 3 >/dev/null; $BIN/4s record --off >/dev/null; $BIN/4s stop >/dev/null; L=\$($BIN/4s clip list sv); [[ \"\$L\" == 'sv: clips *1, 2; plays its arrangement' ]] && echo clean || echo \"\$L\""
+s tempo 120 >/dev/null
+check "step expressions only go with a note turned on" "not off" s step sv 1 C2 --off --set accent
+s focus drums >/dev/null
+s instrument rm sv >/dev/null
 # --- The song (RFC 0008 phase B, RFC 0009): clip pools, the arrangement,
 # launching ---
 # Renders list what the `song` 808 fired as voice@seconds (120 bpm: a bar
@@ -787,6 +823,8 @@ check "the drums still loop their launched clip" "drums: clips *1; plays clip 1 
 check "...so the song does not stop at its end" "transport: playing" bash -c "$BIN/4s play >/dev/null && sleep 3.6 && $BIN/4s status | grep transport"
 check "a launch while playing waits for the bar" "plays clip 2 (launched) (waiting for the boundary)" bash -c "$BIN/4s clip launch song 2 | grep '^song:'"
 check "...and lands on it (240 bpm: within a second)" "landed: song: clips *1, 2 \"B\"; plays clip 2 (launched)" bash -c "for i in \$(seq 40); do $BIN/4s clip list song | grep -q waiting || break; sleep 0.05; done; $BIN/4s clip list song | grep -q waiting || echo landed: \$($BIN/4s clip list song)"
+check "relaunching the clip a track plays waits for the boundary too" "plays clip 2 (launched) (waiting for the boundary)" bash -c "$BIN/4s clip launch song 2 | grep '^song:'"
+sleep 1.1
 check "back to the arrangement for every track" "plays its arrangement" bash -c "$BIN/4s song back --now >/dev/null && sleep 0.2 && $BIN/4s clip list drums"
 check "with a one-bar loop and a two-bar quantum, a launch lands on the loop's wrap" "landed" bash -c "$BIN/4s stop >/dev/null; $BIN/4s set transport.launch_quantize 3 >/dev/null; $BIN/4s song loop 2 2 >/dev/null; $BIN/4s locate 2 >/dev/null; $BIN/4s play >/dev/null; $BIN/4s clip launch song 2 >/dev/null; sleep 1.5; $BIN/4s clip list song | grep -q waiting && echo still waiting || echo landed; $BIN/4s stop >/dev/null; $BIN/4s song back --now >/dev/null; $BIN/4s song loop off >/dev/null; $BIN/4s locate 1 >/dev/null; $BIN/4s set transport.launch_quantize 2 >/dev/null"
 check "with nothing launched, the song stops at its end" "transport: stopped" bash -c "$BIN/4s stop >/dev/null && $BIN/4s play >/dev/null && sleep 3.6 && $BIN/4s status | grep transport"

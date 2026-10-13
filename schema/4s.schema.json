@@ -239,6 +239,22 @@
       },
       "ControllerState": {
         "properties": {
+          "base_note": {
+            "description": "For a pitched focus: the pitch of the bottom row (rows go up a\nsemitone each).",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "clip": {
+            "description": "The clip the step grid edits (`steps`), if any.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "device": {
             "description": "Hardware currently attached as a Livid Block, if any.",
             "type": [
@@ -247,7 +263,7 @@
             ]
           },
           "focus": {
-            "description": "That seat's focused instrument: the grid edits it when it is a\n`tr808` (otherwise the grid is dark) and the knobs control its page.",
+            "description": "That seat's focused instrument (its armed track): the grid edits\nthe clip it is playing, else its selected clip (RFC 0009), and the\nknobs control its page.",
             "type": [
               "string",
               "null"
@@ -256,6 +272,10 @@
           "follow": {
             "description": "When true, the page follows the playhead while playing.",
             "type": "boolean"
+          },
+          "grid": {
+            "$ref": "#/$defs/GridMode",
+            "description": "What the grid shows: the focus's clip as steps, or every track's\nclips to launch."
           },
           "knob_page": {
             "description": "Knob page in use (an id from `knob_pages`).",
@@ -291,11 +311,24 @@
             },
             "type": "array"
           },
+          "length": {
+            "description": "Steps the grid pages over (the target clip's length in 16ths).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "page": {
             "description": "Which 8-step page the grid shows (0 = steps 1-8, 1 = steps 9-16, ...).",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
+          },
+          "rows": {
+            "description": "What each grid row is, top first: a drum voice (`BD`), a pitch\n(`C2`), or a track (`launch`). Empty rows are blank.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "seat": {
             "description": "The seat the engine host's own devices (the Block) belong to.",
@@ -304,9 +337,13 @@
         },
         "required": [
           "seat",
+          "grid",
+          "rows",
           "knob_pages",
           "knob_params",
           "page",
+          "length",
+          "base_note",
           "follow",
           "leds"
         ],
@@ -919,10 +956,29 @@
         ],
         "type": "object"
       },
+      "GridMode": {
+        "description": "What the Block's grid shows (RFC 0009).",
+        "oneOf": [
+          {
+            "const": "steps",
+            "description": "The focus's clip: drum rows, or 8 pitch rows from `base_note`;\ncolumns are steps of the current page.",
+            "type": "string"
+          },
+          {
+            "const": "launch",
+            "description": "One row per track (up to 8): columns 1-7 launch its clips 1-7, the\nlast goes back to the arrangement.",
+            "type": "string"
+          }
+        ]
+      },
       "InstrumentInfo": {
         "properties": {
           "id": {
             "type": "string"
+          },
+          "layout": {
+            "$ref": "#/$defs/NoteLayout",
+            "description": "How its notes show in a step view (RFC 0009)."
           },
           "name": {
             "type": "string"
@@ -942,7 +998,8 @@
           "id",
           "type",
           "name",
-          "outputs"
+          "outputs",
+          "layout"
         ],
         "type": "object"
       },
@@ -1210,6 +1267,157 @@
         "required": [
           "device",
           "target"
+        ],
+        "type": "object"
+      },
+      "NoteExpression": {
+        "description": "How an expression is stored in an event.",
+        "oneOf": [
+          {
+            "description": "On when the velocity is at least `min`; setting it writes `on`,\nclearing it `off`.",
+            "properties": {
+              "kind": {
+                "const": "velocity",
+                "type": "string"
+              },
+              "min": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "off": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "on": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "min",
+              "on",
+              "off"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The note is held one tick into the next step, so the next note\nstarts while it sounds (a 303's slide); clearing it gives the\nnote its usual gate.",
+            "properties": {
+              "kind": {
+                "const": "overlap",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ],
+        "properties": {
+          "id": {
+            "description": "Stable id (`accent`, `slide`).",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "NoteLayout": {
+        "description": "How an instrument's notes show in a step view.",
+        "properties": {
+          "expressions": {
+            "items": {
+              "$ref": "#/$defs/NoteExpression"
+            },
+            "type": "array"
+          },
+          "gate": {
+            "description": "A new step's note: its length as a fraction of a step, and velocity.",
+            "format": "float",
+            "type": "number"
+          },
+          "high": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "low": {
+            "description": "Lowest and highest pitch a pitched instrument plays.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mono": {
+            "description": "One note at a time: a step holds at most one note.",
+            "type": "boolean"
+          },
+          "rows": {
+            "description": "Named rows, top first (a drum machine's voices); empty for a pitched\ninstrument.",
+            "items": {
+              "$ref": "#/$defs/NoteRow"
+            },
+            "type": "array"
+          },
+          "velocity": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rows",
+          "low",
+          "high",
+          "mono",
+          "gate",
+          "velocity",
+          "expressions"
+        ],
+        "type": "object"
+      },
+      "NoteRow": {
+        "description": "A named note: one row of a drum machine's grid.",
+        "properties": {
+          "id": {
+            "description": "Stable id (`kick`).",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "short": {
+            "description": "Two letters (`BD`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note",
+          "id",
+          "name",
+          "short"
         ],
         "type": "object"
       },
@@ -2669,12 +2877,35 @@
       },
       "ControllerModeParams": {
         "properties": {
+          "base_note": {
+            "default": null,
+            "description": "For a pitched focus: the bottom row's pitch.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "follow": {
             "default": null,
             "type": [
               "boolean",
               "null"
             ]
+          },
+          "grid": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/GridMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Steps or launch (RFC 0009)."
           },
           "page": {
             "default": null,
@@ -2728,6 +2959,21 @@
           "note"
         ],
         "type": "object"
+      },
+      "GridMode": {
+        "description": "What the Block's grid shows (RFC 0009).",
+        "oneOf": [
+          {
+            "const": "steps",
+            "description": "The focus's clip: drum rows, or 8 pitch rows from `base_note`;\ncolumns are steps of the current page.",
+            "type": "string"
+          },
+          {
+            "const": "launch",
+            "description": "One row per track (up to 8): columns 1-7 launch its clips 1-7, the\nlast goes back to the arrangement.",
+            "type": "string"
+          }
+        ]
       },
       "HelloParams": {
         "properties": {
@@ -4411,6 +4657,107 @@
         ],
         "type": "object"
       },
+      "StepGetParams": {
+        "properties": {
+          "clip": {
+            "default": null,
+            "description": "Default: the selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "description": "Default: the caller's seat focus.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolution": {
+            "default": null,
+            "description": "Ticks a step (default 24, a 16th).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "StepSetParams": {
+        "description": "Edit one step: turn a note on or off, and set or clear expressions on it.",
+        "properties": {
+          "clip": {
+            "default": null,
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "expressions": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "default": {},
+            "description": "Expressions to set (true) or clear (false), by id (`accent`).",
+            "type": "object"
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "default": null,
+            "description": "The note (a drum voice's or a pitch). On a mono instrument, `null`\nwith `on: false` makes the step a rest, and a note replaces the\nstep's note.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "on": {
+            "default": null,
+            "description": "Default true.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "resolution": {
+            "default": null,
+            "description": "Ticks a step (default 24, a 16th).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "step": {
+            "description": "0-based.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "step"
+        ],
+        "type": "object"
+      },
       "SubscribeParams": {
         "properties": {
           "types": {
@@ -5077,6 +5424,40 @@
         "type": "object"
       },
       {
+        "description": "A clip as steps through its instrument's note layout (RFC 0009).",
+        "properties": {
+          "method": {
+            "const": "step.get",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/StepGetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Edit one step of a clip: a note on or off, expressions set or\ncleared.",
+        "properties": {
+          "method": {
+            "const": "step.set",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/StepSetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "An instrument's clip: timed note events (RFC 0007).",
         "properties": {
           "method": {
@@ -5518,7 +5899,7 @@
         "type": "object"
       },
       {
-        "description": "Change the grid page or follow.",
+        "description": "Change the grid page, follow, mode (steps or launch), or a pitched\nfocus's bottom row.",
         "properties": {
           "method": {
             "const": "controller.set_mode",
@@ -6287,6 +6668,22 @@
       },
       "ControllerState": {
         "properties": {
+          "base_note": {
+            "description": "For a pitched focus: the pitch of the bottom row (rows go up a\nsemitone each).",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "clip": {
+            "description": "The clip the step grid edits (`steps`), if any.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "device": {
             "description": "Hardware currently attached as a Livid Block, if any.",
             "type": [
@@ -6295,7 +6692,7 @@
             ]
           },
           "focus": {
-            "description": "That seat's focused instrument: the grid edits it when it is a\n`tr808` (otherwise the grid is dark) and the knobs control its page.",
+            "description": "That seat's focused instrument (its armed track): the grid edits\nthe clip it is playing, else its selected clip (RFC 0009), and the\nknobs control its page.",
             "type": [
               "string",
               "null"
@@ -6304,6 +6701,10 @@
           "follow": {
             "description": "When true, the page follows the playhead while playing.",
             "type": "boolean"
+          },
+          "grid": {
+            "$ref": "#/$defs/GridMode",
+            "description": "What the grid shows: the focus's clip as steps, or every track's\nclips to launch."
           },
           "knob_page": {
             "description": "Knob page in use (an id from `knob_pages`).",
@@ -6339,11 +6740,24 @@
             },
             "type": "array"
           },
+          "length": {
+            "description": "Steps the grid pages over (the target clip's length in 16ths).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "page": {
             "description": "Which 8-step page the grid shows (0 = steps 1-8, 1 = steps 9-16, ...).",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
+          },
+          "rows": {
+            "description": "What each grid row is, top first: a drum voice (`BD`), a pitch\n(`C2`), or a track (`launch`). Empty rows are blank.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "seat": {
             "description": "The seat the engine host's own devices (the Block) belong to.",
@@ -6352,9 +6766,13 @@
         },
         "required": [
           "seat",
+          "grid",
+          "rows",
           "knob_pages",
           "knob_params",
           "page",
+          "length",
+          "base_note",
           "follow",
           "leds"
         ],
@@ -6409,10 +6827,29 @@
         ],
         "type": "object"
       },
+      "GridMode": {
+        "description": "What the Block's grid shows (RFC 0009).",
+        "oneOf": [
+          {
+            "const": "steps",
+            "description": "The focus's clip: drum rows, or 8 pitch rows from `base_note`;\ncolumns are steps of the current page.",
+            "type": "string"
+          },
+          {
+            "const": "launch",
+            "description": "One row per track (up to 8): columns 1-7 launch its clips 1-7, the\nlast goes back to the arrangement.",
+            "type": "string"
+          }
+        ]
+      },
       "InstrumentInfo": {
         "properties": {
           "id": {
             "type": "string"
+          },
+          "layout": {
+            "$ref": "#/$defs/NoteLayout",
+            "description": "How its notes show in a step view (RFC 0009)."
           },
           "name": {
             "type": "string"
@@ -6432,7 +6869,8 @@
           "id",
           "type",
           "name",
-          "outputs"
+          "outputs",
+          "layout"
         ],
         "type": "object"
       },
@@ -6617,6 +7055,157 @@
         "required": [
           "device",
           "target"
+        ],
+        "type": "object"
+      },
+      "NoteExpression": {
+        "description": "How an expression is stored in an event.",
+        "oneOf": [
+          {
+            "description": "On when the velocity is at least `min`; setting it writes `on`,\nclearing it `off`.",
+            "properties": {
+              "kind": {
+                "const": "velocity",
+                "type": "string"
+              },
+              "min": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "off": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "on": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "min",
+              "on",
+              "off"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The note is held one tick into the next step, so the next note\nstarts while it sounds (a 303's slide); clearing it gives the\nnote its usual gate.",
+            "properties": {
+              "kind": {
+                "const": "overlap",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ],
+        "properties": {
+          "id": {
+            "description": "Stable id (`accent`, `slide`).",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "NoteLayout": {
+        "description": "How an instrument's notes show in a step view.",
+        "properties": {
+          "expressions": {
+            "items": {
+              "$ref": "#/$defs/NoteExpression"
+            },
+            "type": "array"
+          },
+          "gate": {
+            "description": "A new step's note: its length as a fraction of a step, and velocity.",
+            "format": "float",
+            "type": "number"
+          },
+          "high": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "low": {
+            "description": "Lowest and highest pitch a pitched instrument plays.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mono": {
+            "description": "One note at a time: a step holds at most one note.",
+            "type": "boolean"
+          },
+          "rows": {
+            "description": "Named rows, top first (a drum machine's voices); empty for a pitched\ninstrument.",
+            "items": {
+              "$ref": "#/$defs/NoteRow"
+            },
+            "type": "array"
+          },
+          "velocity": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rows",
+          "low",
+          "high",
+          "mono",
+          "gate",
+          "velocity",
+          "expressions"
+        ],
+        "type": "object"
+      },
+      "NoteRow": {
+        "description": "A named note: one row of a drum machine's grid.",
+        "properties": {
+          "id": {
+            "description": "Stable id (`kick`).",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "short": {
+            "description": "Two letters (`BD`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note",
+          "id",
+          "name",
+          "short"
         ],
         "type": "object"
       },

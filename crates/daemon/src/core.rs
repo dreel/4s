@@ -10,6 +10,7 @@
 //! live in `seats.rs`.
 
 mod clips;
+mod grid;
 pub(crate) mod record;
 mod seats;
 mod song;
@@ -110,6 +111,8 @@ pub struct Core {
     /// its entry (see `journaled`).
     in_request: bool,
     controller: Controller,
+    /// The controller state last sent to clients.
+    controller_sent: Option<ControllerState>,
     block_map: BlockMap,
     midi: Midi,
     midi_tx: Sender<MidiMessage>,
@@ -178,6 +181,7 @@ impl Core {
             take: None,
             in_request: false,
             controller: Controller::default(),
+            controller_sent: None,
             block_map,
             midi: Midi::default(),
             midi_tx,
@@ -269,20 +273,6 @@ impl Core {
         self.params[index].value
     }
 
-    /// Steps the Block grid shows: the host focus's selected clip's length
-    /// (whole steps, rounded up).
-    fn grid_length(&self) -> u32 {
-        self.drum_focus(&self.host_seat).map_or(16, |id| self.steps_len(&id))
-    }
-
-    /// The Block grid's playhead: the step the host focus's selected clip
-    /// is playing, if it is playing.
-    fn grid_playhead(&self) -> Option<u32> {
-        let id = self.drum_focus(&self.host_seat)?;
-        let at = self.track_playhead(&id).filter(|p| p.clip == self.track(&id).selected)?;
-        Some(at.tick / TICKS_PER_STEP)
-    }
-
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
     }
@@ -303,7 +293,7 @@ impl Core {
     }
 
     fn instrument_info(&self, i: &InstrumentState) -> InstrumentInfo {
-        InstrumentInfo { id: i.id.clone(), kind: i.kind, name: i.name.clone(), outputs: i.outputs.clone() }
+        InstrumentInfo { id: i.id.clone(), kind: i.kind, name: i.name.clone(), outputs: i.outputs.clone(), layout: i.kind.layout() }
     }
 
     fn graph_changed(&mut self, origin: &str) {
@@ -676,6 +666,7 @@ impl Core {
                     outputs: instrument::outputs(*k, k.default_id(), k.label()),
                     params: instrument::params(*k, k.default_id()),
                     knob_pages: instrument::knob_pages(*k, k.default_id()),
+                    layout: k.layout(),
                 })
                 .collect(),
         }
@@ -690,15 +681,17 @@ impl Core {
         if self.controller.page >= pages {
             self.controller.page = pages - 1;
         }
-        let pattern = self.target_pattern();
-        let leds = self.controller.compute_leds(pattern.as_ref(), self.grid_length(), self.grid_playhead());
+        let leds = self.grid_leds();
         let diff = self.controller.set_leds(leds);
         for (r, c, v) in &diff {
             let msg = self.block_map.led_message(*r, *c, *v);
             self.midi.send_block(&msg);
         }
-        if force_event || !diff.is_empty() {
-            let state = self.controller_state();
+        // Anything clients show (the clip the grid edits, its rows, its
+        // length), not only the LEDs.
+        let state = self.controller_state();
+        if force_event || self.controller_sent.as_ref() != Some(&state) {
+            self.controller_sent = Some(state.clone());
             self.emit(origin, Event::Controller { state });
         }
     }
@@ -712,7 +705,12 @@ impl Core {
             knob_page: page.as_ref().map(|p| p.id.clone()),
             knob_pages: pages.iter().map(|p| p.id.clone()).collect(),
             knob_params: page.map(|p| p.params).unwrap_or_default(),
+            grid: c.grid,
+            clip: self.grid_target(&self.host_seat).filter(|_| c.grid == GridMode::Steps).map(|(_, n)| n),
+            rows: self.grid_rows(&self.host_seat),
             page: c.page,
+            length: self.grid_length(),
+            base_note: c.base_note,
             follow: c.follow,
             leds: c.leds.iter().map(|r| r.to_vec()).collect(),
             device: c.device.clone(),
@@ -723,10 +721,6 @@ impl Core {
     fn drum_focus(&self, seat: &str) -> Option<String> {
         let f = self.seat_focus(seat)?;
         self.is_drums(&f).then_some(f)
-    }
-
-    fn target_pattern(&self) -> Option<[[u8; MAX_STEPS]; NUM_TRACKS]> {
-        Some(self.drums(&self.drum_focus(&self.host_seat)?))
     }
 
     /// Re-send every LED (after a device connects).
@@ -911,6 +905,7 @@ impl Core {
         let ids: Vec<String> = self.instruments.iter().map(|i| i.id.clone()).collect();
         for id in ids {
             let t = self.tracks.get_mut(&id).expect("every instrument has a track");
+            t.restart = false;
             let now = t.launched.map(|n| (n, 0));
             if t.playing != now {
                 let was_pending = t.launched != t.playing.map(|p| p.0);
@@ -971,29 +966,18 @@ impl Core {
 
     // ---- controller --------------------------------------------------------
 
-    /// A grid pad: toggles a step of the seat's drum focus.
-    fn controller_pad(&mut self, seat: &str, row: u32, col: u32, pressed: bool, origin: &str) -> Result<(), RpcError> {
-        if row as usize >= NUM_TRACKS || col as usize >= crate::controller::GRID {
-            return Err(RpcError::invalid("row and col must be 0..7"));
-        }
-        let Some(target) = self.drum_focus(seat) else { return Ok(()) };
-        if !pressed {
-            return Ok(());
-        }
-        let step = self.controller.pad_step(col);
-        if step >= self.grid_length() {
-            return Ok(());
-        }
-        let voice = Voice::from_index(row as usize).unwrap();
-        let cur = self.drums(&target)[row as usize][step as usize];
-        let next = if cur == STEP_OFF { STEP_ON } else { STEP_OFF };
-        self.set_step(&target, voice, step, next, origin)?;
-        Ok(())
-    }
-
     fn controller_mode(&mut self, p: ControllerModeParams, origin: &str) -> Result<ControllerState, RpcError> {
+        if p.base_note.is_some_and(|n| n > 120) {
+            return Err(RpcError::invalid("base_note must be 0..120 (8 rows up from it)"));
+        }
         if let Some(f) = p.follow {
             self.controller.follow = f;
+        }
+        if let Some(g) = p.grid {
+            self.controller.grid = g;
+        }
+        if let Some(n) = p.base_note {
+            self.controller.base_note = n;
         }
         if let Some(page) = p.page {
             self.controller.page = page.min(Controller::num_pages(self.grid_length()) - 1);
@@ -2043,6 +2027,10 @@ impl Core {
             Ok(r) => return r,
             Err(req) => req,
         };
+        let req = match self.handle_step(req, origin, client) {
+            Ok(r) => return r,
+            Err(req) => req,
+        };
         match req {
             Request::StateGet(_) => ok(self.snapshot()),
             Request::ParamList(p) => {
@@ -2236,6 +2224,7 @@ impl Core {
             | Request::SongMove(_)
             | Request::SongBack(_)
             | Request::TransportLocate(_) => unreachable!("handled by handle_song"),
+            Request::StepGet(_) | Request::StepSet(_) => unreachable!("handled by handle_step"),
             Request::ClipNew(_)
             | Request::ClipDuplicate(_)
             | Request::ClipRename(_)
@@ -2293,7 +2282,7 @@ fn read_only(req: &Request) -> bool {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
-        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) => true,
+        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
         | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | ClipLaunch(_) | SongPlace(_) | SongRemove(_)
         | SongMove(_) | SongBack(_)
@@ -2305,7 +2294,7 @@ fn read_only(req: &Request) -> bool {
         | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
         | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
         | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) => false,
+        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) | StepSet(_) => false,
     }
 }
 

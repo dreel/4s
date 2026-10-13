@@ -11,7 +11,7 @@ import type { ClipEvent } from "../generated/ClipEvent";
 import type { EventKey } from "../generated/EventKey";
 import type { TakeNote } from "../generated/TakeNote";
 import { act, client, useApp, useLive, useSelectedClipTick } from "../store";
-import { noteName } from "./BassEditor";
+import { noteName } from "./StepView";
 import { GM_NOTES, voiceShort } from "./voices";
 import type { Voice } from "../generated/Voice";
 

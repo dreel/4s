@@ -36,12 +36,14 @@ impl Core {
         if !playing {
             t.playing = clip.map(|n| (n, 0));
         }
+        t.restart = playing && clip.is_some() && t.playing.map(|p| p.0) == clip;
         Ok(())
     }
 
     /// A track's launch state changed: it is saved, but not undone.
     pub(super) fn launch_changed(&mut self, id: &str, origin: &str) {
         self.track_changed(id, origin);
+        self.refresh_controller(origin, false);
     }
 
     /// The engine switched a slot to a launched clip (or back) at `tick`
@@ -59,6 +61,7 @@ impl Core {
         if t.playing == clip.map(|n| (n, tick)) {
             return;
         }
+        self.tracks.get_mut(&id).expect("found").restart = false;
         let recording = self.playing && self.starting == 0 && self.take.as_ref().is_some_and(|t| t.slot == slot);
         let pos = pos as f64;
         if recording {
@@ -70,6 +73,8 @@ impl Core {
         }
         let track = self.track_info(&id);
         self.emit("engine", Event::Track { track });
+        // The Block edits what the armed track plays.
+        self.refresh_controller("engine", false);
     }
 
     /// Where a track is playing now (while playing): its launched clip, from

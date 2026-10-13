@@ -59,8 +59,12 @@ removes and adds in one step, and is how recorded takes are journaled;
 the next `transport.launch_quantize` boundary while playing,
 and the others take an optional `clip`, default the selected one),
 `batch` (several requests as one journal entry and undo step) and their step
-views (`pattern.*`, drum steps and note steps),
-auditioning (`voice.trigger`), the controller (`controller.*`), MIDI (`midi.*`),
+views (`step.get` / `step.set`: any clip through its instrument's note
+layout at a resolution, RFC 0009; the older `pattern.*` drum and note
+steps),
+auditioning (`voice.trigger`), the controller (`controller.*`;
+`controller.set_mode` also takes `grid`, steps or launch, and a pitched
+focus's `base_note`), MIDI (`midi.*`),
 seats and their bindings (`seat.*`, RFC 0007), undo and the journal
 (`history.*`, `journal.get`, `journal.export`), projects (`project.*`,
 including `project.import` to load a project sent inline), rendering

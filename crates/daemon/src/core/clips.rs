@@ -34,6 +34,9 @@ pub(super) struct TrackState {
     /// The launched clip the engine is playing and the tick from play it
     /// started at (`Feedback::Launched`); while stopped, `launched` from 0.
     pub playing: Option<(u32, u64)>,
+    /// A launch of the clip it already plays (a restart from its start) is
+    /// waiting for its boundary.
+    pub restart: bool,
 }
 
 impl TrackState {
@@ -315,7 +318,7 @@ impl Core {
             clips: t.clips.iter().map(|(n, c)| ClipHeader { id: *n, name: c.name.clone(), length: c.length }).collect(),
             arrangement: t.placements.clone(),
             launched: t.launched,
-            pending: self.playing && t.launched != t.playing.map(|p| p.0),
+            pending: self.playing && (t.restart || t.launched != t.playing.map(|p| p.0)),
         }
     }
 
@@ -378,7 +381,7 @@ impl Core {
     /// A new track with one empty one-bar clip, selected (on an instrument
     /// just added to the engine), following its arrangement.
     pub(super) fn add_track_unchecked(&mut self, id: &str, kind: InstrumentType) {
-        let t = TrackState { kind, clips: BTreeMap::new(), selected: 1, placements: Vec::new(), launched: None, playing: None };
+        let t = TrackState { kind, clips: BTreeMap::new(), selected: 1, placements: Vec::new(), launched: None, playing: None, restart: false };
         self.tracks.insert(id.to_string(), t);
         self.add_clip_unchecked(id, 1, "1".into(), DEFAULT_CLIP_LENGTH, Vec::new());
     }
@@ -389,7 +392,7 @@ impl Core {
         let kind = self.track(id).kind;
         self.remove_track(id);
         let track =
-            TrackState { kind, clips: BTreeMap::new(), selected: t.selected, placements: Vec::new(), launched: None, playing: None };
+            TrackState { kind, clips: BTreeMap::new(), selected: t.selected, placements: Vec::new(), launched: None, playing: None, restart: false };
         self.tracks.insert(id.to_string(), track);
         for (n, name, length, events) in t.clips {
             self.add_clip_unchecked(id, n, name, length, events);
@@ -564,8 +567,13 @@ impl Core {
         if t.launched == Some(n) || t.playing.is_some_and(|p| p.0 == n) {
             self.launch(id, None, true)?;
             // It plays the arrangement from the next tick: a take into it
-            // must not target the deleted clip meanwhile.
+            // must not target the deleted clip meanwhile, and what it has
+            // not written of that clip goes with it.
             self.tracks.get_mut(id).expect("checked").playing = None;
+            let (slot, from) = (self.slot(id)?, (self.play_tick as f64, self.song_pos.map_or(self.locate, |p| p) as f64));
+            if let Some(t) = self.take.as_mut().filter(|t| t.slot == slot) {
+                t.take = record::Take::new(from.0, from.1);
+            }
         }
         let t = self.track(id);
         if t.selected == n {

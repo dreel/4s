@@ -40,13 +40,24 @@ unplug.
   devices, see `4s midi ports`) and drives that seat's **focus** (default:
   the first instrument). Choose it with `4s focus drums2` or the focus
   button in an instrument's editor. If the focus is removed, the first
-  instrument takes over. When the focus is not a drum machine the grid goes
-  dark and pads do nothing; the knobs still work.
-- Rows 1-8 = the focus's tracks (kick, snare, clap, closed hat, open hat,
-  low tom, high tom, cowbell). Columns = 8 steps of the current page.
-- Pressing a pad toggles that step of the focus's selected clip. Steps past
-  the clip's length are dark and ignored. The playhead shows while that
-  clip is playing (launched, or under the song position; RFC 0009).
+  instrument takes over. The focus is the armed track (RFC 0009): the grid
+  edits the clip it is playing (its launched clip, or the placement's clip
+  under the playhead), else the clip it launched, else its selected clip
+  (`4s controller` says which).
+- Rows 1-8, through the instrument's note layout: a drum machine's voices
+  (kick, snare, clap, closed hat, open hat, low tom, high tom, cowbell), or
+  for a pitched focus eight pitches up from a base note (C2 by default,
+  the bottom row; `4s controller mode --base D2` or the mirror's buttons
+  move it). Columns = 8 16ths of the current page.
+- Pressing a pad toggles its row's note on that step (on a monophonic
+  instrument it puts that pitch on the step, or makes a lit step a rest).
+  Steps past the clip's length are dark and ignored. The playhead shows
+  while that clip is playing.
+- **Launch mode** (`4s controller mode --grid launch`, or the mirror's
+  `launch` button): one row per track (the first eight); pads 1-7 launch
+  its clips 1-7 and pad 8 sends it back to the arrangement. The launched
+  clip's pad is lit, and pad 8 while the track has a launch. There is no
+  hardware button for the mode yet (see the backlog).
 - LEDs: lit = step on. The playhead column is inverted (lit steps go dark,
   dark steps light) so it is visible either way.
 - Pages: page 1 = steps 1-8, page 2 = steps 9-16, and so on. With `follow` on

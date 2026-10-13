@@ -109,6 +109,20 @@ impl Voice {
         Some(v)
     }
 
+    /// Two-letter name, as on an 808's panel.
+    pub fn short(self) -> &'static str {
+        match self {
+            Voice::Kick => "BD",
+            Voice::Snare => "SD",
+            Voice::Clap => "CP",
+            Voice::ClosedHat => "CH",
+            Voice::OpenHat => "OH",
+            Voice::LowTom => "LT",
+            Voice::HighTom => "HT",
+            Voice::Cowbell => "CB",
+        }
+    }
+
     /// General MIDI drum note for this voice (used for generic MIDI input).
     pub fn gm_note(self) -> u8 {
         match self {
@@ -216,6 +230,8 @@ pub struct InstrumentInfo {
     pub name: String,
     /// Main output first, then any direct outs.
     pub outputs: Vec<OutputInfo>,
+    /// How its notes show in a step view (RFC 0009).
+    pub layout: crate::layout::NoteLayout,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -388,9 +404,18 @@ pub struct KnobPage {
 pub struct ControllerState {
     /// The seat the engine host's own devices (the Block) belong to.
     pub seat: String,
-    /// That seat's focused instrument: the grid edits it when it is a
-    /// `tr808` (otherwise the grid is dark) and the knobs control its page.
+    /// That seat's focused instrument (its armed track): the grid edits
+    /// the clip it is playing, else its selected clip (RFC 0009), and the
+    /// knobs control its page.
     pub focus: Option<String>,
+    /// What the grid shows: the focus's clip as steps, or every track's
+    /// clips to launch.
+    pub grid: GridMode,
+    /// The clip the step grid edits (`steps`), if any.
+    pub clip: Option<u32>,
+    /// What each grid row is, top first: a drum voice (`BD`), a pitch
+    /// (`C2`), or a track (`launch`). Empty rows are blank.
+    pub rows: Vec<String>,
     /// Knob page in use (an id from `knob_pages`).
     pub knob_page: Option<String>,
     /// Pages the focused instrument offers.
@@ -399,12 +424,30 @@ pub struct ControllerState {
     pub knob_params: Vec<String>,
     /// Which 8-step page the grid shows (0 = steps 1-8, 1 = steps 9-16, ...).
     pub page: u32,
+    /// Steps the grid pages over (the target clip's length in 16ths).
+    pub length: u32,
+    /// For a pitched focus: the pitch of the bottom row (rows go up a
+    /// semitone each).
+    pub base_note: u8,
     /// When true, the page follows the playhead while playing.
     pub follow: bool,
     /// 8 rows x 8 columns of LED values (0 = off, 1 = on).
     pub leds: Vec<Vec<u8>>,
     /// Hardware currently attached as a Livid Block, if any.
     pub device: Option<String>,
+}
+
+/// What the Block's grid shows (RFC 0009).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GridMode {
+    /// The focus's clip: drum rows, or 8 pitch rows from `base_note`;
+    /// columns are steps of the current page.
+    #[default]
+    Steps,
+    /// One row per track (up to 8): columns 1-7 launch its clips 1-7, the
+    /// last goes back to the arrangement.
+    Launch,
 }
 
 // ---------------------------------------------------------------------------

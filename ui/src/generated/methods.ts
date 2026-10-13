@@ -89,7 +89,10 @@ import type { SongInfo } from "./SongInfo";
 import type { SongMoveParams } from "./SongMoveParams";
 import type { SongPlaceParams } from "./SongPlaceParams";
 import type { SongRemoveParams } from "./SongRemoveParams";
+import type { StepGetParams } from "./StepGetParams";
+import type { StepGrid } from "./StepGrid";
 import type { StepResult } from "./StepResult";
+import type { StepSetParams } from "./StepSetParams";
 import type { SubscribeParams } from "./SubscribeParams";
 import type { SubscribeResult } from "./SubscribeResult";
 import type { ToggleStepParams } from "./ToggleStepParams";
@@ -132,6 +135,8 @@ export interface Methods {
   "pattern.get_notes": { params: NotesGetParams; result: NotesResult };
   "pattern.set_notes": { params: NotesSetParams; result: NotesResult };
   "pattern.set_note": { params: NoteSetParams; result: NotesResult };
+  "step.get": { params: StepGetParams; result: StepGrid };
+  "step.set": { params: StepSetParams; result: StepGrid };
   "clip.get": { params: ClipGetParams; result: Clip };
   "clip.set": { params: ClipEventsParams; result: Clip };
   "clip.add": { params: ClipEventsParams; result: Clip };
@@ -227,6 +232,8 @@ export const METHODS: MethodName[] = [
   "pattern.get_notes",
   "pattern.set_notes",
   "pattern.set_note",
+  "step.get",
+  "step.set",
   "clip.get",
   "clip.set",
   "clip.add",

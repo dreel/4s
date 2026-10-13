@@ -166,6 +166,8 @@ pub struct InstrumentTypeInfo {
     pub params: Vec<ParamInfo>,
     /// Knob pages of an instance with the default id.
     pub knob_pages: Vec<KnobPage>,
+    /// How its notes show in a step view (RFC 0009).
+    pub layout: crate::layout::NoteLayout,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -342,6 +344,58 @@ pub struct NoteSetParams {
     /// 0-based step index.
     pub step: u32,
     pub note: NoteStep,
+}
+
+// ---- step views (RFC 0009) ------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct StepGetParams {
+    /// Default: the caller's seat focus.
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Default: the selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
+    /// Ticks a step (default 24, a 16th).
+    #[serde(default)]
+    pub resolution: Option<u32>,
+}
+
+/// Edit one step: turn a note on or off, and set or clear expressions on it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct StepSetParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    #[serde(default)]
+    pub clip: Option<u32>,
+    /// Ticks a step (default 24, a 16th).
+    #[serde(default)]
+    pub resolution: Option<u32>,
+    /// 0-based.
+    pub step: u32,
+    /// The note (a drum voice's or a pitch). On a mono instrument, `null`
+    /// with `on: false` makes the step a rest, and a note replaces the
+    /// step's note.
+    #[serde(default)]
+    pub note: Option<u8>,
+    /// Default true.
+    #[serde(default)]
+    pub on: Option<bool>,
+    /// Expressions to set (true) or clear (false), by id (`accent`).
+    #[serde(default)]
+    pub expressions: std::collections::BTreeMap<String, bool>,
+}
+
+/// A clip through its instrument's layout at a resolution.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct StepGrid {
+    pub instrument: String,
+    pub clip: u32,
+    pub resolution: u32,
+    /// Steps in the clip (its length over the resolution, rounded up).
+    pub steps: u32,
+    pub layout: crate::layout::NoteLayout,
+    pub cells: Vec<crate::layout::StepCell>,
 }
 
 // ---- clips (RFC 0007) -----------------------------------------------------
@@ -734,6 +788,12 @@ pub struct ControllerModeParams {
     pub page: Option<u32>,
     #[serde(default)]
     pub follow: Option<bool>,
+    /// Steps or launch (RFC 0009).
+    #[serde(default)]
+    pub grid: Option<GridMode>,
+    /// For a pitched focus: the bottom row's pitch.
+    #[serde(default)]
+    pub base_note: Option<u8>,
 }
 
 // ---- midi ----------------------------------------------------------------
@@ -1090,6 +1150,12 @@ api! {
     /// Set one step of a note pattern.
     PatternSetNote = "pattern.set_note" (NoteSetParams) -> NotesResult;
 
+    /// A clip as steps through its instrument's note layout (RFC 0009).
+    StepGet = "step.get" (StepGetParams) -> StepGrid;
+    /// Edit one step of a clip: a note on or off, expressions set or
+    /// cleared.
+    StepSet = "step.set" (StepSetParams) -> StepGrid;
+
     /// An instrument's clip: timed note events (RFC 0007).
     ClipGet = "clip.get" (ClipGetParams) -> Clip;
     /// Replace a clip's events.
@@ -1152,7 +1218,8 @@ api! {
     /// Set a knob's parameter to a position, as if on the Livid Block (no
     /// pickup).
     ControllerKnob = "controller.knob" (KnobParams) -> ControllerState;
-    /// Change the grid page or follow.
+    /// Change the grid page, follow, mode (steps or launch), or a pitched
+    /// focus's bottom row.
     ControllerSetMode = "controller.set_mode" (ControllerModeParams) -> ControllerState;
 
     /// List MIDI ports, connections, and this machine's device names.

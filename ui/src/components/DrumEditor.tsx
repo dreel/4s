@@ -1,14 +1,14 @@
-// Editor for a `tr808`: the step sequencer (one row per voice), each voice's
-// internal mix (level, pan, mute) and sound (tune, decay, tone), and its
-// output: the instrument's main mix or a direct out to a mixer channel.
-// Click a step to toggle it; shift-click or right-click toggles accent.
+// Editor for a `tr808`: the step view (one row per voice, RFC 0009) with
+// each voice's audition, mute, and output (the instrument's main mix or a
+// direct out to a mixer channel) beside its row, and each voice's sound
+// (tune, decay, tone, pan, level).
 
-import type { TrackPattern } from "../generated/TrackPattern";
 import type { Voice } from "../generated/Voice";
-import { act, client, setParam, useApp, useLive, useSelectedClipSteps, useSelectedClipTick } from "../store";
+import { act, client, setParam, useApp, useLive } from "../store";
 import { BlockMirror } from "./BlockMirror";
 import { Toggle } from "./controls";
 import { ParamKnob, pan, pct, st } from "./ParamKnob";
+import { StepView } from "./StepView";
 import { voiceLabel } from "./voices";
 
 function TriggerLight({ id, voice }: { id: string; voice: Voice }) {
@@ -42,22 +42,13 @@ function OutputSelect({ id, voice }: { id: string; voice: Voice }) {
   );
 }
 
-function Row({ id, track, length, playhead }: { id: string; track: TrackPattern; length: number; playhead: number | null }) {
-  const voice = track.voice;
+/** What sits beside a voice's row in the step view: audition, mute, and
+ * where the voice plays. */
+function RowControls({ id, voice }: { id: string; voice: Voice }) {
   const mutePath = `${id}.${voice}.mute`;
   const mute = useApp((s) => (s.snapshot?.params[mutePath] ?? 0) >= 0.5);
-
-  const click = (step: number, accent: boolean) => {
-    const level = track.steps[step];
-    if (accent) {
-      void act(client.call("pattern.set_step", { instrument: id, voice, step, level: level === 2 ? 1 : 2 }));
-    } else {
-      void act(client.call("pattern.toggle_step", { instrument: id, voice, step }));
-    }
-  };
-
   return (
-    <div className="flex items-center gap-2" data-testid={`row-${voice}`}>
+    <>
       <button
         className="w-24 h-8 flex items-center gap-2 px-2 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-600 text-left text-xs"
         onClick={() => void act(client.call("voice.trigger", { instrument: id, voice, note: null, velocity: null }))}
@@ -69,35 +60,7 @@ function Row({ id, track, length, playhead }: { id: string; track: TrackPattern;
       </button>
       <Toggle label="M" on={mute} onClick={() => void setParam(mutePath, mute ? 0 : 1)} testId={`voice-mute-${voice}`} title="Mute voice" />
       <OutputSelect id={id} voice={voice} />
-      <div className="flex gap-1 flex-1 min-w-0">
-        {Array.from({ length }, (_, s) => {
-          const level = track.steps[s] ?? 0;
-          const group = Math.floor(s / 4) % 2 === 0;
-          const base =
-            level === 2
-              ? "bg-amber-300 shadow-[inset_0_0_0_2px_rgba(255,255,255,0.6)]"
-              : level === 1
-                ? "bg-amber-600"
-                : group
-                  ? "bg-zinc-800"
-                  : "bg-zinc-800/60";
-          const head = playhead === s ? "ring-2 ring-zinc-100" : "";
-          return (
-            <button
-              key={s}
-              data-testid={`step-${voice}-${s}`}
-              data-level={level}
-              className={`h-8 flex-1 min-w-3 rounded-sm ${base} ${head} hover:brightness-125 ${s % 4 === 0 && s > 0 ? "ml-1" : ""}`}
-              onClick={(e) => click(s, e.shiftKey)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                click(s, true);
-              }}
-            />
-          );
-        })}
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -116,25 +79,13 @@ function VoiceStrip({ id, voice }: { id: string; voice: Voice }) {
 }
 
 export function DrumEditor({ id }: { id: string }) {
-  const pattern = useApp((s) => s.snapshot?.patterns.find((p) => p.instrument === id)?.pattern);
-  const length = useSelectedClipSteps(id);
-  const at = useSelectedClipTick(id);
-  const playhead = at === null ? null : Math.floor(at / 24);
+  const voices = useApp((s) => s.snapshot?.graph.instruments.find((i) => i.id === id)?.layout.rows ?? []);
   const isTarget = useApp((s) => s.snapshot?.controller.focus === id);
   const blockSeat = useApp((s) => s.snapshot?.controller.seat ?? null);
-  if (!pattern || pattern.kind !== "drums") return null;
   return (
     <div className="flex flex-col gap-3" data-testid={`drum-editor-${id}`}>
       <div className="flex gap-3 items-start">
-        <section className="flex-1 min-w-0 flex flex-col gap-1.5 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800">
-          <div className="flex items-center justify-between text-xs text-zinc-500 mb-1">
-            <span>Sequencer</span>
-            <span>click: on/off - shift/right-click: accent</span>
-          </div>
-          {pattern.tracks.map((t) => (
-            <Row key={t.voice} id={id} track={t} length={length} playhead={playhead} />
-          ))}
-        </section>
+        <StepView id={id} rowExtras={(r) => <RowControls id={id} voice={r.id as Voice} />} />
         {isTarget ? (
           <BlockMirror />
         ) : (
@@ -148,8 +99,8 @@ export function DrumEditor({ id }: { id: string }) {
         )}
       </div>
       <section className="flex gap-2 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 overflow-x-auto">
-        {pattern.tracks.map((t) => (
-          <VoiceStrip key={t.voice} id={id} voice={t.voice} />
+        {voices.map((r) => (
+          <VoiceStrip key={r.id} id={id} voice={r.id as Voice} />
         ))}
       </section>
     </div>

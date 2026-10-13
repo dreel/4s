@@ -275,12 +275,40 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   deleted a launched clip restores the launch even if the track was
   launched elsewhere since: `launched:<id>` has no per-user conflict check
   beyond the doc's (`apply_clip_sets`).
-
 - (2026-10-12, clip launching review) deleting a launched clip frees its
   engine clip-table entry at once, while the engine plays it until the
   `now` return lands on the next tick; a `clip.new` in the same batch that
   reuses the entry could sound for that tick on the deleted clip's track.
   Free the entry on `Feedback::Launched` (`delete_clip`).
+- (2026-10-12, step view) the Block has no hardware control for launch
+  mode or moving a pitched focus's rows (`controller.set_mode` only); map
+  spare Block buttons or a knob page when the device is probed
+  (`crates/daemon/src/controller.rs`, `BlockMap`).
+- (2026-10-12, step view) `pattern.*` (drum and note step views) are kept
+  for scripts and the journal; retire them for `step.*` once nothing uses
+  them (`crates/daemon/src/core/clips.rs`, `crates/cli`).
+- (2026-10-12, step view) the step view's pitch-row layout (pitched, not
+  mono) has no instrument yet; it shows C1..C4 only, with no scrolling.
+
+- (2026-10-12, #37 review) the launch quantize labels (none, 1 beat, 1 bar,
+  2 bars, 4 bars) are spelled out in the CLI (`print_song`) and the UI
+  (`Transport.tsx`); export them from the protocol with
+  `LAUNCH_QUANTIZE_TICKS`, as for the record grids.
+
+- (2026-10-12, step view review) `4s step bass 3 C2 --clear accent` on a
+  rest places the note (`on` defaults to true); reject `--clear` on an
+  empty step or document it (`crates/cli/src/main.rs`, `Cmd::Step`).
+- (2026-10-12, step view review) `step.set` accepts steps past the clip's
+  length, writing events no step view shows; reject `step >= steps` in
+  `Core::edit_step`.
+- (2026-10-12, step view review) `step_grid` falls back to `tr808` when the
+  instrument is missing instead of failing (`crates/daemon/src/core/grid.rs`).
+- (2026-10-12, step view review) every engine step builds a full
+  `ControllerState` to compare with the last one sent
+  (`refresh_controller`); cache the rows and length, or compare only what
+  can change in a tick.
+- (2026-10-12, step view review) entering the Block's launch mode clamps
+  the step page to 0, so going back loses it; keep a separate steps page.
 
 ## Mismatches
 
