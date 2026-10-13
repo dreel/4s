@@ -306,6 +306,14 @@ impl LaneStore {
 
 /// Most parameters automated at once: every lane of a clip on every track.
 const MAX_AUTOMATED: usize = MAX_INSTRUMENTS * MAX_LANES;
+/// Where play start's jump of the lanes' first values is (`snap_lanes`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapLanes {
+    Off,
+    Armed,
+    First,
+}
+
 /// Most parameters moved at once (by modulation or automation).
 const MAX_MOVED: usize = MAX_AUTOMATED + MAX_MOD_ROUTES;
 
@@ -512,10 +520,11 @@ pub struct Engine {
     /// second (so a dropped report does not leave a stale value for good).
     moved_reported: bool,
     moved_quiet: u32,
-    /// Play just happened: the lanes' first values jump
-    /// straight to where they start instead of ramping through the
-    /// parameter smoothers (cleared once clips play).
-    snap_lanes: bool,
+    /// Play just happened: the lanes' first values jump straight to where
+    /// they start instead of ramping through the parameter smoothers.
+    /// `Armed` at play, `First` at the first tick after any count-in, off
+    /// after that tick's first block (whether or not a clip plays).
+    snap_lanes: SnapLanes,
     /// Beats since the song's tick 0, advanced every block (synced LFOs
     /// follow it; it runs while stopped too).
     beat: f64,
@@ -577,7 +586,7 @@ impl Engine {
             moved_len: 0,
             moved_reported: false,
             moved_quiet: 0,
-            snap_lanes: false,
+            snap_lanes: SnapLanes::Off,
             beat: 0.0,
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
@@ -933,7 +942,7 @@ impl Engine {
                 for t in self.tracks.iter_mut() {
                     t.at = None;
                 }
-                self.snap_lanes = true;
+                self.snap_lanes = SnapLanes::Armed;
                 // Waiting switches land; launched clips start with the song.
                 for slot in 0..self.tracks.len() {
                     let t = &self.tracks[slot];
@@ -1081,7 +1090,7 @@ impl Engine {
                         let v = if whole { v.round() } else { v };
                         self.write_param(target, v.clamp(min, max));
                         self.note_moved(target, v.clamp(min, max));
-                        if self.snap_lanes && !self.automated.iter().flatten().any(|a| a.0 == target) {
+                        if self.snap_lanes == SnapLanes::First && !self.automated.iter().flatten().any(|a| a.0 == target) {
                             self.snap_target(target);
                         }
                     }
@@ -1099,8 +1108,8 @@ impl Engine {
             }
         }
         self.automated = now;
-        if self.tracks.iter().any(|t| t.at.is_some()) {
-            self.snap_lanes = false;
+        if self.snap_lanes == SnapLanes::First {
+            self.snap_lanes = SnapLanes::Off;
         }
     }
 
@@ -1226,6 +1235,9 @@ impl Engine {
         }
         // Ticks from the song's start, after any count-in.
         let song = tick - self.count_in;
+        if self.snap_lanes == SnapLanes::Armed {
+            self.snap_lanes = SnapLanes::First;
+        }
         let time = self.time();
         let looping = self.song_loop();
         // A range loops when the song reaches its end (playing from past it

@@ -908,21 +908,14 @@ impl Core {
             // notes and lanes, and a pass is one undo step.
             // Lanes first: setting one again gives the same lane, so if the
             // notes then fail and are written next pass, nothing doubles.
-            let mut requests = moves.clone();
+            let mut requests = moves;
             if !writes.is_empty() {
                 requests.extend(write_requests(&id, &writes, &existing));
             }
-            let lanes_only = requests.len() > moves.len() && !moves.is_empty();
-            let mut result = self.journal_requests(requests, &user, &client, &origin);
-            if let Err(e) = &result {
+            // Lanes go first and nothing is rolled back, so notes refused
+            // for good (too many events) still leave the pass's lanes.
+            if let Err(e) = self.journal_requests(requests, &user, &client, &origin) {
                 tracing::warn!("recording into {id}: {}", e.message);
-                // Notes refused for good (too many events) keep the pass's
-                // knob moves: they are written alone.
-                if e.code == RpcError::invalid("").code && lanes_only {
-                    result = self.journal_requests(moves, &user, &client, &origin);
-                }
-            }
-            if let Err(e) = result {
                 // A busy engine may take it next pass; an invalid clip (too
                 // many events) never will.
                 if e.code != RpcError::invalid("").code {

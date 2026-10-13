@@ -1006,7 +1006,8 @@ cat > "$TMP/lr.py" <<PY
 import json, subprocess
 r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render']))
 l, rr = r['left']['rms'], r['right']['rms']
-print('left' if rr < 0.2 * l else 'even' if abs(rr - l) < 0.01 else (l, rr))
+# Hard left from the first hit (a lane's first value jumps there at play).
+print('left' if r['right']['peak'] < 0.001 else 'even' if abs(rr - l) < 0.01 else (l, rr, r['right']['peak']))
 PY
 check "a centered kick renders even" "even" python3 "$TMP/lr.py"
 check "a lane on channel 1's pan" "lane mixer.1.pan: 0:-1 192:-1" s clip lane drums mixer.1.pan "0:-1 192:-1"
@@ -1059,6 +1060,13 @@ for p in mixer.1.volume mixer.1.pan; do $BIN/4s clip lane drums $p --rm >/dev/nu
 s set mixer.1.volume 1 >/dev/null
 s set mixer.1.pan 0 >/dev/null
 s clip length drums 16 >/dev/null
+check "moves in two placements of a clip are separate runs: the points between them stay" "lane mixer.1.pan: 0:0 48:-0.5 144:0.9 216:-0.7 336:0" bash -c "$BIN/4s song back >/dev/null; $BIN/4s song place drums --at 1 --bars 1 >/dev/null; $BIN/4s song place drums --at 2 --bars 1 >/dev/null; $BIN/4s clip lane drums mixer.1.pan '0:0 144:0.9 336:0' >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.12; $BIN/4s set mixer.1.pan -0.5 >/dev/null; sleep 1.45; $BIN/4s set mixer.1.pan -0.7 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep 'lane mixer.1.pan'"
+s song rm drums 2 >/dev/null
+s song rm drums 1 >/dev/null
+s clip launch drums 1 --now >/dev/null
+s clip lane drums mixer.1.pan --rm >/dev/null
+s set mixer.1.pan 0 >/dev/null
+check "a removed device's parameters leave moving at once" "gone" bash -c "$BIN/4s device add filter --on 1 >/dev/null; $BIN/4s device add lfo --id lfo9 >/dev/null; $BIN/4s mod route lfo9.1 filter.cutoff 50% >/dev/null; sleep 0.3; $BIN/4s call state.get | grep -q filter.cutoff || echo 'not moving?'; $BIN/4s device rm filter >/dev/null; $BIN/4s call state.get | python3 -c 'import json,sys; print(\"gone\" if \"filter.cutoff\" not in json.load(sys.stdin)[\"moving\"] else \"still there\")'; $BIN/4s device rm lfo9 >/dev/null"
 s tempo 120 >/dev/null
 check "a session with lanes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/lanes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/lanes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null
