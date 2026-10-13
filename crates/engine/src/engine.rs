@@ -512,6 +512,10 @@ pub struct Engine {
     /// second (so a dropped report does not leave a stale value for good).
     moved_reported: bool,
     moved_quiet: u32,
+    /// Play just happened: the lanes' first values jump
+    /// straight to where they start instead of ramping through the
+    /// parameter smoothers (cleared once clips play).
+    snap_lanes: bool,
     /// Beats since the song's tick 0, advanced every block (synced LFOs
     /// follow it; it runs while stopped too).
     beat: f64,
@@ -573,6 +577,7 @@ impl Engine {
             moved_len: 0,
             moved_reported: false,
             moved_quiet: 0,
+            snap_lanes: false,
             beat: 0.0,
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
@@ -924,10 +929,11 @@ impl Engine {
             Command::Play { count_in } => {
                 self.release_clip_notes(None);
                 // No clip plays (nor automates) until the first tick after
-                // any count-in.
+                // any count-in, and then lanes start where they are.
                 for t in self.tracks.iter_mut() {
                     t.at = None;
                 }
+                self.snap_lanes = true;
                 // Waiting switches land; launched clips start with the song.
                 for slot in 0..self.tracks.len() {
                     let t = &self.tracks[slot];
@@ -1011,6 +1017,38 @@ impl Engine {
         }
     }
 
+    /// Jump a parameter's smoother (and those sharing its strip or device)
+    /// to where it is heading.
+    fn snap_target(&mut self, target: ParamTarget) {
+        match target {
+            ParamTarget::Global(i) if i == MASTER_VOLUME => self.master.value = volume_to_gain(self.globals[MASTER_VOLUME]),
+            ParamTarget::Global(_) | ParamTarget::Modulator { .. } => {}
+            ParamTarget::Channel { ch, .. } => {
+                let any_solo = self.any_solo();
+                if let Some(c) = self.channels.get_mut(ch as usize) {
+                    c.snap(any_solo);
+                }
+            }
+            ParamTarget::Instrument { slot, .. } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.snap();
+                }
+            }
+            ParamTarget::Effect { slot, .. } => {
+                let ctx = ProcessContext { tempo: self.globals[TEMPO].clamp(20.0, 300.0) };
+                if let Some(Some(e)) = self.effects.get_mut(slot as usize) {
+                    e.effect.snap(&ctx);
+                    e.wet.value = if e.bypass { 0.0 } else { e.mix };
+                }
+            }
+            ParamTarget::Send { ch, ret } => {
+                if let (Some(at), Some(to)) = (self.sends_at.get_mut(ch as usize), self.sends.get(ch as usize)) {
+                    at[ret as usize % MAX_CHANNELS] = to[ret as usize % MAX_CHANNELS];
+                }
+            }
+        }
+    }
+
     /// Forget automated targets whose slot goes, so letting go of them later
     /// does not write a stale value into whatever takes the slot next.
     fn forget_automated(&mut self, gone: impl Fn(ParamTarget) -> bool) {
@@ -1043,6 +1081,9 @@ impl Engine {
                         let v = if whole { v.round() } else { v };
                         self.write_param(target, v.clamp(min, max));
                         self.note_moved(target, v.clamp(min, max));
+                        if self.snap_lanes && !self.automated.iter().flatten().any(|a| a.0 == target) {
+                            self.snap_target(target);
+                        }
                     }
                 }
             }
@@ -1058,6 +1099,9 @@ impl Engine {
             }
         }
         self.automated = now;
+        if self.tracks.iter().any(|t| t.at.is_some()) {
+            self.snap_lanes = false;
+        }
     }
 
     /// Advance the modulators by `n` frames and move every modulated target
@@ -1890,6 +1934,15 @@ pub(crate) mod tests {
         // Once settled it says so once, not every meter period.
         let dones = fb.iter().filter(|f| matches!(f, Feedback::MovedDone)).count();
         assert!(!fb.iter().any(|f| matches!(f, Feedback::Moved { .. })) && dones == 1, "settled once: {dones}");
+        // From play, a lane's first value is there at once (no ramp from the
+        // value set by hand through the smoother).
+        apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 1, tick: 384, value: -1.0 });
+        apply(&mut e, Command::Play { count_in: 0 });
+        render_secs(&mut e, 0.002, &mut vec![]);
+        let (now, want) = (e.channels[0].bal_r.value, e.channels[0].targets(e.any_solo())[4]);
+        assert!((now - want).abs() < 1e-6, "hard left from the first block: {now} vs {want}");
+        apply(&mut e, Command::Stop);
+        render_secs(&mut e, 0.1, &mut vec![]);
         // A count-in plays no clip, so nothing is automated yet.
         apply(&mut e, Command::Play { count_in: TICKS_PER_BAR });
         render_secs(&mut e, 0.5, &mut vec![]);

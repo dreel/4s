@@ -332,10 +332,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   that reloads the pad fails (skipped). Point undo at the bundle copy, or
   keep decoded samples by content.
 
-- (2026-10-12, automation lanes) lanes: a lane's first value at play start
-  ramps in through parameter smoothing (a few ms), so the first hit can
-  sound partly at the value set by hand (the pan e2e's right channel peaks
-  0.18 for one hit). Snap automated targets' smoothers when play starts.
 - (2026-10-12, automation lanes review) lanes: a lane whose engine
   commands did not fit the queue is marked unsent and resent only at the
   next edit or graph change (`sync_lanes`); until then it may play stale

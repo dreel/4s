@@ -394,8 +394,10 @@ instruments.
   modulation, so **automation overrides modulation** on the same target;
   the first lane for a target wins when two playing clips automate it.
   What no playing lane covers goes back to its value set by hand, which
-  `param.set` keeps up to date. Parameter smoothing applies, so a jump at
-  play start ramps in over a few milliseconds.
+  `param.set` keeps up to date. At play start a lane's first value jumps
+  straight there (its target's smoother is snapped, so the first hit
+  already sounds automated); later changes, and a clip launched while
+  playing, move through the smoothers as any change does.
 - The daemon keeps each lane's engine target (`ClipState::sent`) and
   re-sends targets after a graph change; a lane whose parameter goes (an
   instrument or effect removed) goes with it, as modulation routes do, in
