@@ -1,10 +1,11 @@
 //! Offline (faster than real time) rendering and simple audio analysis, used
 //! for exports and for agent-driven validation of what the engine produces.
 
+use crate::effect;
 use crate::engine::{Command, Engine, Feedback, ParamTarget, Placement};
 use crate::instrument;
 use crate::params::{NUM_GLOBALS, TEMPO};
-use fours_protocol::{ClipEvent, InstrumentType, RenderTrigger, Voice};
+use fours_protocol::{ClipEvent, DeviceType, InstrumentType, MAX_INSERTS, RenderTrigger, Voice};
 use std::path::Path;
 
 #[derive(Clone, Debug)]
@@ -30,6 +31,15 @@ pub struct RenderClip {
     pub events: Vec<ClipEvent>,
 }
 
+/// An audio effect in its engine slot, with its parameter values (in
+/// `effect::params` order).
+#[derive(Clone, Debug)]
+pub struct RenderEffect {
+    pub slot: u8,
+    pub kind: DeviceType,
+    pub params: Vec<f32>,
+}
+
 /// Everything needed to render the current project, copied out of the
 /// daemon's state.
 #[derive(Clone, Debug)]
@@ -39,6 +49,10 @@ pub struct RenderSpec {
     pub channels: Vec<(u8, [f32; crate::params::CHANNEL_PARAMS])>,
     pub instruments: Vec<RenderInstrument>,
     pub clips: Vec<RenderClip>,
+    pub effects: Vec<RenderEffect>,
+    /// Insert chains: engine chain index (`MASTER_CHAIN` for the master)
+    /// -> effect slots in order.
+    pub chains: Vec<(u8, Vec<u8>)>,
     /// Where play starts from.
     pub start: u32,
 }
@@ -75,6 +89,19 @@ impl RenderSpec {
             for placement in &inst.placements {
                 let _ = e.apply(Command::AddPlacement { slot, placement: *placement }, &mut fb);
             }
+        }
+        for fx in &self.effects {
+            let _ = e.apply(Command::AddEffect { slot: fx.slot, effect: effect::make(fx.kind, sample_rate as f32) }, &mut fb);
+            for (i, v) in fx.params.iter().enumerate() {
+                let target = ParamTarget::Effect { slot: fx.slot, index: i as u16 };
+                let _ = e.apply(Command::SetParam { target, value: *v }, &mut fb);
+            }
+        }
+        for (ch, chain) in &self.chains {
+            let mut slots = [0u8; MAX_INSERTS];
+            let len = chain.len().min(MAX_INSERTS);
+            slots[..len].copy_from_slice(&chain[..len]);
+            let _ = e.apply(Command::SetChain { ch: *ch, slots, len: len as u8 }, &mut fb);
         }
         for c in &self.clips {
             let _ = e.apply(Command::SetClipLength { clip: c.index, length: c.length }, &mut fb);
@@ -282,6 +309,8 @@ mod tests {
                 placements: Vec::new(),
             }],
             clips: vec![RenderClip { index: 0, length: fours_protocol::DEFAULT_CLIP_LENGTH, events }],
+            effects: Vec::new(),
+            chains: Vec::new(),
             start: 0,
         }
     }

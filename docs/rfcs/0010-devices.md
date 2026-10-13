@@ -1,9 +1,10 @@
 # RFC 0010: Devices: effects, buses, modulators, a sampler, automation
 
-- Status: proposed (Sam asked to keep building and review the stack later;
-  the choices marked "default" below are reversible and open to review)
+- Status: accepted (phase 2 implemented; Sam asked to keep building and
+  review the stack later, so the choices marked "default" are reversible
+  and open to review; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
-- Created: 2026-10-12
+- Created: 2026-10-11
 - Discussion: the PR that introduces this RFC. Follows RFC 0004
   (instruments, channels, routes) and RFC 0009 (one transport, clip
   launching, note layouts), whose section 7 sketched this phase.
@@ -68,7 +69,9 @@ instruments.
   (pre-fader inserts, as on a console strip). The master's chain runs
   before the master fader and soft clipper.
 - RPC: `device.add { type, id?, name?, channel, position? }` (channel 0 is
-  the master; default position: the end), `device.remove { id }`,
+  the master: a new convention, since channels count from 1 and the
+  master's parameters are `mixer.master.*`; the CLI says `--on master`;
+  default position: the end), `device.remove { id }`,
   `device.move { id, channel, position }`, `device.list`. Every effect has
   `<id>.bypass` (a toggle) and `<id>.mix` (dry/wet) parameters besides its
   own.
@@ -79,7 +82,8 @@ instruments.
     resonance; stereo.
   - `delay`: tempo-synced or free stereo delay with feedback, ping-pong,
     and a damping low-pass; the buffer (2 s at the engine rate) is
-    allocated when the device is built.
+    allocated when the device is built, and a longer synced time (a
+    dotted half at a slow tempo) is clamped to it.
   - `reverb`: a small Freeverb-style network (comb and all-pass filters),
     size, damping, width.
 
@@ -89,7 +93,8 @@ instruments.
   `return` channel (`channel.add { kind: "return" }`), fed only by sends.
 - Every track channel has a send level per return channel:
   `mixer.<n>.send.<m>` (0..1, default 0), post-fader (default; a pre-fader
-  option can come later as `mixer.<n>.send.<m>.pre`).
+  option can come later as `mixer.<n>.send.<m>.pre`), so a muted (or
+  soloed-away) track sends nothing.
 - Returns are mixed after every track channel, so a send can never feed
   itself; returns do not send (no return-to-return routing in this phase).
   A return has its own insert chain (the reverb usually lives there),
@@ -107,13 +112,18 @@ instruments.
 - A **modulation route** `{source: "lfo.1", target: "bass.cutoff",
   depth: -1..1}` moves the target by `depth x` the target's range around
   the value it is set to (its **base**), clamped to its range. Several
-  routes on one target add up.
+  routes on one target add up. Only continuous parameters can be targets
+  (a toggle, an integer, or a `bypass` is refused). Removing a source or
+  a target (its device or instrument) drops its routes, in the same
+  change, so undo brings them back and clients get the new graph.
 - RPC: `mod.route { source, target, depth }` (adds, or sets the depth of
   an existing route), `mod.unroute { source, target }`; the graph lists
   `mod_routes`. A route's depth is also a parameter for CC maps and
   automation: no (default: routes are graph state; their depth is set by
   `mod.route`), to keep parameter lists stable.
-- Engine: a fixed route table (`MAX_MOD_ROUTES` = 64). Each block, every
+- Engine: a fixed route table (`MAX_MOD_ROUTES` = 64), filled by small
+  commands (`SetModRoute { index, source, target, depth }`, `ClearModRoute`)
+  that carry no heap data. Each block, every
   modulator advances, and every route's target is set to its base plus
   the routes' sum, through the same `set_param` path as any change (so
   instruments and effects need nothing new). `SetParam` on a modulated
@@ -140,26 +150,31 @@ instruments.
   audio thread never decodes or allocates, and a replaced sample is
   handed back to be dropped.
 - **Storage**: `sampler.load { instrument, pad, path }` reads a file on
-  the engine host (relative paths under the data dir, like projects).
+  the engine host, with the same rule as project paths: relative paths
+  under the data dir, absolute paths as given (the engine host's own
+  files, which the daemon's user can already read).
   Saving a project copies each sample into the bundle
   (`<name>.4s/samples/<instrument>-<pad>-<file>.wav`) and stores the
   relative path, so a bundle is self-contained and moves between
-  machines. `sampler.upload { instrument, pad, name, data }` (base64 WAV)
-  serves remote clients (network transparency); the CLI uses it when the
-  file is local to the CLI and the engine is remote.
+  machines. `sampler.upload { instrument, pad, name, data }` (base64 WAV,
+  at most 16 MB decoded, within the server's message limit) serves remote
+  clients (network transparency); the CLI uses it when the file is local
+  to the CLI and the engine is remote.
 
 ### 6. Automation lanes
 
 - A clip gains **lanes**: `{path, points: [{tick, value}]}`, values in the
   parameter's own units, linear between points; before the first point
   and after the last, the nearest point's value.
-- While a clip plays (launched or placed), each of its lanes sets its
-  parameter's **base** at block rate, as a hand on the knob would, but
-  without journaling or undo (the lane is the saved state). A parameter
-  automated by a playing clip shows it (`automated` in `state.get`).
-  When no playing clip has a lane for it, a parameter keeps the last
-  value automation gave it (default; "return to the value set by hand"
-  is an alternative).
+- While a clip plays (launched or placed), each of its lanes overrides its
+  parameter in the engine, evaluated at block rate from the song position
+  (so renders are deterministic). The daemon's value of the parameter
+  stays the one set by hand: it is what `param.get` returns, what is
+  saved, and what undo and the journal see. When no playing clip has a
+  lane for it, the parameter goes back to that value (default; keeping
+  the last automated value is the alternative, but would make the engine,
+  not the daemon, own a saved value). `state.get` shows the live values
+  of automated parameters (`automated`), at meter rate.
 - RPC: `clip.lane.set { instrument?, clip?, path, points }`,
   `clip.lane.remove { instrument?, clip?, path }`; lanes are in `Clip`
   and in the project file, and undo per lane (`lane:<id>.<n>.<path>`).
@@ -256,10 +271,38 @@ instruments.
 ## Open questions
 
 - Sends post-fader by default (as most consoles), with pre-fader later.
-- Automation leaves the last automated value when its clip stops
-  (default) or returns to the value set by hand.
+- A `virtual_block` check that `seat.focus` on an effect or a modulator
+  puts its knob page on the Block's knobs comes with that change.
+- Automation returns to the value set by hand when its clip stops
+  (default), or leaves the last automated value.
 - Modulation depth as graph state (default) or as a parameter (so CCs and
   lanes can move it).
 - Should `instrument.add` grow into `device.add` for every kind? This RFC
   keeps both: instruments have routes and tracks, effects have
   placements.
+
+## Implementation notes (phase 2: the registry and insert chains)
+
+- `DeviceType` (`crates/protocol/src/device.rs`) has the effects; the
+  registry (`device.types`) lists instruments and effects with their
+  ports, parameters, knob pages, and (instruments) note layouts. Modulators
+  join `DeviceType` in phase 4.
+- `device.add { type, id?, name?, channel, position? }`, `device.remove`,
+  `device.move`, `device.list`; the graph's `devices` lists effects by
+  chain (the master, channel 0, first) and place. Ids share the
+  instruments' namespace. Removing a channel removes its inserts (undo
+  brings both back: `device:<id>` and `chain:<n>` undo keys).
+- Engine: `AudioEffect` (`crates/engine/src/effect.rs`), 64 effect slots,
+  a chain per channel and the master (8 inserts each), a shared dry
+  buffer; `bypass` and `mix` are applied by the engine around each
+  effect. The return ring carries `Returned::{Instrument, Effect}`.
+- Offline renders include effects (`RenderSpec.effects`, `chains`).
+- Project format v7 (`devices`), protocol 9.
+- CLI: `4s device types|list|add|rm|mv` (`--on <n|master>`, `--at`);
+  `4s mixer` shows each chain.
+- UI: each strip and the master list their inserts under the name, with
+  a "+ fx" select; a chip opens the device panel below the console (one
+  knob per parameter from the registry, bypass, earlier/later, remove).
+- Not yet: per-channel peaks in `4s render` (the CLI e2e checks a delay by
+  its onsets instead); `seat.focus` on an effect (knobs for effects).
+

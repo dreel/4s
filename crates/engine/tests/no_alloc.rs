@@ -2,9 +2,10 @@
 //! on this thread while `RtEngine::process` runs, with instruments being
 //! added, routed, played, and removed through the command ring.
 
+use fours_engine::effect;
 use fours_engine::instrument::{self, MAX_BLOCK};
 use fours_engine::{Command, Engine, ParamTarget, Placement, RtEngine, params};
-use fours_protocol::{ClipEvent, InstrumentType, MAX_EVENTS, NoteStep, STEP_ON, Voice, drum_event, note_event};
+use fours_protocol::{ClipEvent, DeviceType, InstrumentType, MAX_EVENTS, NoteStep, STEP_ON, Voice, drum_event, note_event};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -76,6 +77,17 @@ fn process_never_allocates() {
             Command::SetRoute { slot: 0, output: 0, channel: Some(0) },
             Command::SetRoute { slot: 0, output: 1, channel: Some(1) },
             Command::SetRoute { slot: 1, output: 0, channel: Some(1) },
+            // Inserts (RFC 0010): a filter and a delay on channel 1, a
+            // reverb on the master, one parameter of each kind.
+            Command::AddEffect { slot: 0, effect: effect::make(DeviceType::Filter, sr as f32) },
+            Command::AddEffect { slot: 1, effect: effect::make(DeviceType::Delay, sr as f32) },
+            Command::AddEffect { slot: 2, effect: effect::make(DeviceType::Reverb, sr as f32) },
+            Command::SetParam { target: ParamTarget::Effect { slot: 0, index: 1 }, value: 1.0 },
+            Command::SetParam { target: ParamTarget::Effect { slot: 1, index: 1 }, value: 0.4 },
+            Command::SetParam { target: ParamTarget::Effect { slot: 2, index: 1 }, value: 0.3 },
+            Command::SetParam { target: ParamTarget::Effect { slot: 0, index: 3 }, value: 0.3 },
+            Command::SetChain { ch: 0, slots: [0, 1, 0, 0, 0, 0, 0, 0], len: 2 },
+            Command::SetChain { ch: fours_engine::MASTER_CHAIN, slots: [2, 0, 0, 0, 0, 0, 0, 0], len: 1 },
             Command::ClearClip { clip: 0 },
             Command::AddEvent { clip: 0, event: kicks[0] },
             Command::AddEvent { clip: 0, event: kicks[1] },
@@ -161,15 +173,18 @@ fn process_never_allocates() {
             Command::SetRoute { slot: 0, output: 1, channel: None },
             Command::RemoveInstrument { slot: 0 },
             Command::RemoveInstrument { slot: 1 },
+            Command::RemoveEffect { slot: 0 },
+            Command::RemoveEffect { slot: 1 },
+            Command::RemoveEffect { slot: 2 },
             Command::SetChannelActive { ch: 1, active: false },
         ] {
             assert!(link.commands.push(c).is_ok());
         }
         let n = counted(|| rt.process(&mut out, 2));
         assert_eq!(n, 0, "round {round}: {n} heap operations while removing");
-        // The removed instruments came back to be dropped here, off the
-        // audio thread.
-        assert_eq!(link.returns.slots(), 2);
+        // The removed instruments and effects came back to be dropped here,
+        // off the audio thread.
+        assert_eq!(link.returns.slots(), 5);
         while let Ok(b) = link.returns.pop() {
             drop(b);
         }

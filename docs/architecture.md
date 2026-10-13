@@ -68,8 +68,11 @@ business logic: it renders daemon state, subscribes to events, and sends RPCs.
 
 Implemented by RFC 0004 for instruments, channels, and routes:
 
-- Nodes: instruments (`tr808`, `tb303`, added and removed at runtime), stereo
-  mixer channels, the master bus, MIDI devices. Effects are future work.
+- Nodes: instruments (`tr808`, `tb303`, added and removed at runtime), audio
+  effects in insert chains on channels and the master (RFC 0010: `filter`,
+  `delay`, `reverb`), stereo mixer channels, the master bus, MIDI devices.
+  Every device type (`device.types`) declares typed ports (notes, audio,
+  modulation) so a patching graph can connect them later.
 - Edges: audio routing (instrument output -> channel -> master; an output is
   mono or stereo, an instrument has a main out and optionally direct outs)
   and control mappings (MIDI device -> instrument through a seat's note

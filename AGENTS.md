@@ -18,8 +18,9 @@ and agents can drive and verify every part of it.
 5. **Modular by design.** Instruments, mixer channels, effects, and MIDI devices
    are nodes in a graph; every parameter has a stable, addressable path.
    Instruments (808 drums, 303 bass) are added at runtime and routed into
-   stereo mixer channels (RFC 0004); new instrument types are Extensions.
-   Effects and buses still need an RFC. See [extending](docs/extending.md).
+   stereo mixer channels (RFC 0004); audio effects sit in insert chains on
+   channels and the master (RFC 0010); new instrument and effect types are
+   Extensions. See [extending](docs/extending.md).
 6. **Network-transparent.** Never assume clients, controllers, or files share
    a machine with the engine. See [topology](docs/topology.md).
 7. **Docs evolve with the code.** These principles are a starting point; update
@@ -87,6 +88,9 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   manage each instrument's clip pool (RFC 0008). `4s clip launch bass 2`
   makes a track loop a clip instead of its arrangement (from the next bar
   while playing) and `4s song back` returns (RFC 0009).
+- `4s device add delay --on 1` (or `--on master`) puts an audio effect in
+  a channel's insert chain; `4s device list|mv|rm|types`, and its
+  parameters are `<id>.*` (RFC 0010).
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history.

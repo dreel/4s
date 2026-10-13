@@ -867,6 +867,61 @@ s --user other batch "$(cat "$TMP/fill.json")" >/dev/null
 check "undo that needs a clip when the table is full says so" "at most 256 clips" s undo
 check "...and the daemon is still up" "transport:" s status
 s --user other undo >/dev/null
+# --- Devices (RFC 0010): audio effects in insert chains ---
+s project new >/dev/null
+s pattern set kick "x---------------" >/dev/null
+check "a lone kick is one onset" "onsets (s): 0.000" bash -c "$BIN/4s render | tail -1"
+check "device types list instruments and effects" "delay   audio_effect" s device types
+check "add a delay to channel 1" "delay      delay   Delay        on ch 1 at 1" s device add delay --on 1
+check "its parameters are under its id" "delay.feedback" s params delay
+check "a synced delay echoes every dotted eighth (0.375 s at 120 bpm)" "echoes on time" python3 -c "
+import json, subprocess
+o = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render']))['onsets']
+ok = len(o) >= 4 and all(abs(t - 0.375 * k) < 0.01 for k, t in enumerate(o[:4]))
+print('echoes on time' if ok else o)"
+check "bypass passes the kick through alone" "onsets (s): 0.000" bash -c "$BIN/4s set delay.bypass on >/dev/null && $BIN/4s render | tail -1"
+s set delay.bypass off >/dev/null
+check "a filter goes first in the chain" "<- drums  [filter, delay]" bash -c "$BIN/4s device add filter --on 1 --at 1 >/dev/null && $BIN/4s mixer"
+check "a reverb on the master" "master        vol  80%  [reverb]" bash -c "$BIN/4s device add reverb --on master >/dev/null && $BIN/4s mixer"
+check "moving one is one undo step" "undid: device.move filter" bash -c "$BIN/4s device mv filter --on master >/dev/null && $BIN/4s undo"
+check "ids are shared with instruments" "already an instrument or device id" s device add delay --on 1 --id drums
+check "unknown types are refused" "unknown device type" s device add flanger --on 1
+check "a chain holds at most 8" "at most 8 inserts" bash -c "for i in 1 2 3 4 5 6; do $BIN/4s device add filter --on 1 >/dev/null; done; $BIN/4s device add filter --on 1"
+for i in 2 3 4 5 6 7; do s device rm "filter$i" >/dev/null; done
+check "effects save with the project and load back" "delay      delay   Delay        on ch 1 at 2" bash -c "$BIN/4s set delay.feedback 0.6 >/dev/null && $BIN/4s project save fx >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load fx >/dev/null && $BIN/4s device list"
+check "...with their parameters" "delay.feedback = 0.6" s get delay.feedback
+check "removing a channel removes its inserts" "reverb     reverb" bash -c "$BIN/4s channel rm 1 >/dev/null; $BIN/4s device list"
+check "...and undo brings them back" "delay      delay   Delay        on ch 1 at 2" bash -c "$BIN/4s undo >/dev/null && $BIN/4s device list"
+cat > "$TMP/levels.py" <<PY
+import array, json, struct, subprocess, sys
+def level(lo, hi):
+    r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--out', 'renders/lv.wav']))
+    b = open(r['path'], 'rb').read(); i = b.index(b'data'); n = struct.unpack('<I', b[i + 4:i + 8])[0]
+    a = array.array('f'); a.frombytes(b[i + 8:i + 8 + n]); sr = r['sample_rate']
+    return max(abs(x) for x in a[int(lo * sr) * 2:int(hi * sr) * 2])
+print('peak %.3f tail %.4f' % (level(0, 0.05), level(0.5, 1.5)))
+PY
+s set delay.bypass on >/dev/null
+check "a low-pass filter takes the top off the kick" "filtered quieter" bash -c "$BIN/4s set filter.cutoff 0.05 >/dev/null; A=\$(python3 '$TMP/levels.py' | cut -d' ' -f2); $BIN/4s set filter.bypass on >/dev/null; B=\$(python3 '$TMP/levels.py' | cut -d' ' -f2); $BIN/4s set filter.bypass off >/dev/null; $BIN/4s set filter.cutoff 0.6 >/dev/null; python3 -c \"print('filtered quieter' if \$A < 0.8 * \$B else (\$A, \$B))\""
+check "the master's reverb adds a tail" "a tail" bash -c "T=\$(python3 '$TMP/levels.py' | cut -d' ' -f4); python3 -c \"print('a tail' if \$T > 0.003 else \$T)\""
+check "...which is gone when bypassed" "no tail" bash -c "$BIN/4s set reverb.bypass on >/dev/null; T=\$(python3 '$TMP/levels.py' | cut -d' ' -f4); $BIN/4s set reverb.bypass off >/dev/null; python3 -c \"print('no tail' if \$T < 0.002 else \$T)\""
+s set delay.bypass off >/dev/null
+# Undo is per user: a redo whose channel someone removed since does not
+# leave its effect behind, unplaced.
+s channel add --name Two >/dev/null
+s --user alice device add filter --on 2 --id orphan >/dev/null
+s --user alice undo >/dev/null
+s channel rm 2 >/dev/null
+s --user alice redo >/dev/null
+check "a redone effect whose channel went away is not left behind" "no device 'orphan'" s device mv orphan --on 1
+s --user alice instrument add tb303 --id twin --no-channel >/dev/null
+s --user alice undo >/dev/null
+s device add filter --on 1 --id twin >/dev/null
+check "a redone instrument whose id an effect took since stays undone" "skipped: instrument:twin" s --user alice redo
+check "...and the effect keeps its parameters" "twin.cutoff = 0.6" s get twin.cutoff
+s device rm twin >/dev/null
+check "a session with effects replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/fx.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/fx.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
 check "daemon logs" "listening on ws://" s daemon logs

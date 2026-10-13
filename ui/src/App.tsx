@@ -1,3 +1,4 @@
+import { DevicePanel } from "./components/Devices";
 import { Arrangement } from "./components/Arrangement";
 import { Console } from "./components/Console";
 import { Editor } from "./components/Editor";
@@ -103,6 +104,7 @@ export function App() {
         <main className="flex flex-col gap-3 p-4 overflow-auto *:shrink-0">
           <SeatChooser />
           <Console />
+          <DevicePanel />
           <Arrangement />
           <Editor />
           <div className="grid grid-cols-3 gap-3">

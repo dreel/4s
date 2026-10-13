@@ -23,15 +23,18 @@
 //!
 //! Signal flow per block: each instrument renders its outputs; each routed
 //! output is summed into its channel with its own pan law (constant-power pan
-//! for mono, balance for stereo); each channel applies its fader and
-//! mute/solo; channels sum into the master, which has a soft clipper.
+//! for mono, balance for stereo); each channel runs its insert chain of audio
+//! effects (RFC 0010), then applies its fader and mute/solo; channels sum
+//! into the master, which runs its own chain, then its fader and a soft
+//! clipper.
 
 use crate::dsp::{Smoother, soft_clip};
+use crate::effect::{AudioEffect, COMMON_PARAMS, ProcessContext};
 use crate::instrument::{Instrument, MAX_BLOCK, MAX_OUTPUTS};
 use crate::params::*;
 use fours_protocol::{
-    ClipEvent, DEFAULT_CLIP_LENGTH, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_CLIPS, MAX_EVENTS, MAX_INSTRUMENTS,
-    MAX_PLACEMENTS, OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
+    ClipEvent, DEFAULT_CLIP_LENGTH, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_CLIPS, MAX_EFFECTS, MAX_EVENTS, MAX_INSERTS,
+    MAX_INSTRUMENTS, MAX_PLACEMENTS, OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
 };
 use std::f32::consts::TAU;
 
@@ -48,6 +51,17 @@ pub enum ParamTarget {
     Instrument { slot: u8, index: u16 },
     /// `ch` is the 0-based channel index (channel number - 1).
     Channel { ch: u8, index: u8 },
+    /// An audio effect's parameter (`bypass`, `mix`, then its own).
+    Effect { slot: u8, index: u16 },
+}
+
+/// The insert chain index of the master (channels are 0..MAX_CHANNELS).
+pub const MASTER_CHAIN: u8 = MAX_CHANNELS as u8;
+
+/// Something the audio thread hands back to be dropped on the control side.
+pub enum Returned {
+    Instrument(Box<dyn Instrument>),
+    Effect(Box<dyn AudioEffect>),
 }
 
 /// Control messages into the engine. Channel fields are 0-based indexes.
@@ -57,6 +71,12 @@ pub enum Command {
     RemoveInstrument { slot: u8 },
     SetRoute { slot: u8, output: u8, channel: Option<u8> },
     SetChannelActive { ch: u8, active: bool },
+    /// Put an audio effect in an effect slot (replacing any there).
+    AddEffect { slot: u8, effect: Box<dyn AudioEffect> },
+    RemoveEffect { slot: u8 },
+    /// A channel's (or, `MASTER_CHAIN`, the master's) insert chain: the
+    /// first `len` effect slots of `slots`, in order.
+    SetChain { ch: u8, slots: [u8; MAX_INSERTS], len: u8 },
     /// Remove every event from a clip (an index in the clip table).
     ClearClip { clip: u16 },
     /// Add an event (replacing one at the same tick and note).
@@ -91,6 +111,9 @@ impl std::fmt::Debug for Command {
             Command::RemoveInstrument { slot } => write!(f, "RemoveInstrument({slot})"),
             Command::SetRoute { slot, output, channel } => write!(f, "SetRoute({slot}, {output}, {channel:?})"),
             Command::SetChannelActive { ch, active } => write!(f, "SetChannelActive({ch}, {active})"),
+            Command::AddEffect { slot, .. } => write!(f, "AddEffect({slot})"),
+            Command::RemoveEffect { slot } => write!(f, "RemoveEffect({slot})"),
+            Command::SetChain { ch, slots, len } => write!(f, "SetChain({ch}, {:?})", &slots[..(*len as usize).min(MAX_INSERTS)]),
             Command::ClearClip { clip } => write!(f, "ClearClip({clip})"),
             Command::AddEvent { clip, event } => write!(f, "AddEvent({clip}, {event:?})"),
             Command::RemoveEvent { clip, tick, note } => write!(f, "RemoveEvent({clip}, {tick}, {note})"),
@@ -138,6 +161,45 @@ pub enum Feedback {
 struct Slot {
     instrument: Box<dyn Instrument>,
     routes: [Option<u8>; MAX_OUTPUTS],
+}
+
+/// An audio effect and the two parameters the engine applies around it.
+struct EffectSlot {
+    effect: Box<dyn AudioEffect>,
+    bypass: bool,
+    mix: f32,
+    /// The wet share, smoothed toward `mix` (0 when bypassed).
+    wet: Smoother,
+    /// Bypassed and faded out: it did not run, so it starts clean.
+    idle: bool,
+}
+
+/// Run an insert chain over `bus` (interleaved stereo, `n` frames), keeping
+/// each effect's dry signal in `dry` to blend by its mix.
+fn run_chain(effects: &mut [Option<EffectSlot>], chain: &[u8], bus: &mut [f32], dry: &mut [f32], n: usize, ctx: &ProcessContext) {
+    for &slot in chain {
+        let Some(Some(e)) = effects.get_mut(slot as usize) else { continue };
+        let target = if e.bypass { 0.0 } else { e.mix };
+        if target == 0.0 && e.wet.value < 1e-4 {
+            // Bypassed and faded out: the effect does not run.
+            e.idle = true;
+            continue;
+        }
+        if e.idle {
+            // Back from a bypass: no echoes or tail from before it.
+            e.effect.reset();
+            e.idle = false;
+        }
+        dry[..n * 2].copy_from_slice(&bus[..n * 2]);
+        e.effect.process(&mut bus[..n * 2], n, ctx);
+        for f in 0..n {
+            let w = e.wet.next(target);
+            for c in 0..2 {
+                let i = f * 2 + c;
+                bus[i] = dry[i] * (1.0 - w) + bus[i] * w;
+            }
+        }
+    }
 }
 
 /// A clip in the shared table. Preallocated: edits insert into spare
@@ -305,6 +367,12 @@ pub struct Engine {
     tracks: Vec<Track>,
     clips: Vec<ClipStore>,
     channels: Vec<Channel>,
+    effects: Vec<Option<EffectSlot>>,
+    /// Insert chains: one per channel, then the master's (`MASTER_CHAIN`).
+    chains: [[u8; MAX_INSERTS]; MAX_CHANNELS + 1],
+    chain_len: [u8; MAX_CHANNELS + 1],
+    /// Scratch for the dry signal of the effect running.
+    dry: Vec<f32>,
     master: Smoother,
     master_bus: Vec<f32>,
     master_peak: [f32; 2],
@@ -348,6 +416,10 @@ impl Engine {
                 .map(|_| ClipStore { events: Vec::with_capacity(MAX_EVENTS), length: DEFAULT_CLIP_LENGTH })
                 .collect(),
             channels: (0..MAX_CHANNELS).map(|_| Channel::new(sr)).collect(),
+            effects: (0..MAX_EFFECTS).map(|_| None).collect(),
+            chains: [[0; MAX_INSERTS]; MAX_CHANNELS + 1],
+            chain_len: [0; MAX_CHANNELS + 1],
+            dry: vec![0.0; MAX_BLOCK * 2],
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
             master_peak: [0.0; 2],
@@ -440,6 +512,11 @@ impl Engine {
         for slot in self.slots.iter_mut().flatten() {
             slot.instrument.snap();
         }
+        let ctx = ProcessContext { tempo: self.globals[TEMPO].clamp(20.0, 300.0) };
+        for e in self.effects.iter_mut().flatten() {
+            e.effect.snap(&ctx);
+            e.wet.value = if e.bypass { 0.0 } else { e.mix };
+        }
     }
 
     fn any_solo(&self) -> bool {
@@ -449,7 +526,7 @@ impl Engine {
     /// Apply a command. A removed instrument is handed back so the caller can
     /// return it to the control side to be dropped there.
     #[must_use]
-    pub fn apply(&mut self, cmd: Command, emit: &mut impl FnMut(Feedback)) -> Option<Box<dyn Instrument>> {
+    pub fn apply(&mut self, cmd: Command, emit: &mut impl FnMut(Feedback)) -> Option<Returned> {
         match cmd {
             Command::SetParam { target, value } => match target {
                 ParamTarget::Global(i) => {
@@ -469,19 +546,55 @@ impl Engine {
                         c.params[index as usize] = value;
                     }
                 }
+                ParamTarget::Effect { slot, index } => {
+                    if let Some(Some(e)) = self.effects.get_mut(slot as usize) {
+                        match index as usize {
+                            0 => e.bypass = value >= 0.5,
+                            1 => e.mix = value.clamp(0.0, 1.0),
+                            i => e.effect.set_param(i - COMMON_PARAMS, value),
+                        }
+                    }
+                }
             },
+            Command::AddEffect { slot, effect } => {
+                // Never drop an effect here: an invalid slot hands it back.
+                let Some(s) = self.effects.get_mut(slot as usize) else { return Some(Returned::Effect(effect)) };
+                let wet = Smoother::new(self.sr, 0.01, 0.0);
+                return s.replace(EffectSlot { effect, bypass: false, mix: 0.0, wet, idle: false }).map(|e| Returned::Effect(e.effect));
+            }
+            Command::RemoveEffect { slot } => {
+                // Out of every chain first, so nothing runs a missing slot.
+                for c in 0..=MAX_CHANNELS {
+                    let len = self.chain_len[c] as usize;
+                    let mut k = 0;
+                    for i in 0..len {
+                        if self.chains[c][i] != slot {
+                            self.chains[c][k] = self.chains[c][i];
+                            k += 1;
+                        }
+                    }
+                    self.chain_len[c] = k as u8;
+                }
+                return self.effects.get_mut(slot as usize)?.take().map(|e| Returned::Effect(e.effect));
+            }
+            Command::SetChain { ch, slots, len } => {
+                if (ch as usize) <= MAX_CHANNELS {
+                    self.chains[ch as usize] = slots;
+                    self.chain_len[ch as usize] = len.min(MAX_INSERTS as u8);
+                }
+            }
             Command::AddInstrument { slot, instrument } => {
                 // Never drop an instrument here: an invalid slot hands it
                 // straight back to be freed on the control side.
-                let Some(s) = self.slots.get_mut(slot as usize) else { return Some(instrument) };
+                let Some(s) = self.slots.get_mut(slot as usize) else { return Some(Returned::Instrument(instrument)) };
                 self.tracks[slot as usize].reset();
-                return s.replace(Slot { instrument, routes: [None; MAX_OUTPUTS] }).map(|s| s.instrument);
+                return s.replace(Slot { instrument, routes: [None; MAX_OUTPUTS] }).map(|s| Returned::Instrument(s.instrument));
             }
             Command::RemoveInstrument { slot } => {
                 if let Some(t) = self.tracks.get_mut(slot as usize) {
                     t.reset();
                 }
-                return self.slots.get_mut(slot as usize)?.take().map(|s| s.instrument);
+                return self.slots.get_mut(slot as usize)?.take().map(|s| Returned::Instrument(s.instrument));
             }
             Command::SetRoute { slot, output, channel } => {
                 if let Some(Some(s)) = self.slots.get_mut(slot as usize)
@@ -870,6 +983,14 @@ impl Engine {
             }
         }
 
+        let ctx = ProcessContext { tempo: self.globals[TEMPO].clamp(20.0, 300.0) };
+        for (i, ch) in self.channels.iter_mut().enumerate().filter(|(_, c)| c.active) {
+            let len = self.chain_len[i] as usize;
+            if len > 0 {
+                run_chain(&mut self.effects, &self.chains[i][..len], &mut ch.bus, &mut self.dry, n, &ctx);
+            }
+        }
+
         let master = &mut self.master_bus[..n * 2];
         master.fill(0.0);
         for ch in self.channels.iter_mut().filter(|c| c.active) {
@@ -882,6 +1003,11 @@ impl Engine {
                 master[f * 2] += l;
                 master[f * 2 + 1] += r;
             }
+        }
+
+        let len = self.chain_len[MASTER_CHAIN as usize] as usize;
+        if len > 0 {
+            run_chain(&mut self.effects, &self.chains[MASTER_CHAIN as usize][..len], &mut self.master_bus, &mut self.dry, n, &ctx);
         }
 
         let master_target = volume_to_gain(self.globals[MASTER_VOLUME]);

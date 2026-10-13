@@ -10,6 +10,7 @@
 //! live in `seats.rs`.
 
 mod clips;
+mod devices;
 mod grid;
 pub(crate) mod record;
 mod seats;
@@ -20,10 +21,11 @@ use crate::hardware::{self, Hardware};
 use crate::journal::{self, Doc, History, Journal};
 use crate::midi::{Midi, MidiMessage, list_ports};
 use clips::{ClipSets, TrackState};
+use devices::{DeviceSets, DeviceState};
 use record::{LiveTake, RecordSettings};
 use seats::{ClientState, Held, InputEffect, Pickup, SeatState, check_seat_config};
 use fours_engine::instrument::{self, MAX_OUTPUTS};
-use fours_engine::offline::{RenderClip, RenderInstrument, RenderSpec};
+use fours_engine::offline::{RenderClip, RenderEffect, RenderInstrument, RenderSpec};
 use fours_engine::params::{self, CHANNEL_PARAMS, NUM_GLOBALS};
 use fours_engine::{Command, Feedback, ParamTarget, RETURN_CAPACITY};
 use fours_protocol::*;
@@ -88,6 +90,13 @@ pub struct Core {
     tracks: HashMap<String, TrackState>,
     /// Entries of the engine's clip table in use.
     clip_used: [bool; MAX_CLIPS],
+    /// Audio effects (RFC 0010), in creation order.
+    devices: Vec<DeviceState>,
+    /// Insert chains: channel number (0 = the master) -> effect ids in
+    /// order. Empty chains are absent.
+    chains: BTreeMap<u32, Vec<String>>,
+    /// Effect slots of the engine in use.
+    effect_used: [bool; MAX_EFFECTS],
     /// Where play starts from (`transport.locate`).
     locate: u32,
     /// The song tick of the last step, while playing.
@@ -169,6 +178,9 @@ impl Core {
             routes: BTreeMap::new(),
             tracks: HashMap::new(),
             clip_used: [false; MAX_CLIPS],
+            devices: Vec::new(),
+            chains: BTreeMap::new(),
+            effect_used: [false; MAX_EFFECTS],
             locate: 0,
             song_pos: None,
             slot_used: [false; MAX_INSTRUMENTS],
@@ -289,6 +301,7 @@ impl Core {
             instruments: self.instruments.iter().map(|i| self.instrument_info(i)).collect(),
             channels: self.channels.clone(),
             routes: self.routes.clone(),
+            devices: self.device_infos(),
         }
     }
 
@@ -319,6 +332,11 @@ impl Core {
         for inst in &self.instruments {
             for (i, info) in instrument::params(inst.kind, &inst.id).into_iter().enumerate() {
                 entries.push((info, ParamTarget::Instrument { slot: inst.slot, index: i as u16 }));
+            }
+        }
+        for d in &self.devices {
+            for (i, info) in fours_engine::effect::params(d.kind, &d.id).into_iter().enumerate() {
+                entries.push((info, ParamTarget::Effect { slot: d.slot, index: i as u16 }));
             }
         }
         self.params = entries
@@ -382,7 +400,7 @@ impl Core {
 
     fn free_id(&self, kind: InstrumentType) -> String {
         let base = kind.default_id();
-        let taken = |id: &str| self.instruments.iter().any(|i| i.id == id);
+        let taken = |id: &str| self.id_taken(id);
         if !taken(base) {
             return base.to_string();
         }
@@ -396,8 +414,8 @@ impl Core {
             None => self.free_id(p.kind),
         };
         validate_instrument_id(&id).map_err(RpcError::invalid)?;
-        if self.instruments.iter().any(|i| i.id == id) {
-            return Err(RpcError::invalid(format!("an instrument '{id}' already exists")));
+        if self.id_taken(&id) {
+            return Err(RpcError::invalid(format!("'{id}' is already an instrument or device id")));
         }
         let slot = self.slot_used.iter().position(|u| !u).ok_or_else(|| {
             RpcError::invalid(format!("at most {MAX_INSTRUMENTS} instruments"))
@@ -483,8 +501,14 @@ impl Core {
                 self.in_flight
             )));
         }
-        // The removal, plus deactivating every channel it may leave empty.
-        self.ensure_room(1 + self.instruments[pos].outputs.len())?;
+        // The removal, plus deactivating every channel it may leave empty
+        // (and their inserts).
+        let fed: Vec<u32> = if p.keep_channels {
+            Vec::new()
+        } else {
+            self.instruments[pos].outputs.iter().filter_map(|o| self.routes.get(&o.source).copied()).collect()
+        };
+        self.check_teardown(&fed, 1 + self.instruments[pos].outputs.len())?;
         let fed = self.teardown_instrument(pos, origin);
         if !p.keep_channels {
             for n in fed {
@@ -542,6 +566,8 @@ impl Core {
     }
 
     fn remove_channel_unchecked(&mut self, n: u32) {
+        // Its inserts go with it.
+        self.teardown_chain(n);
         let sources: Vec<String> = self.routes.iter().filter(|(_, c)| **c == n).map(|(s, _)| s.clone()).collect();
         for s in sources {
             if let Some((id, o)) = self.find_source(&s) {
@@ -574,7 +600,7 @@ impl Core {
 
     pub fn channel_remove(&mut self, n: u32, origin: &str) -> Result<Graph, RpcError> {
         self.check_channel(n)?;
-        self.ensure_room(MAX_OUTPUTS * MAX_INSTRUMENTS + 2)?;
+        self.check_teardown(&[n], MAX_OUTPUTS * MAX_INSTRUMENTS + 2)?;
         self.remove_channel_unchecked(n);
         self.graph_changed(origin);
         Ok(self.graph())
@@ -837,7 +863,29 @@ impl Core {
             .flat_map(|t| t.clips.values())
             .map(|c| RenderClip { index: c.engine, length: c.length, events: c.events.clone() })
             .collect();
-        RenderSpec { globals, channels, instruments, clips, start: self.locate }
+        let effects = self
+            .devices
+            .iter()
+            .map(|d| RenderEffect {
+                slot: d.slot,
+                kind: d.kind,
+                params: self
+                    .params
+                    .iter()
+                    .filter(|p| matches!(p.target, ParamTarget::Effect { slot, .. } if slot == d.slot))
+                    .map(|p| p.value as f32)
+                    .collect(),
+            })
+            .collect();
+        let chains = self
+            .chains
+            .iter()
+            .map(|(n, ids)| {
+                let ch = if *n == MASTER { fours_engine::MASTER_CHAIN } else { (*n - 1) as u8 };
+                (ch, ids.iter().filter_map(|id| self.devices.iter().find(|d| &d.id == id).map(|d| d.slot)).collect())
+            })
+            .collect();
+        RenderSpec { globals, channels, instruments, clips, effects, chains, start: self.locate }
     }
 
     // ---- parameters --------------------------------------------------------
@@ -1333,6 +1381,11 @@ impl Core {
                 .collect(),
             channels: self.channels.clone(),
             routes: self.routes.clone(),
+            devices: self
+                .device_infos()
+                .into_iter()
+                .map(|d| ProjectDevice { id: d.id, kind: d.kind, name: d.name, channel: d.channel })
+                .collect(),
             params: self.params.iter().map(|p| (p.info.path.clone(), p.value)).collect(),
             tracks,
             controller: ProjectController { follow: self.controller.follow },
@@ -1365,6 +1418,25 @@ impl Core {
         for i in &file.instruments {
             check_name(Some(i.name.clone()))?;
         }
+        if file.devices.len() > MAX_EFFECTS {
+            return Err(RpcError::invalid(format!("project has more than {MAX_EFFECTS} effects")));
+        }
+        let mut per_chain: BTreeMap<u32, usize> = BTreeMap::new();
+        for d in &file.devices {
+            validate_instrument_id(&d.id).map_err(RpcError::invalid)?;
+            if !ids.insert(&d.id) {
+                return Err(RpcError::invalid(format!("duplicate instrument or device id '{}'", d.id)));
+            }
+            check_name(Some(d.name.clone()))?;
+            if d.channel != MASTER && !file.channels.iter().any(|c| c.n == d.channel) {
+                return Err(RpcError::invalid(format!("device '{}' is on channel {}, which is not in the project", d.id, d.channel)));
+            }
+            let n = per_chain.entry(d.channel).or_default();
+            *n += 1;
+            if *n > MAX_INSERTS {
+                return Err(RpcError::invalid(format!("at most {MAX_INSERTS} inserts on a channel")));
+            }
+        }
         for (name, seat) in &file.seats {
             validate_name("seat", name).map_err(RpcError::invalid)?;
             check_seat_config(seat).map_err(|e| RpcError::invalid(format!("seat '{name}': {}", e.message)))?;
@@ -1376,7 +1448,7 @@ impl Core {
                 return Err(RpcError::invalid(format!("invalid or duplicate channel number {}", c.n)));
             }
         }
-        if self.in_flight + self.instruments.len() > RETURN_CAPACITY {
+        if self.in_flight + self.instruments.len() + self.devices.len() > RETURN_CAPACITY {
             return Err(RpcError::failed(format!(
                 "{} removed instruments are still waiting to be returned by the audio engine",
                 self.in_flight
@@ -1405,7 +1477,13 @@ impl Core {
         if clip_count > MAX_CLIPS {
             return Err(RpcError::invalid(format!("project has more than {MAX_CLIPS} clips")));
         }
+        let effect_params: usize = file.devices.iter().map(|d| fours_engine::effect::params(d.kind, &d.id).len()).sum();
         let needed = self.instruments.len()
+            + self.devices.len() * 2
+            + self.chains.len()
+            + file.devices.len() * 2
+            + effect_params
+            + MAX_CHANNELS
             + self.channels.len()
             + file.channels.len() * (1 + CHANNEL_PARAMS)
             + file.instruments.len() * 2
@@ -1427,6 +1505,14 @@ impl Core {
             self.send(Command::RemoveInstrument { slot: inst.slot });
             self.in_flight += 1;
         }
+        for n in self.chains.keys().copied().collect::<Vec<_>>() {
+            self.set_chain_unchecked(n, Vec::new());
+        }
+        for d in std::mem::take(&mut self.devices) {
+            self.send(Command::RemoveEffect { slot: d.slot });
+            self.in_flight += 1;
+        }
+        self.effect_used = [false; MAX_EFFECTS];
         for c in std::mem::take(&mut self.channels) {
             self.send(Command::SetChannelActive { ch: (c.n - 1) as u8, active: false });
         }
@@ -1447,6 +1533,11 @@ impl Core {
         for (slot, i) in file.instruments.iter().enumerate() {
             self.add_instrument_unchecked(&i.id, i.kind, i.name.trim(), slot as u8);
         }
+        let mut chains: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+        for d in &file.devices {
+            self.add_device_unchecked(&d.id, d.kind, d.name.trim());
+            chains.entry(d.channel).or_default().push(d.id.clone());
+        }
         for (source, n) in &file.routes {
             match (self.find_source(source), self.channels.iter().any(|c| c.n == *n)) {
                 (Some((id, o)), true) => self.set_route_unchecked(&id, o, Some(*n)),
@@ -1464,6 +1555,9 @@ impl Core {
             self.params.iter().map(|p| Command::SetParam { target: p.target, value: p.value as f32 }).collect();
         for c in cmds {
             self.send(c);
+        }
+        for (n, ids) in chains {
+            self.set_chain_unchecked(n, ids);
         }
         for id in file.tracks.keys() {
             if !self.tracks.contains_key(id) {
@@ -1592,6 +1686,7 @@ impl Core {
             d.insert(format!("instrument:{}", i.id), json!({ "type": i.kind.id(), "name": i.name }));
         }
         self.clip_doc(&mut d);
+        self.device_doc(&mut d);
         for c in &self.channels {
             d.insert(format!("channel:{}", c.n), json!(c.name));
         }
@@ -1706,6 +1801,7 @@ impl Core {
         let mut routes: Vec<(String, Option<u32>)> = Vec::new();
         let mut params: Vec<(String, Option<f64>)> = Vec::new();
         let mut clip_sets = ClipSets::default();
+        let mut device_sets = DeviceSets::default();
         let mut seats: Vec<(String, SeatConfig)> = Vec::new();
         let mut skipped = Vec::new();
         for (key, v) in sets {
@@ -1725,6 +1821,7 @@ impl Core {
                 "route" => Some(routes.push((rest.to_string(), v.as_u64().map(|n| n as u32)))),
                 "param" => Some(params.push((rest.to_string(), v.as_f64()))),
                 "clip" | "event" | "selected" | "place" | "launched" => clip_sets.parse(kind, rest, v),
+                "device" | "chain" => device_sets.parse(kind, rest, v),
                 "seat" => match v {
                     Value::Null => Some(seats.push((rest.to_string(), SeatConfig::default()))),
                     v => serde_json::from_value(v.clone()).ok().map(|c| seats.push((rest.to_string(), c))),
@@ -1742,7 +1839,10 @@ impl Core {
             .filter(|(id, v)| v.is_none() && self.instruments.iter().any(|i| &i.id == id))
             .map(|(id, _)| id.clone())
             .collect();
-        let owned = |key: &str| removing.iter().any(|id| key == id || key.starts_with(&format!("{id}.")));
+        let removing_devices: Vec<&String> = device_sets.devices.iter().filter(|(_, v)| v.is_none()).map(|(id, _)| id).collect();
+        let owned = |key: &str| {
+            removing.iter().chain(removing_devices.iter().copied()).any(|id| key == id || key.starts_with(&format!("{id}.")))
+        };
         routes.retain(|(s, _)| !owned(s));
         params.retain(|(p, _)| !owned(p));
         clip_sets.retain_not(&removing);
@@ -1764,9 +1864,15 @@ impl Core {
         if adding.len() + new_clips > self.free_clips() {
             return Err(RpcError::failed(format!("at most {MAX_CLIPS} clips in a project")));
         }
-        if self.in_flight + removing.len() > RETURN_CAPACITY {
+        // Channels it removes take their inserts; devices it makes may be
+        // torn down again (`apply_device_sets`).
+        let channel_inserts: usize =
+            channels.iter().filter(|(_, v)| v.is_none()).map(|(n, _)| self.inserts_on(*n)).sum();
+        let made_devices = device_sets.devices.iter().filter(|(_, v)| v.is_some()).count();
+        let teardowns = removing.len() + removing_devices.len() + channel_inserts + made_devices;
+        if self.in_flight + teardowns > RETURN_CAPACITY {
             return Err(RpcError::failed(format!(
-                "{} removed instruments are still waiting to be returned by the audio engine",
+                "{} removed instruments or devices are still waiting to be returned by the audio engine",
                 self.in_flight
             )));
         }
@@ -1780,7 +1886,10 @@ impl Core {
                 + channels.len()
                 + routes.len()
                 + params.len()
-                + clip_sets.commands(),
+                + clip_sets.commands()
+                + device_sets.devices.len() * ADD_COMMANDS
+                + (channel_inserts + made_devices) * 2
+                + device_sets.chains.len() * 2,
         )?;
 
         let mut graph = false;
@@ -1796,8 +1905,16 @@ impl Core {
             graph = true;
         }
         let mut added = Vec::new();
+        // Instruments whose id a device took since: they (and their
+        // parameters) cannot come back.
+        let mut blocked: Vec<String> = Vec::new();
         for (id, v) in &instruments {
             let Some((kind, name)) = v else { continue };
+            if self.devices.iter().any(|d| &d.id == id) {
+                skipped.push(format!("instrument:{id}"));
+                blocked.push(id.clone());
+                continue;
+            }
             if let Some(i) = self.instruments.iter_mut().find(|i| &i.id == id) {
                 i.name = name.clone();
                 i.outputs = instrument::outputs(i.kind, id, name);
@@ -1824,6 +1941,11 @@ impl Core {
                 self.push_instrument_params(id);
             }
         }
+        // Devices after channels (their chains need them), before the
+        // parameters (theirs among them).
+        let device_change = !device_sets.devices.is_empty() || !device_sets.chains.is_empty();
+        skipped.extend(self.apply_device_sets(device_sets));
+        graph |= device_change;
         for (source, n) in routes {
             match (self.find_source(&source), n) {
                 (Some((id, o)), Some(n)) if self.channels.iter().any(|c| c.n == n) => {
@@ -1838,6 +1960,10 @@ impl Core {
             graph = true;
         }
         for (path, v) in params {
+            if blocked.iter().any(|id| path.starts_with(&format!("{id}."))) {
+                skipped.push(format!("param:{path}"));
+                continue;
+            }
             match self.index.get(&path) {
                 Some(&i) => {
                     let value = v.unwrap_or(self.params[i].info.default);
@@ -1876,7 +2002,8 @@ impl Core {
             if name.is_some() || !self.channels.iter().any(|c| c.n == *n) {
                 continue;
             }
-            if self.routes.values().any(|c| c == n) {
+            // Someone routed to it or put an effect on it since: it stays.
+            if self.routes.values().any(|c| c == n) || self.inserts_on(*n) > 0 {
                 skipped.push(format!("channel:{n}"));
             } else {
                 self.remove_channel_unchecked(*n);
@@ -2037,6 +2164,10 @@ impl Core {
             Err(req) => req,
         };
         let req = match self.handle_step(req, origin, client) {
+            Ok(r) => return r,
+            Err(req) => req,
+        };
+        let req = match self.handle_device(req, origin) {
             Ok(r) => return r,
             Err(req) => req,
         };
@@ -2234,6 +2365,11 @@ impl Core {
             | Request::SongBack(_)
             | Request::TransportLocate(_) => unreachable!("handled by handle_song"),
             Request::StepGet(_) | Request::StepSet(_) => unreachable!("handled by handle_step"),
+            Request::DeviceTypes(_)
+            | Request::DeviceList(_)
+            | Request::DeviceAdd(_)
+            | Request::DeviceRemove(_)
+            | Request::DeviceMove(_) => unreachable!("handled by handle_device"),
             Request::ClipNew(_)
             | Request::ClipDuplicate(_)
             | Request::ClipRename(_)
@@ -2291,7 +2427,7 @@ fn read_only(req: &Request) -> bool {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
-        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) => true,
+        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
         | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | ClipLaunch(_) | SongPlace(_) | SongRemove(_)
         | SongMove(_) | SongBack(_)
@@ -2303,7 +2439,7 @@ fn read_only(req: &Request) -> bool {
         | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
         | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
         | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) | StepSet(_) => false,
+        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) => false,
     }
 }
 
@@ -2368,6 +2504,7 @@ fn default_project() -> ProjectFile {
         instruments: vec![ProjectInstrument { id: "drums".into(), kind: InstrumentType::Tr808, name: "Drums".into() }],
         channels: vec![ChannelInfo { n: 1, name: "Drums".into() }],
         routes: BTreeMap::from([("drums".to_string(), 1)]),
+        devices: Vec::new(),
         params: BTreeMap::new(),
         tracks: BTreeMap::from([("drums".to_string(), drums)]),
         controller: ProjectController { follow: true },

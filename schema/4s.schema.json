@@ -349,6 +349,40 @@
         ],
         "type": "object"
       },
+      "DeviceInfo": {
+        "description": "A device that is not an instrument, and where it sits.",
+        "properties": {
+          "channel": {
+            "description": "Audio effects: the channel whose insert chain holds it (0 = the\nmaster).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "description": "Its place in that chain, from 0.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/$defs/DeviceType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "channel",
+          "position"
+        ],
+        "type": "object"
+      },
       "DeviceProfile": {
         "description": "How a device's input is interpreted.",
         "oneOf": [
@@ -360,6 +394,26 @@
           {
             "const": "livid_block",
             "description": "Grid + knobs as a surface for the seat's focus, LEDs driven.",
+            "type": "string"
+          }
+        ]
+      },
+      "DeviceType": {
+        "description": "A device type that is not an instrument.",
+        "oneOf": [
+          {
+            "const": "filter",
+            "description": "State-variable filter: low, band, or high pass.",
+            "type": "string"
+          },
+          {
+            "const": "delay",
+            "description": "Stereo delay, free or tempo-synced, with feedback and ping-pong.",
+            "type": "string"
+          },
+          {
+            "const": "reverb",
+            "description": "A small Freeverb-style room.",
             "type": "string"
           }
         ]
@@ -932,6 +986,13 @@
             },
             "type": "array"
           },
+          "devices": {
+            "description": "Audio effects (RFC 0010), by channel (the master, 0, first) and\ntheir place in its insert chain.",
+            "items": {
+              "$ref": "#/$defs/DeviceInfo"
+            },
+            "type": "array"
+          },
           "instruments": {
             "description": "In creation order.",
             "items": {
@@ -952,7 +1013,8 @@
         "required": [
           "instruments",
           "channels",
-          "routes"
+          "routes",
+          "devices"
         ],
         "type": "object"
       },
@@ -1919,6 +1981,26 @@
         ],
         "type": "object"
       },
+      "DeviceType": {
+        "description": "A device type that is not an instrument.",
+        "oneOf": [
+          {
+            "const": "filter",
+            "description": "State-variable filter: low, band, or high pass.",
+            "type": "string"
+          },
+          {
+            "const": "delay",
+            "description": "Stereo delay, free or tempo-synced, with feedback and ping-pong.",
+            "type": "string"
+          },
+          {
+            "const": "reverb",
+            "description": "A small Freeverb-style room.",
+            "type": "string"
+          }
+        ]
+      },
       "InstrumentType": {
         "description": "An instrument type. Instances are created with `instrument.add`.",
         "oneOf": [
@@ -2127,6 +2209,33 @@
         ],
         "type": "object"
       },
+      "ProjectDevice": {
+        "description": "An audio effect in a project file.",
+        "properties": {
+          "channel": {
+            "description": "Whose insert chain: a channel number, or 0 for the master.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/$defs/DeviceType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "channel"
+        ],
+        "type": "object"
+      },
       "ProjectInstrument": {
         "properties": {
           "id": {
@@ -2289,6 +2398,13 @@
       "controller": {
         "$ref": "#/$defs/ProjectController"
       },
+      "devices": {
+        "description": "Audio effects (RFC 0010), each chain in order (channel 0 is the\nmaster). Their parameters are in `params` under their ids.",
+        "items": {
+          "$ref": "#/$defs/ProjectDevice"
+        },
+        "type": "array"
+      },
       "format_version": {
         "format": "uint32",
         "minimum": 0,
@@ -2346,8 +2462,8 @@
     "title": "ProjectFile",
     "type": "object"
   },
-  "project_format_version": 6,
-  "protocol_version": 8,
+  "project_format_version": 7,
+  "protocol_version": 9,
   "request": {
     "$defs": {
       "BatchParams": {
@@ -2920,6 +3036,79 @@
         },
         "type": "object"
       },
+      "DeviceAddParams": {
+        "description": "Add an audio effect to a channel's insert chain.",
+        "properties": {
+          "channel": {
+            "description": "The channel whose chain gets it; 0 is the master.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "default": null,
+            "description": "Default: the type's id (`delay`), numbered if taken.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position": {
+            "default": null,
+            "description": "Its place in the chain from 0 (default: the end).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "type": {
+            "$ref": "#/$defs/DeviceType"
+          }
+        },
+        "required": [
+          "type",
+          "channel"
+        ],
+        "type": "object"
+      },
+      "DeviceMoveParams": {
+        "description": "Move an effect to another place, in its chain or another channel's.",
+        "properties": {
+          "channel": {
+            "description": "0 is the master.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "position": {
+            "default": null,
+            "description": "Default: the end.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "channel"
+        ],
+        "type": "object"
+      },
       "DeviceProfile": {
         "description": "How a device's input is interpreted.",
         "oneOf": [
@@ -2931,6 +3120,37 @@
           {
             "const": "livid_block",
             "description": "Grid + knobs as a surface for the seat's focus, LEDs driven.",
+            "type": "string"
+          }
+        ]
+      },
+      "DeviceRefParams": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "DeviceType": {
+        "description": "A device type that is not an instrument.",
+        "oneOf": [
+          {
+            "const": "filter",
+            "description": "State-variable filter: low, band, or high pass.",
+            "type": "string"
+          },
+          {
+            "const": "delay",
+            "description": "Stereo delay, free or tempo-synced, with feedback and ping-pong.",
+            "type": "string"
+          },
+          {
+            "const": "reverb",
+            "description": "A small Freeverb-style room.",
             "type": "string"
           }
         ]
@@ -3776,6 +3996,33 @@
         ],
         "type": "object"
       },
+      "ProjectDevice": {
+        "description": "An audio effect in a project file.",
+        "properties": {
+          "channel": {
+            "description": "Whose insert chain: a channel number, or 0 for the master.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/$defs/DeviceType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "channel"
+        ],
+        "type": "object"
+      },
       "ProjectFile": {
         "properties": {
           "channels": {
@@ -3787,6 +4034,13 @@
           },
           "controller": {
             "$ref": "#/$defs/ProjectController"
+          },
+          "devices": {
+            "description": "Audio effects (RFC 0010), each chain in order (channel 0 is the\nmaster). Their parameters are in `params` under their ids.",
+            "items": {
+              "$ref": "#/$defs/ProjectDevice"
+            },
+            "type": "array"
           },
           "format_version": {
             "format": "uint32",
@@ -5109,6 +5363,91 @@
           },
           "params": {
             "$ref": "#/$defs/InstrumentRemoveParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Every device type (instruments and audio effects) with its ports and\nparameters (RFC 0010).",
+        "properties": {
+          "method": {
+            "const": "device.types",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Audio effects and where they sit.",
+        "properties": {
+          "method": {
+            "const": "device.list",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Add an audio effect to a channel's (or the master's) insert chain.",
+        "properties": {
+          "method": {
+            "const": "device.add",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/DeviceAddParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove an audio effect.",
+        "properties": {
+          "method": {
+            "const": "device.remove",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/DeviceRefParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Move an audio effect within its chain or to another channel's.",
+        "properties": {
+          "method": {
+            "const": "device.move",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/DeviceMoveParams"
           }
         },
         "required": [
@@ -6778,6 +7117,40 @@
         ],
         "type": "object"
       },
+      "DeviceInfo": {
+        "description": "A device that is not an instrument, and where it sits.",
+        "properties": {
+          "channel": {
+            "description": "Audio effects: the channel whose insert chain holds it (0 = the\nmaster).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "description": "Its place in that chain, from 0.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/$defs/DeviceType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "channel",
+          "position"
+        ],
+        "type": "object"
+      },
       "DeviceProfile": {
         "description": "How a device's input is interpreted.",
         "oneOf": [
@@ -6793,6 +7166,26 @@
           }
         ]
       },
+      "DeviceType": {
+        "description": "A device type that is not an instrument.",
+        "oneOf": [
+          {
+            "const": "filter",
+            "description": "State-variable filter: low, band, or high pass.",
+            "type": "string"
+          },
+          {
+            "const": "delay",
+            "description": "Stereo delay, free or tempo-synced, with feedback and ping-pong.",
+            "type": "string"
+          },
+          {
+            "const": "reverb",
+            "description": "A small Freeverb-style room.",
+            "type": "string"
+          }
+        ]
+      },
       "Graph": {
         "description": "Instruments, mixer channels, and the routes between them.",
         "properties": {
@@ -6800,6 +7193,13 @@
             "description": "In display (creation) order.",
             "items": {
               "$ref": "#/$defs/ChannelInfo"
+            },
+            "type": "array"
+          },
+          "devices": {
+            "description": "Audio effects (RFC 0010), by channel (the master, 0, first) and\ntheir place in its insert chain.",
+            "items": {
+              "$ref": "#/$defs/DeviceInfo"
             },
             "type": "array"
           },
@@ -6823,7 +7223,8 @@
         "required": [
           "instruments",
           "channels",
-          "routes"
+          "routes",
+          "devices"
         ],
         "type": "object"
       },

@@ -192,6 +192,13 @@ enum Cmd {
         #[command(subcommand)]
         cmd: InstrumentCmd,
     },
+    /// Audio effects in insert chains on channels and the master (RFC
+    /// 0010), e.g. `4s device add delay --on 1`, `4s device add reverb --on
+    /// master`. Their parameters are `<id>.*` (`4s params delay`).
+    Device {
+        #[command(subcommand)]
+        cmd: DeviceCmd,
+    },
     /// Add, remove, rename, and reorder mixer channels.
     Channel {
         #[command(subcommand)]
@@ -415,6 +422,46 @@ enum InstrumentCmd {
         #[arg(long)]
         keep_channels: bool,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum DeviceCmd {
+    /// Every device type (instruments and effects).
+    Types,
+    /// Effects and where they sit.
+    List,
+    /// Add an effect to a channel's insert chain (`--on master` for the
+    /// master's), at the end unless `--at` (1-based).
+    Add {
+        /// filter, delay, or reverb.
+        kind: String,
+        #[arg(long)]
+        on: String,
+        #[arg(long)]
+        at: Option<u32>,
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Remove an effect.
+    Rm { id: String },
+    /// Move an effect to another place (`--at`, 1-based) or channel.
+    Mv {
+        id: String,
+        #[arg(long)]
+        on: String,
+        #[arg(long)]
+        at: Option<u32>,
+    },
+}
+
+/// A chain: a channel number, or `master` (0).
+fn chain_arg(s: &str) -> Result<u32> {
+    if s.eq_ignore_ascii_case("master") {
+        return Ok(MASTER);
+    }
+    s.parse().map_err(|_| anyhow!("--on takes a channel number or `master`"))
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1223,6 +1270,23 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 keep_channels: *keep_channels,
             })],
         },
+        Cmd::Device { cmd } => match cmd {
+            DeviceCmd::Types => vec![Request::DeviceTypes(e)],
+            DeviceCmd::List => vec![Request::DeviceList(e)],
+            DeviceCmd::Add { kind, on, at, id, name } => vec![Request::DeviceAdd(DeviceAddParams {
+                kind: DeviceType::parse(kind).ok_or_else(|| anyhow!("unknown device type '{kind}' (filter, delay, reverb)"))?,
+                id: id.clone(),
+                name: name.clone(),
+                channel: chain_arg(on)?,
+                position: at.map(|a| one_based(a, "position")).transpose()?,
+            })],
+            DeviceCmd::Rm { id } => vec![Request::DeviceRemove(DeviceRefParams { id: id.clone() })],
+            DeviceCmd::Mv { id, on, at } => vec![Request::DeviceMove(DeviceMoveParams {
+                id: id.clone(),
+                channel: chain_arg(on)?,
+                position: at.map(|a| one_based(a, "position")).transpose()?,
+            })],
+        },
         Cmd::Channel { cmd } => match cmd {
             ChannelCmd::Add { name } => vec![Request::ChannelAdd(ChannelAddParams { name: name.clone() })],
             ChannelCmd::Rm { n } => vec![Request::ChannelRemove(ChannelRemoveParams { n: *n })],
@@ -1688,21 +1752,43 @@ fn print_mixer(s: &Snapshot) {
             flags.push_str(" S");
         }
         println!(
-            "ch {n:<2} {:<12} vol {:>3.0}%  pan {:<4}{flags:<5}  <- {}",
+            "ch {n:<2} {:<12} vol {:>3.0}%  pan {:<4}{flags:<5}  <- {}{}",
             c.name,
             p(&format!("mixer.{n}.volume")) * 100.0,
             fmt_pan(p(&format!("mixer.{n}.pan"))),
-            if sources.is_empty() { "(nothing)".to_string() } else { sources.join(", ") }
+            if sources.is_empty() { "(nothing)".to_string() } else { sources.join(", ") },
+            inserts(&s.graph.devices, n)
         );
     }
-    println!("master        vol {:>3.0}%", p("mixer.master.volume") * 100.0);
+    println!("master        vol {:>3.0}%{}", p("mixer.master.volume") * 100.0, inserts(&s.graph.devices, MASTER));
+}
+
+/// Where a device sits, by the channel's number or `master`.
+fn chain_name(n: u32) -> String {
+    if n == MASTER { "master".into() } else { format!("ch {n}") }
+}
+
+fn print_device(d: &DeviceInfo) {
+    println!("{:<10} {:<7} {:<12} on {} at {}", d.id, d.kind.id(), d.name, chain_name(d.channel), d.position + 1);
+}
+
+/// A chain's inserts, ` [filter, delay]`, or nothing.
+fn inserts(devices: &[DeviceInfo], n: u32) -> String {
+    let ids: Vec<&str> = devices.iter().filter(|d| d.channel == n).map(|d| d.id.as_str()).collect();
+    if ids.is_empty() { String::new() } else { format!("  [{}]", ids.join(", ")) }
 }
 
 fn print_graph(g: &Graph) {
     for c in &g.channels {
         let sources: Vec<&str> =
             g.routes.iter().filter(|(_, ch)| **ch == c.n).map(|(src, _)| src.as_str()).collect();
-        println!("ch {:<2} {:<12} <- {}", c.n, c.name, if sources.is_empty() { "(nothing)".into() } else { sources.join(", ") });
+        println!(
+            "ch {:<2} {:<12} <- {}{}",
+            c.n,
+            c.name,
+            if sources.is_empty() { "(nothing)".into() } else { sources.join(", ") },
+            inserts(&g.devices, c.n)
+        );
     }
     let unrouted: Vec<&str> = g
         .instruments
@@ -1712,6 +1798,9 @@ fn print_graph(g: &Graph) {
         .collect();
     if !unrouted.is_empty() {
         println!("unrouted main outs: {}", unrouted.join(", "));
+    }
+    if g.devices.iter().any(|d| d.channel == MASTER) {
+        println!("master{}", inserts(&g.devices, MASTER));
     }
 }
 
@@ -2050,6 +2139,24 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
         Cmd::Instrument { cmd: InstrumentCmd::Add { .. } } => {
             print_instrument(&serde_json::from_value(last)?);
         }
+        Cmd::Device { cmd: DeviceCmd::Types } => {
+            let r: DeviceTypesResult = serde_json::from_value(last)?;
+            for t in r.types {
+                let kind = serde_json::to_value(t.kind)?.as_str().unwrap_or_default().to_string();
+                println!("{:<7} {:<13} {:<7} default id `{}`, {} params", t.id, kind, t.label, t.default_id, t.params.len());
+            }
+        }
+        Cmd::Device { cmd: DeviceCmd::List } => {
+            let r: DeviceListResult = serde_json::from_value(last)?;
+            if r.devices.is_empty() {
+                println!("(no devices)");
+            }
+            for d in &r.devices {
+                print_device(d);
+            }
+        }
+        Cmd::Device { cmd: DeviceCmd::Add { .. } } => print_device(&serde_json::from_value(last)?),
+        Cmd::Device { .. } => print_graph(&serde_json::from_value(last)?),
         Cmd::Instrument { .. }
         | Cmd::Route { .. }
         | Cmd::Channel { cmd: ChannelCmd::Rm { .. } | ChannelCmd::Move { .. } } => {
@@ -2590,6 +2697,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
+            "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",
