@@ -645,6 +645,99 @@ test("arrangement editing: place from the pool, move, resize, copy, and delete b
   expect(await song()).toEqual(copied);
 });
 
+test("arrangement multi-select: shift-click across tracks; drag moves and alt-drag copies them together; Delete removes them; one undo step each", async () => {
+  const { page, rpc } = h;
+  type P = { clip: number; start: number; length: number; offset: number };
+  const arr = async (id: string): Promise<P[]> =>
+    (await rpc("song.get", {})).tracks.find((t: { instrument: string }) => t.instrument === id)!.arrangement;
+  const both = async () => ({ drums: await arr("drums"), bass: await arr("bass") });
+  await rpc("instrument.add", { type: "tb303", id: "bass", name: null, channel: null, no_channel: false });
+  for (const start of [0, 384]) await rpc("song.place", { instrument: "drums", clip: 1, start, length: 384, offset: null });
+  await rpc("song.place", { instrument: "bass", clip: 1, start: 0, length: 384, offset: null });
+  await page.getByTestId("arr-zoom").selectOption("96");
+  await page.getByTestId("arr-snap").selectOption("384");
+  const bar = 96;
+  const at = async (testid: string) => {
+    await page.getByTestId("arrangement").scrollIntoViewIfNeeded();
+    const b = (await page.getByTestId(testid).boundingBox())!;
+    return { x: b.x + 20, y: b.y + b.height / 2 };
+  };
+  const drag = async (from: { x: number; y: number }, dx: number, alt = false) => {
+    await page.mouse.move(from.x, from.y);
+    if (alt) await page.keyboard.down("Alt");
+    await page.mouse.down();
+    await page.mouse.move(from.x + dx / 2, from.y);
+    await page.mouse.move(from.x + dx, from.y);
+    await page.mouse.up();
+    if (alt) await page.keyboard.up("Alt");
+  };
+  const shiftClick = async (testid: string) => {
+    const p = await at(testid);
+    await page.keyboard.down("Shift");
+    await page.mouse.click(p.x, p.y);
+    await page.keyboard.up("Shift");
+  };
+  const oneStep = async (before: object, after: object) => {
+    await expect.poll(both).toEqual(after);
+    await page.getByTestId("undo").click();
+    await expect.poll(both).toEqual(before);
+    await page.getByTestId("redo").click();
+    await expect.poll(both).toEqual(after);
+  };
+  const one = (start: number) => ({ clip: 1, start, length: 384, offset: 0 });
+  const start = { drums: [one(0), one(384)], bass: [one(0)] };
+  await expect(page.getByTestId("placement-bass-0")).toBeVisible();
+  const sel = (testid: string) => page.getByTestId(testid);
+
+  // Click one, shift-click the next: both selected. Dragging the first a
+  // bar right moves both (the second first, so the first, landing where the
+  // second was, does not cut it).
+  let p = await at("placement-drums-0");
+  await page.mouse.click(p.x, p.y);
+  await shiftClick("placement-drums-384");
+  await expect(sel("placement-drums-0")).toHaveAttribute("data-selected", "true");
+  await expect(sel("placement-drums-384")).toHaveAttribute("data-selected", "true");
+  await expect(sel("placement-bass-0")).toHaveAttribute("data-selected", "false");
+  // A click on a selected one (no drag) selects it alone; select both again.
+  p = await at("placement-drums-384");
+  await page.mouse.click(p.x, p.y);
+  await expect(sel("placement-drums-0")).toHaveAttribute("data-selected", "false");
+  await shiftClick("placement-drums-0");
+  await expect(sel("placement-drums-0")).toHaveAttribute("data-selected", "true");
+  await drag(await at("placement-drums-0"), bar);
+  const moved = { drums: [one(384), one(768)], bass: [one(0)] };
+  await oneStep(start, moved);
+  // (The undo and redo clicks took the focus, and with it the selection.)
+  // Select the pair again; alt-drag copies both two bars on.
+  p = await at("placement-drums-384");
+  await page.mouse.click(p.x, p.y);
+  await shiftClick("placement-drums-768");
+  await drag(await at("placement-drums-384"), 2 * bar, true);
+  const copied = { drums: [one(384), one(768), one(1152), one(1536)], bass: [one(0)] };
+  await oneStep(moved, copied);
+  // Shift-click adds one and takes it out again, and adds one on another
+  // track; Delete removes the selected ones in one step.
+  p = await at("placement-drums-384");
+  await page.mouse.click(p.x, p.y);
+  await shiftClick("placement-drums-1536");
+  await expect(sel("placement-drums-1536")).toHaveAttribute("data-selected", "true");
+  await shiftClick("placement-drums-1536");
+  await expect(sel("placement-drums-1536")).toHaveAttribute("data-selected", "false");
+  await shiftClick("placement-bass-0");
+  await expect(sel("placement-bass-0")).toHaveAttribute("data-selected", "true");
+  await expect(sel("placement-drums-384")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Delete");
+  const deleted = { drums: [one(768), one(1152), one(1536)], bass: [] };
+  await oneStep(copied, deleted);
+  // Dragged left past the song's start, the pair stops together at bar 1,
+  // a bar apart as before.
+  p = await at("placement-drums-768");
+  await page.mouse.click(p.x, p.y);
+  await shiftClick("placement-drums-1152");
+  await drag(await at("placement-drums-768"), -4 * bar);
+  await oneStep(deleted, { drums: [one(0), one(384), one(1536)], bass: [] });
+});
+
 test("arrangement loop brace: draw, move, resize, and toggle by dragging the ruler, one undo step each; clicks still locate", async () => {
   const { page, rpc } = h;
   type L = { on: number; start: number; end: number };
