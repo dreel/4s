@@ -1240,23 +1240,20 @@ test("automation lanes in the step view: a bar per step, set a point, paint acro
   const points = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).lanes[0]?.points ?? [];
   await page.getByTestId("step-lane-add-drums").fill("mixer.1.pan");
   await page.getByTestId("step-lane-add-drums").press("Enter");
-  await expect(page.getByTestId("step-lane-mixer.1.pan")).toBeVisible();
+  await expect(page.getByTestId("step-lane-drums-mixer.1.pan")).toBeVisible();
   // Step 5 (tick 96), pressed near its top: pan near 1.
-  const c4 = page.getByTestId("lane-cell-mixer.1.pan-4");
+  const c4 = page.getByTestId("lane-cell-drums-mixer.1.pan-4");
   await c4.scrollIntoViewIfNeeded();
   const b4 = (await c4.boundingBox())!;
   await page.mouse.click(b4.x + b4.width / 2, b4.y + 1);
   await expect.poll(async () => (await points()).find((p: { tick: number }) => p.tick === 96)?.value).toBeGreaterThan(0.85);
   await expect(c4).toHaveAttribute("data-point", "true");
-  // Paint steps 9..12 at the bottom: one edit, pan near -1 at ticks 192..264.
-  const at = async (s: number) => (await page.getByTestId(`lane-cell-mixer.1.pan-${s}`).boundingBox())!;
+  // Paint steps 9..12 at the bottom in one jump (the steps a fast drag
+  // skips are filled): one edit, pan near -1 at ticks 192..264.
+  const at = async (s: number) => (await page.getByTestId(`lane-cell-drums-mixer.1.pan-${s}`).boundingBox())!;
   const [b8, b11] = [await at(8), await at(11)];
   await page.mouse.move(b8.x + b8.width / 2, b8.y + b8.height - 1);
   await page.mouse.down();
-  for (const s of [9, 10, 11]) {
-    const b = await at(s);
-    await page.mouse.move(b.x + b.width / 2, b.y + b.height - 1);
-  }
   await page.mouse.move(b11.x + b11.width / 2, b11.y + b11.height - 1);
   await page.mouse.up();
   await expect.poll(async () => (await points()).filter((p: { value: number }) => p.value < -0.85).map((p: { tick: number }) => p.tick)).toEqual([192, 216, 240, 264]);
@@ -1266,13 +1263,13 @@ test("automation lanes in the step view: a bar per step, set a point, paint acro
   await c4.click();
   await page.keyboard.up("Alt");
   await expect.poll(async () => (await points()).some((p: { tick: number }) => p.tick === 96)).toBe(false);
-  await page.getByTestId("step-lane-remove-mixer.1.pan").click();
+  await page.getByTestId("step-lane-remove-drums-mixer.1.pan").click();
   await expect.poll(async () => (await rpc("clip.get", { instrument: "drums", clip: null })).lanes).toEqual([]);
   // A 303's step columns carry a bar per lane: pressing one sets its step.
   await rpc("instrument.add", { type: "tb303", id: null, name: null, channel: null, no_channel: false });
   await rpc("clip.lane.set", { instrument: "bass", clip: null, path: "bass.cutoff", points: [{ tick: 0, value: 0.2 }] });
   await page.getByTestId("select-bass").click();
-  const bass = page.getByTestId("lane-cell-bass.cutoff-2");
+  const bass = page.getByTestId("lane-cell-bass-bass.cutoff-2");
   await bass.scrollIntoViewIfNeeded();
   const bb = (await bass.boundingBox())!;
   await page.mouse.click(bb.x + bb.width / 2, bb.y + 1);

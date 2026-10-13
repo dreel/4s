@@ -13,7 +13,7 @@ import type { Lane } from "../generated/Lane";
 import { MAX_LANE_POINTS } from "../generated/limits";
 import type { LanePoint } from "../generated/LanePoint";
 import { act, client, useApp } from "../store";
-import { rangeOf } from "./AutomationLanes";
+import { rangeOf, setLane } from "./AutomationLanes";
 
 /** A lane's value at a clip tick: linear between points, the nearest
  * point's outside them. Mirrors `LaneStore::value` in
@@ -28,8 +28,9 @@ export function laneValue(points: LanePoint[], tick: number): number | null {
   return points[points.length - 1].value;
 }
 
-/** A paint in progress: the lane and the values set per step. */
-type Paint = { path: string; values: Map<number, number> };
+/** A paint in progress: the lane, the values set per step, and the step
+ * painted last (steps a fast drag skipped are filled from it). */
+type Paint = { path: string; values: Map<number, number>; last: number };
 
 /** Bars for a clip's lanes in a step view of `res` ticks a step. */
 export function useStepLanes(clip: Clip | undefined, res: number) {
@@ -43,6 +44,7 @@ export function useStepLanes(clip: Clip | undefined, res: number) {
     const up = () => {
       const p = current.current;
       if (!p) return;
+      current.current = null;
       setPaint(null);
       const lane = clip?.lanes.find((l) => l.path === p.path);
       if (!clip || !lane) return;
@@ -54,7 +56,10 @@ export function useStepLanes(clip: Clip | undefined, res: number) {
       void act(client.call("clip.lane.set", { instrument: clip.instrument, clip: clip.id, path: p.path, points }));
     };
     // A cancelled touch or pen drag drops the paint.
-    const cancel = () => setPaint(null);
+    const cancel = () => {
+      current.current = null;
+      setPaint(null);
+    };
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
     return () => {
@@ -75,37 +80,45 @@ export function useStepLanes(clip: Clip | undefined, res: number) {
       return min + (1 - Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))) * (max - min);
     };
     const set = (e: React.PointerEvent) => {
-      const values = new Map(paint?.path === lane.path ? paint.values : []);
-      // Not past the points a lane holds: the daemon would refuse it all.
-      const others = lane.points.filter((q) => q.tick % res !== 0 || !values.has(q.tick / res)).length;
-      if (!values.has(s) && !lane.points.some((q) => q.tick === s * res) && others + values.size >= MAX_LANE_POINTS) return;
-      values.set(s, valueAt(e));
-      setPaint({ path: lane.path, values });
+      // Built on the latest paint (two enters can land before a render).
+      const was = current.current?.path === lane.path ? current.current : null;
+      const values = new Map(was?.values ?? []);
+      const v = valueAt(e);
+      const from = was ? was.last : s;
+      const lastValue = was?.values.get(from) ?? v;
+      const dir = s >= from ? 1 : -1;
+      // Every step from the last painted one to this one, in line.
+      for (let k = from === s ? s : from + dir; dir > 0 ? k <= s : k >= s; k += dir) {
+        const fresh = !values.has(k) && !lane.points.some((q) => q.tick === k * res);
+        // Not past the points a lane holds: the daemon would refuse it all.
+        const others = lane.points.filter((q) => q.tick % res !== 0 || !values.has(q.tick / res)).length;
+        if (fresh && others + values.size >= MAX_LANE_POINTS) break;
+        const t = from === s ? 1 : (k - from) / (s - from);
+        values.set(k, lastValue + (v - lastValue) * t);
+      }
+      const next = { path: lane.path, values, last: s };
+      current.current = next;
+      setPaint(next);
     };
     return (
       <div
         key={`${lane.path}-${s}`}
         className={`relative h-8 rounded-sm bg-zinc-900 cursor-ns-resize touch-none select-none ${className}`}
         title={`${lane.path} at step ${s + 1}: ${value.toFixed(2)}${point ? "" : " (between points)"} (alt-click: remove)`}
-        data-testid={`lane-cell-${lane.path}-${s}`}
+        data-testid={`lane-cell-${clip.instrument}-${lane.path}-${s}`}
         data-point={point}
         onPointerDown={(e) => {
           e.preventDefault();
           if (e.altKey) {
             const points = lane.points.filter((q) => q.tick !== s * res);
-            if (points.length === lane.points.length) return;
-            void act(
-              points.length
-                ? client.call("clip.lane.set", { instrument: clip.instrument, clip: clip.id, path: lane.path, points })
-                : client.call("clip.lane.remove", { instrument: clip.instrument, clip: clip.id, path: lane.path }),
-            );
+            if (points.length !== lane.points.length) void setLane(clip, lane.path, points);
             return;
           }
           // Painting carries on into the steps the pointer enters.
           (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
           set(e);
         }}
-        onPointerEnter={(e) => paint?.path === lane.path && e.buttons & 1 && set(e)}
+        onPointerEnter={(e) => current.current?.path === lane.path && e.buttons & 1 && set(e)}
       >
         <div
           className={`absolute bottom-0 left-0 right-0 rounded-sm ${point ? "bg-sky-400" : "bg-sky-800"}`}
@@ -125,7 +138,7 @@ export function StepLaneLabel({ clip, lane, className }: { clip: Clip; lane: Lan
       <button
         className="text-zinc-600 hover:text-red-400"
         title="remove the lane"
-        data-testid={`step-lane-remove-${lane.path}`}
+        data-testid={`step-lane-remove-${clip.instrument}-${lane.path}`}
         onClick={() => void act(client.call("clip.lane.remove", { instrument: clip.instrument, clip: clip.id, path: lane.path }))}
       >
         x

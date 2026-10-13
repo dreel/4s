@@ -36,7 +36,7 @@ export function useAutomatable(): string[] {
 }
 
 /** Set a lane's points (one undo step), or remove it with none left. */
-function setLane(clip: Clip, path: string, points: LanePoint[]) {
+export function setLane(clip: Clip, path: string, points: LanePoint[]) {
   if (!points.length) return act(client.call("clip.lane.remove", { instrument: clip.instrument, clip: clip.id, path }));
   return act(client.call("clip.lane.set", { instrument: clip.instrument, clip: clip.id, path, points }));
 }

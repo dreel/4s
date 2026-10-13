@@ -138,7 +138,7 @@ export function StepView({ id, rowExtras }: { id: string; rowExtras?: (row: Note
   // Lane rows under a grid: a label, then a bar per step, spaced as the
   // steps are.
   const laneRows = clip.lanes.map((l) => (
-    <div key={l.path} className="contents" data-testid={`step-lane-${l.path}`}>
+    <div key={l.path} className="contents" data-testid={`step-lane-${id}-${l.path}`}>
       <StepLaneLabel clip={clip} lane={l} className="w-24" />
       <div className="flex gap-1 min-w-0">
         {Array.from({ length: steps }, (_, s) => lanes.cell(clip, l, s, `flex-1 min-w-3 ${s % 4 === 0 && s > 0 ? "ml-1" : ""}`))}
