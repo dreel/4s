@@ -12,6 +12,10 @@ use ts_rs::TS;
 
 /// Most audio effects in a project.
 pub const MAX_EFFECTS: usize = 64;
+/// Most modulators in a project.
+pub const MAX_MODULATORS: usize = 8;
+/// Most modulation routes in a project.
+pub const MAX_MOD_ROUTES: usize = 64;
 /// Most inserts on one channel (or the master).
 pub const MAX_INSERTS: usize = 8;
 /// The channel number that means the master bus in a device placement.
@@ -39,16 +43,19 @@ pub enum DeviceType {
     Delay,
     /// A small Freeverb-style room.
     Reverb,
+    /// Four LFOs, free or synced to the transport (a modulator).
+    Lfo,
 }
 
 impl DeviceType {
-    pub const ALL: [DeviceType; 3] = [DeviceType::Filter, DeviceType::Delay, DeviceType::Reverb];
+    pub const ALL: [DeviceType; 4] = [DeviceType::Filter, DeviceType::Delay, DeviceType::Reverb, DeviceType::Lfo];
 
     pub fn id(self) -> &'static str {
         match self {
             DeviceType::Filter => "filter",
             DeviceType::Delay => "delay",
             DeviceType::Reverb => "reverb",
+            DeviceType::Lfo => "lfo",
         }
     }
 
@@ -57,6 +64,7 @@ impl DeviceType {
             DeviceType::Filter => "Filter",
             DeviceType::Delay => "Delay",
             DeviceType::Reverb => "Reverb",
+            DeviceType::Lfo => "LFO",
         }
     }
 
@@ -66,7 +74,10 @@ impl DeviceType {
     }
 
     pub fn kind(self) -> DeviceKind {
-        DeviceKind::AudioEffect
+        match self {
+            DeviceType::Lfo => DeviceKind::Modulator,
+            _ => DeviceKind::AudioEffect,
+        }
     }
 
     pub fn parse(s: &str) -> Option<DeviceType> {
@@ -74,13 +85,20 @@ impl DeviceType {
             "filter" | "svf" => Some(DeviceType::Filter),
             "delay" | "echo" => Some(DeviceType::Delay),
             "reverb" | "verb" => Some(DeviceType::Reverb),
+            "lfo" => Some(DeviceType::Lfo),
             _ => None,
         }
     }
 
-    /// Its ports: audio effects are stereo in, stereo out.
+    /// Its ports: audio effects are stereo in, stereo out; an LFO bank has
+    /// four modulation outputs.
     pub fn ports(self) -> Vec<PortInfo> {
-        vec![PortInfo::audio("in", PortDirection::In), PortInfo::audio("out", PortDirection::Out)]
+        match self.kind() {
+            DeviceKind::Modulator => (1..=4)
+                .map(|k| PortInfo { id: k.to_string(), kind: PortKind::Modulation, direction: PortDirection::Out, width: None })
+                .collect(),
+            _ => vec![PortInfo::audio("in", PortDirection::In), PortInfo::audio("out", PortDirection::Out)],
+        }
     }
 }
 
@@ -132,10 +150,23 @@ pub struct DeviceInfo {
     pub kind: DeviceType,
     pub name: String,
     /// Audio effects: the channel whose insert chain holds it (0 = the
-    /// master).
-    pub channel: u32,
-    /// Its place in that chain, from 0.
+    /// master); modulators: none.
+    pub channel: Option<u32>,
+    /// Its place in that chain (or, a modulator, in the modulator rack),
+    /// from 0.
     pub position: u32,
+}
+
+/// A modulation route (RFC 0010): a modulator output moving a continuous
+/// parameter by `depth` of its range around the value it is set to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ModRoute {
+    /// A modulator output, `<id>.<k>` (`lfo.1`).
+    pub source: String,
+    /// A parameter path.
+    pub target: String,
+    /// -1..1.
+    pub depth: f32,
 }
 
 /// One entry of the device registry (`device.types`).
@@ -154,4 +185,79 @@ pub struct DeviceTypeInfo {
     pub knob_pages: Vec<KnobPage>,
     /// Instruments: how their notes show in a step view.
     pub layout: Option<NoteLayout>,
+}
+
+/// Pads in a `sampler`.
+pub const SAMPLER_PADS: u32 = 16;
+/// The largest sample a `sampler.upload` takes, decoded from base64 (its
+/// base64 then fits a 16 MiB WebSocket frame).
+pub const MAX_UPLOAD_BYTES: usize = 11 * 1024 * 1024;
+
+/// A loaded pad of a sampler.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerPad {
+    /// 1..16.
+    pub pad: u32,
+    /// The file's name, without its folders.
+    pub name: String,
+    /// Where it is on the engine host.
+    pub path: String,
+    pub seconds: f64,
+}
+
+/// A sampler's loaded pads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerInfo {
+    pub instrument: String,
+    pub pads: Vec<SamplerPad>,
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Standard base64, with padding.
+pub fn base64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Decode standard base64 (whitespace ignored).
+pub fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    let (mut acc, mut bits) = (0u32, 0);
+    for c in s.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=') {
+        let v = B64.iter().position(|b| *b == c).ok_or("invalid base64")? as u32;
+        acc = acc << 6 | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_round_trips() {
+        for data in [&b""[..], b"f", b"fo", b"foo", b"foob", b"fooba", b"foobar", &[0, 255, 128, 7]] {
+            let e = base64_encode(data);
+            assert_eq!(base64_decode(&e).unwrap(), data, "{e}");
+        }
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert!(base64_decode("@@").is_err());
+    }
 }

@@ -223,8 +223,10 @@ pub struct DeviceAddParams {
     pub id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
-    /// The channel whose chain gets it; 0 is the master.
-    pub channel: u32,
+    /// An audio effect: the channel whose chain gets it (0 is the master).
+    /// A modulator: none.
+    #[serde(default)]
+    pub channel: Option<u32>,
     /// Its place in the chain from 0 (default: the end).
     #[serde(default)]
     pub position: Option<u32>,
@@ -245,6 +247,92 @@ pub struct DeviceMoveParams {
     /// Default: the end.
     #[serde(default)]
     pub position: Option<u32>,
+}
+
+/// Route a modulator output to a parameter (or set an existing route's
+/// depth).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ModRouteParams {
+    pub source: String,
+    pub target: String,
+    /// -1..1.
+    pub depth: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ModUnrouteParams {
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ModRoutesResult {
+    pub routes: Vec<crate::device::ModRoute>,
+}
+
+// ---- automation lanes (RFC 0010) ----------------------------------------------
+
+/// Set (add or replace) a clip's automation lane for a parameter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LaneSetParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// Default: the selected clip.
+    #[serde(default)]
+    pub clip: Option<u32>,
+    pub path: String,
+    /// 1..`MAX_LANE_POINTS`, ticks below `MAX_CLIP_TICKS` (points past the
+    /// clip's loop never play); sorted and made unique by tick (the last of
+    /// a tick wins), values clamped to the parameter's range.
+    pub points: Vec<LanePoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LaneRemoveParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    #[serde(default)]
+    pub clip: Option<u32>,
+    pub path: String,
+}
+
+// ---- the sampler (RFC 0010) ---------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerGetParams {
+    /// Default: the first sampler.
+    #[serde(default)]
+    pub instrument: Option<String>,
+}
+
+/// Load a WAV file on the engine host into a pad.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerLoadParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    /// 1..16.
+    pub pad: u32,
+    /// Relative paths are under the data dir; absolute paths as given.
+    pub path: String,
+}
+
+/// Send a WAV file to load into a pad (from a client on another machine).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerUploadParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    pub pad: u32,
+    /// The file's name.
+    pub name: String,
+    /// The WAV file, base64 (at most `MAX_UPLOAD_BYTES` decoded).
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplerPadParams {
+    #[serde(default)]
+    pub instrument: Option<String>,
+    pub pad: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -1173,6 +1261,20 @@ api! {
     DeviceRemove = "device.remove" (DeviceRefParams) -> Graph;
     /// Move an audio effect within its chain or to another channel's.
     DeviceMove = "device.move" (DeviceMoveParams) -> Graph;
+    /// A sampler's loaded pads.
+    SamplerGet = "sampler.get" (SamplerGetParams) -> crate::device::SamplerInfo;
+    /// Load a WAV on the engine host into a sampler's pad.
+    SamplerLoad = "sampler.load" (SamplerLoadParams) -> crate::device::SamplerInfo;
+    /// Send a WAV to load into a pad; journaled as the `sampler.load` of the
+    /// file it was stored as.
+    SamplerUpload = "sampler.upload" (SamplerUploadParams) -> crate::device::SamplerInfo;
+    /// Empty a pad.
+    SamplerClear = "sampler.clear" (SamplerPadParams) -> crate::device::SamplerInfo;
+    /// Route a modulator output to a continuous parameter, with a depth
+    /// (or change an existing route's depth).
+    ModRoute = "mod.route" (ModRouteParams) -> ModRoutesResult;
+    /// Remove a modulation route (its target goes back to its value).
+    ModUnroute = "mod.unroute" (ModUnrouteParams) -> ModRoutesResult;
     /// Add a mixer channel (lowest free number).
     ChannelAdd = "channel.add" (ChannelAddParams) -> ChannelInfo;
     /// Remove a mixer channel; sources routed to it are unrouted.
@@ -1242,6 +1344,11 @@ api! {
     ClipRename = "clip.rename" (ClipRenameParams) -> Clip;
     /// Delete a clip and its placements (a track keeps at least one clip).
     ClipDelete = "clip.delete" (ClipRefParams) -> TrackInfo;
+    /// Set a clip's automation lane for a parameter (RFC 0010): while the
+    /// clip plays, the parameter follows it.
+    ClipLaneSet = "clip.lane.set" (LaneSetParams) -> Clip;
+    /// Remove a clip's automation lane.
+    ClipLaneRemove = "clip.lane.remove" (LaneRemoveParams) -> Clip;
     /// Select the clip editors edit (the step views, the Block, and the
     /// `clip.*` defaults). It does not change what plays.
     ClipSelect = "clip.select" (ClipRefParams) -> TrackInfo;

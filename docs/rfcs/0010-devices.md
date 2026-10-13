@@ -1,6 +1,6 @@
 # RFC 0010: Devices: effects, buses, modulators, a sampler, automation
 
-- Status: accepted (phases 2 and 3 implemented; Sam asked to keep building and
+- Status: accepted (phases 2 to 5 implemented; Sam asked to keep building and
   review the stack later, so the choices marked "default" are reversible
   and open to review; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
@@ -99,7 +99,8 @@ instruments.
   itself; returns do not send (no return-to-return routing in this phase).
   A return has its own insert chain (the reverb usually lives there),
   fader, pan, mute, and solo. Solo on a track keeps the returns audible,
-  as consoles do.
+  as consoles do; soloing a return plays just that return (the tracks keep
+  sending, their dry signal leaves the master).
 
 ### 4. Modulators and modulation routes
 
@@ -324,3 +325,134 @@ instruments.
 - UI: "+ return" on the console; a return strip shows `return` instead of
   an input; every track strip has a send knob per return.
 
+## Implementation notes (phase 4: modulators and routes)
+
+- `DeviceType::Lfo` (kind `modulator`); `device.add { type: "lfo" }` with
+  no `channel` puts it in the rack (`DeviceInfo.channel` is null for
+  modulators, `position` its place in the rack). Its parameters are
+  `<id>.<k>.shape|sync|rate|division|phase`, a knob page per LFO.
+- `mod.route { source, target, depth }` and `mod.unroute`; the graph's
+  `mod_routes`. Targets must be continuous parameters; routes go when
+  their modulator or target goes (in the same change, so undo brings them
+  back; undo key `mod:<source>><target>` -> depth). A route's depth is
+  graph state, not a parameter (the RFC's default).
+- The engine holds each route's base: a `SetParam` on a modulated target
+  moves the base, and the daemon's value stays the one set by hand
+  (`param.get`, saving, the journal).
+- Synced LFOs follow a beat clock that restarts with play (at the start
+  point, minus any count-in) and keeps running while stopped, so renders
+  are deterministic.
+- Project files carry `mod_routes`; format stays 7 and protocol 9 within
+  this unreleased stack (both were bumped in phase 2).
+- CLI: `4s device add lfo`, `4s mod`, `4s mod route|unroute`.
+- UI: a modulator rack under the device panel ("+ lfo", a "map" button per
+  output: press it, then any continuous knob; Escape cancels), routes with
+  a depth slider and a remove button; routed knobs get a ring.
+- Not yet: `state.get` showing live modulated values; modulating a
+  route's depth.
+
+## Implementation notes (phase 5: the sampler)
+
+- `InstrumentType::Sampler`: 16 pads on notes 36..51 (the note layout's
+  named rows `Pad 1`..`Pad 16`, ids `pad1`..). A pad spanning a key range
+  for melodic sampling is not built yet; each pad plays its sample at
+  `tune`.
+- `sampler.get|load|upload|clear`; the snapshot's `samplers` and the
+  `sampler` event. `sampler.upload` stores the file under
+  `<data dir>/samples/` and is journaled as the `sampler.load` of it, so
+  the journal holds no audio and a replay needs no upload. Uploads are at
+  most 11 MB (their base64 fits a 16 MiB WebSocket frame), samples 60 s,
+  and an upload cannot go in a `batch` (it is rewritten as a load before
+  it is journaled).
+- Engine: `Instrument::set_sample` takes and hands back `Arc<[f32]>`
+  buffers (`Command::SetSample`, `Returned::Sample`), so the audio thread
+  never frees a sample; `no_alloc` plays one.
+- Projects: `samples` (instrument -> pad -> path); saving copies them
+  into the bundle, loading resolves them against it. Undo key
+  `sample:<id>.<pad>` -> the file's path (undo reloads it).
+- CLI: `4s sampler [load <pad> <file>|clear <pad>] [--instrument]`; a file
+  on the CLI's machine is uploaded, else the path is read on the engine
+  host. `4s step sampler 1 pad1` names pads.
+- UI: `SamplerEditor`: the step view with each pad's sample, audition,
+  load (a file picker, uploaded), and clear beside its row; the selected
+  pad's knobs.
+
+
+## Implementation notes (phase 6: automation lanes)
+
+- `Clip.lanes` (`{path, points: [{tick, value}]}`), at most 8 lanes of 64
+  points; `clip.lane.set` replaces one lane (adds it if new), sorting its
+  points and clamping their values to the parameter's range;
+  `clip.lane.remove` drops it. Continuous and whole-number parameters
+  only; not toggles, not the transport's (`transport.*` and the song's
+  loop, `song.*`: the daemon counts time by them). Point ticks are checked against
+  the longest clip, not the clip's length, so undo can restore a lane
+  before the clip's length; points past the loop never play.
+- Engine: each clip-table entry holds its lanes (`Command::SetLane`,
+  `SetLanePoint`; a retargeted lane keeps its points). Every block, each
+  playing track's clip writes its lanes' values at its playhead, after
+  modulation, so **automation overrides modulation** on the same target;
+  the first lane for a target wins when two playing clips automate it.
+  What no playing lane covers goes back to its value set by hand, which
+  `param.set` keeps up to date. At play start a lane's first value jumps
+  straight there (its target's smoother is snapped, so the first hit
+  already sounds automated); later changes, and a clip launched while
+  playing, move through the smoothers as any change does.
+- The daemon keeps each lane's engine target (`ClipState::sent`) and
+  re-sends targets after a graph change; a lane whose parameter goes (an
+  instrument or effect removed) goes with it, as modulation routes do, in
+  the same undo step. Duplicating a clip copies its lanes; renders and
+  `4s render --record` include them; projects save them in the clip.
+- CLI: `4s clip lane <instrument> <path> "tick:value ..."` (`--rm`), and
+  `4s clip show` lists lanes.
+- Whole-number parameters' lanes are rounded (points in the daemon, the
+  line between them in the engine). The UI's limits come from the
+  generated `limits.ts`.
+- The song's loop (`song.*`) counts as the transport's for modulation
+  routes too (they took only continuous parameters, so no route could
+  reach it before either; now the error says why).
+- UI: `AutomationLanes.tsx`: a lane strip per lane under the piano roll's
+  velocity lane (click: add a point on the snap grid, drag: move,
+  alt-click: remove; a dashed line is the value set by hand), and a
+  parameter field to add one. The step views (`StepLanes.tsx`) show each
+  lane as a bar per step under the grid (in a monophonic instrument's
+  step columns, a bar per lane): press a step to set a point there,
+  drag across steps to paint them (one `clip.lane.set`), alt-click to
+  remove a step's point.
+
+## Implementation notes (live values)
+
+- Section 6's live values are built as `moving` rather than `automated`,
+  and cover modulation as well as automation: the engine notes where each
+  block's routes and lanes put their targets (automation's write wins) and
+  reports them at meter rate (`Feedback::Moved` per parameter, then
+  `MovedDone`; once more when nothing moves, then quiet). The daemon maps
+  targets back to paths and keeps `Snapshot.moving` (path -> value), emits
+  `moving` events when the set or a value changes, and adds `moving` to
+  `param.get` / `param.set` results. `params` and saved values stay the
+  ones set by hand.
+- CLI: `4s get` prints `(now <value>: modulated or automated)`.
+- UI: knobs show a sky dot and faders a sky bar at the moving value, with
+  it in the tooltip; the handle stays at the value set by hand.
+
+## Implementation notes (recording knob moves)
+
+- While a take records (`transport.record`), a parameter set by hand
+  (`param.set`, a CC, a controller knob; not undo or a load) that a lane
+  can take is recorded into the clip the recorded track plays under the
+  playhead, on the 1/16 grid (the last move in a 16th wins, so the
+  longest clip fits a lane's 64 points). Each pass (and the take's end)
+  writes them as `clip.lane.set` requests in the same journal entry as
+  the pass's notes: one undo step, and a replay writes the same lanes.
+  Recorded moves run forward until the clip loops (a pass written one
+  step before the loop's end can cross it); each run replaces the lane's
+  points from its first move to its last (gaps between moves included),
+  and other points stay (a full lane gives
+  up those farthest from the runs).
+- The value set by hand follows the knob as usual; after the take the
+  lane plays the recorded moves. Only the recorder's moves are recorded
+  (the user of the request, as the journal has it; hardware MIDI acts as
+  the host user, see the backlog); other players' moves only change the
+  value set by hand. Moves in another placement of the same clip are a
+  separate run, and a pass whose notes are refused for good (too many
+  events) still writes its moves.

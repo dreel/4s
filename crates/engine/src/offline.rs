@@ -2,7 +2,8 @@
 //! for exports and for agent-driven validation of what the engine produces.
 
 use crate::effect;
-use crate::engine::{Command, Engine, Feedback, ParamTarget, Placement};
+use crate::engine::{Command, Engine, Feedback, ModRoute, ParamTarget, Placement};
+use crate::modulator;
 use crate::instrument;
 use crate::params::{NUM_GLOBALS, TEMPO};
 use fours_protocol::{ClipEvent, DeviceType, InstrumentType, MAX_INSERTS, RenderTrigger, Voice};
@@ -21,6 +22,8 @@ pub struct RenderInstrument {
     pub launched: Option<u16>,
     /// Its arrangement, by start.
     pub placements: Vec<Placement>,
+    /// A sampler's samples by pad (0-based).
+    pub samples: Vec<(u8, std::sync::Arc<[f32]>)>,
 }
 
 /// A clip in the engine's clip table: length in ticks and events.
@@ -29,6 +32,19 @@ pub struct RenderClip {
     pub index: u16,
     pub length: u32,
     pub events: Vec<ClipEvent>,
+    pub lanes: Vec<RenderLane>,
+}
+
+/// A clip's automation lane, resolved: its target, the target's value set
+/// by hand, its range, and its (tick, value) points in tick order.
+#[derive(Clone, Debug)]
+pub struct RenderLane {
+    pub target: ParamTarget,
+    pub base: f32,
+    pub min: f32,
+    pub max: f32,
+    pub whole: bool,
+    pub points: Vec<(u32, f32)>,
 }
 
 /// An audio effect in its engine slot, with its parameter values (in
@@ -54,6 +70,10 @@ pub struct RenderSpec {
     /// level).
     pub returns: Vec<u8>,
     pub sends: Vec<(u8, u8, f32)>,
+    /// Modulators (as effects: slot, kind, parameter values) and the
+    /// modulation routes by index.
+    pub modulators: Vec<RenderEffect>,
+    pub routes: Vec<ModRoute>,
     /// Insert chains: engine chain index (`MASTER_CHAIN` for the master)
     /// -> effect slots in order.
     pub chains: Vec<(u8, Vec<u8>)>,
@@ -87,6 +107,9 @@ impl RenderSpec {
             for (o, ch) in inst.routes.iter().enumerate() {
                 let _ = e.apply(Command::SetRoute { slot, output: o as u8, channel: *ch }, &mut fb);
             }
+            for (pad, sample) in &inst.samples {
+                let _ = e.apply(Command::SetSample { slot, pad: *pad, sample: Some(sample.clone()) }, &mut fb);
+            }
             if inst.launched.is_some() {
                 let _ = e.apply(Command::Launch { slot, clip: inst.launched, now: true }, &mut fb);
             }
@@ -107,6 +130,16 @@ impl RenderSpec {
                 let _ = e.apply(Command::SetParam { target, value: *v }, &mut fb);
             }
         }
+        for m in &self.modulators {
+            let _ = e.apply(Command::AddModulator { slot: m.slot, modulator: modulator::make(m.kind) }, &mut fb);
+            for (i, v) in m.params.iter().enumerate() {
+                let target = ParamTarget::Modulator { slot: m.slot, index: i as u16 };
+                let _ = e.apply(Command::SetParam { target, value: *v }, &mut fb);
+            }
+        }
+        for (i, r) in self.routes.iter().enumerate() {
+            let _ = e.apply(Command::SetModRoute { index: i as u8, route: Some(*r) }, &mut fb);
+        }
         for (ch, chain) in &self.chains {
             let mut slots = [0u8; MAX_INSERTS];
             let len = chain.len().min(MAX_INSERTS);
@@ -117,6 +150,15 @@ impl RenderSpec {
             let _ = e.apply(Command::SetClipLength { clip: c.index, length: c.length }, &mut fb);
             for event in &c.events {
                 let _ = e.apply(Command::AddEvent { clip: c.index, event: *event }, &mut fb);
+            }
+            for (k, l) in c.lanes.iter().enumerate() {
+                let len = l.points.len() as u8;
+                let lane = Command::SetLane { clip: c.index, lane: k as u8, target: Some(l.target), base: l.base, min: l.min, max: l.max, whole: l.whole, len };
+                let _ = e.apply(lane, &mut fb);
+                for (i, (tick, value)) in l.points.iter().enumerate() {
+                    let point = Command::SetLanePoint { clip: c.index, lane: k as u8, index: i as u8, tick: *tick, value: *value };
+                    let _ = e.apply(point, &mut fb);
+                }
             }
         }
         let _ = e.apply(Command::Locate { tick: self.start }, &mut fb);
@@ -317,12 +359,15 @@ mod tests {
                 routes,
                 launched: Some(0),
                 placements: Vec::new(),
+                samples: Vec::new(),
             }],
-            clips: vec![RenderClip { index: 0, length: fours_protocol::DEFAULT_CLIP_LENGTH, events }],
+            clips: vec![RenderClip { index: 0, length: fours_protocol::DEFAULT_CLIP_LENGTH, events, lanes: Vec::new() }],
             effects: Vec::new(),
             chains: Vec::new(),
             returns: Vec::new(),
             sends: Vec::new(),
+            modulators: Vec::new(),
+            routes: Vec::new(),
             start: 0,
         }
     }

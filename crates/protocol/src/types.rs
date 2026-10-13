@@ -152,15 +152,18 @@ pub enum InstrumentType {
     Tr808,
     /// TB-303-style bass synth: one monophonic voice, a note pattern.
     Tb303,
+    /// 16 pads, each a sample on its own note (RFC 0010).
+    Sampler,
 }
 
 impl InstrumentType {
-    pub const ALL: [InstrumentType; 2] = [InstrumentType::Tr808, InstrumentType::Tb303];
+    pub const ALL: [InstrumentType; 3] = [InstrumentType::Tr808, InstrumentType::Tb303, InstrumentType::Sampler];
 
     pub fn id(self) -> &'static str {
         match self {
             InstrumentType::Tr808 => "tr808",
             InstrumentType::Tb303 => "tb303",
+            InstrumentType::Sampler => "sampler",
         }
     }
 
@@ -169,6 +172,7 @@ impl InstrumentType {
         match self {
             InstrumentType::Tr808 => "drums",
             InstrumentType::Tb303 => "bass",
+            InstrumentType::Sampler => "sampler",
         }
     }
 
@@ -176,6 +180,7 @@ impl InstrumentType {
         match self {
             InstrumentType::Tr808 => "Drums",
             InstrumentType::Tb303 => "Bass",
+            InstrumentType::Sampler => "Sampler",
         }
     }
 
@@ -183,6 +188,7 @@ impl InstrumentType {
         match s.trim().to_ascii_lowercase().as_str() {
             "tr808" | "808" | "drums" => Some(InstrumentType::Tr808),
             "tb303" | "303" | "bass" => Some(InstrumentType::Tb303),
+            "sampler" | "pads" => Some(InstrumentType::Sampler),
             _ => None,
         }
     }
@@ -274,6 +280,8 @@ pub struct Graph {
     /// Audio effects (RFC 0010), by channel (the master, 0, first) and
     /// their place in its insert chain.
     pub devices: Vec<crate::device::DeviceInfo>,
+    /// Modulation routes, in the order they were made.
+    pub mod_routes: Vec<crate::device::ModRoute>,
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +330,12 @@ impl ParamInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ParamValue {
     pub path: String,
+    /// The value set by hand: what is saved and undone.
     pub value: f64,
+    /// Where modulation or automation has it now, if either moves it
+    /// (RFC 0010): the engine's last report, up to a meter period old.
+    #[serde(default)]
+    pub moving: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -800,6 +813,12 @@ pub struct Snapshot {
     pub seats: SeatsState,
     pub project: ProjectInfo,
     pub audio: AudioStatus,
+    /// Each sampler's loaded pads (RFC 0010).
+    pub samplers: Vec<crate::device::SamplerInfo>,
+    /// Parameters modulation or automation moves, and where they are now
+    /// (`params` keeps the values set by hand). RFC 0010.
+    #[serde(default)]
+    pub moving: BTreeMap<String, f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -897,12 +916,18 @@ pub enum Event {
     Playhead { step: u32, tick: u32, time: f64, clips: BTreeMap<String, crate::clip::ClipPlayhead> },
     /// The start point moved (`transport.locate`).
     Located { tick: u32 },
+    /// A sampler's pads changed (a sample loaded or cleared).
+    Sampler { info: crate::device::SamplerInfo },
     /// An instrument played (from the sequencer, a pad, MIDI, or an
     /// audition). Drums set `voice`; note instruments set `note`.
     Trigger { instrument: String, voice: Option<Voice>, note: Option<u8>, velocity: f32, time: f64 },
     /// Peak levels since the last meter event (linear, 0..1+), per active
     /// channel (post fader, pan, and mute/solo) and for the master.
     Meters { channels: Vec<ChannelLevel>, master: Vec<f32> },
+    /// The parameters modulation or automation moves and where they are
+    /// (all of them; absent ones are at their values set by hand), at
+    /// meter rate while any move, once when they stop (RFC 0010).
+    Moving { params: BTreeMap<String, f64> },
     Controller { state: ControllerState },
     Midi { connections: Vec<MidiConnection> },
     /// Seats, their bindings, or who sits where changed.
@@ -933,12 +958,14 @@ impl Event {
             Event::ClipDeleted { .. } => "clip_deleted",
             Event::TakeNotes { .. } => "take_notes",
             Event::Located { .. } => "located",
+            Event::Sampler { .. } => "sampler",
             Event::Graph { .. } => "graph",
             Event::Transport { .. } => "transport",
             Event::Record { .. } => "record",
             Event::Playhead { .. } => "playhead",
             Event::Trigger { .. } => "trigger",
             Event::Meters { .. } => "meters",
+            Event::Moving { .. } => "moving",
             Event::Controller { .. } => "controller",
             Event::Midi { .. } => "midi",
             Event::Seats { .. } => "seats",

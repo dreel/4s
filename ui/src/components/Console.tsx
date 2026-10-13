@@ -141,6 +141,7 @@ function Strip({ channel, index, count }: { channel: ChannelInfo; index: number;
   });
   const selected = useSelected();
   const volume = useApp((s) => s.snapshot?.params[`mixer.${n}.volume`] ?? 0);
+  const moving = useLive((s) => s.moving[`mixer.${n}.volume`]);
   const mute = useApp((s) => (s.snapshot?.params[`mixer.${n}.mute`] ?? 0) >= 0.5);
   const solo = useApp((s) => (s.snapshot?.params[`mixer.${n}.solo`] ?? 0) >= 0.5);
   const active = instrument !== null && instrument === selected;
@@ -203,6 +204,7 @@ function Strip({ channel, index, count }: { channel: ChannelInfo; index: number;
           defaultValue={1}
           onChange={(v) => void setParam(`mixer.${n}.volume`, v)}
           testId={`fader-${n}`}
+          moving={moving}
         />
         <StereoMeter n={n} />
       </div>
@@ -273,6 +275,7 @@ function AddControls() {
 export function Console() {
   const channels = useApp((s) => s.snapshot?.graph.channels ?? []);
   const master = useApp((s) => s.snapshot?.params["mixer.master.volume"] ?? 0);
+  const masterMoving = useLive((s) => s.moving["mixer.master.volume"]);
   return (
     <section className="flex flex-col gap-3 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800" data-testid="console">
       <Transport />
@@ -284,7 +287,7 @@ export function Console() {
           <div className="text-xs font-semibold text-zinc-300">Master</div>
           <Inserts n={0} />
           <div className="flex items-end gap-1">
-            <Fader value={master} onChange={(v) => void setParam("mixer.master.volume", v)} testId="fader-master" height={150} />
+            <Fader value={master} onChange={(v) => void setParam("mixer.master.volume", v)} testId="fader-master" height={150} moving={masterMoving} />
             <MasterMeters />
           </div>
           <div className="text-[10px] text-zinc-400 tabular-nums">{pct(master)}</div>

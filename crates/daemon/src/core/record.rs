@@ -541,6 +541,8 @@ pub struct RenderRecord {
     pub target: TakeTarget,
     /// The track's clips by id: (name, length, events).
     pub clips: BTreeMap<u32, (String, u32, Vec<ClipEvent>)>,
+    /// Their automation lanes (a take leaves them as they are).
+    pub lanes: BTreeMap<u32, Vec<Lane>>,
     pub tempo: f64,
 }
 
@@ -559,6 +561,7 @@ impl RenderRecord {
                 name: self.clips.get(&n).map_or_else(|| n.to_string(), |c| c.0.clone()),
                 length,
                 events,
+                lanes: self.lanes.get(&n).cloned().unwrap_or_default(),
             })
             .collect()
     }
@@ -574,7 +577,16 @@ pub(super) struct LiveTake {
     /// journal records.
     pub client: String,
     pub origin: String,
+    /// Knob moves made by hand while recording (RFC 0010): (clip, path) ->
+    /// (clip tick on the 1/16 grid, value, where the clip started playing:
+    /// a placement's start, or `u32::MAX` for a launched clip) in the order
+    /// played, written as lanes with each pass.
+    pub moves: BTreeMap<(u32, String), Vec<(u32, f64, u32)>>,
 }
+
+/// Knob moves are recorded on this grid (a 16th): the longest clip then
+/// fits a lane's `MAX_LANE_POINTS`.
+pub const MOVE_GRID: u32 = TICKS_PER_STEP;
 
 impl Core {
     /// The notes an offline render plays, and what it records: into
@@ -605,6 +617,7 @@ impl Core {
                 let mut settings = self.record.clone();
                 settings.update(r)?;
                 let clips = self.track(&id).clips.iter().map(|(n, c)| (*n, (c.name.clone(), c.length, c.events.clone()))).collect();
+                let lanes = self.track(&id).clips.iter().map(|(n, c)| (*n, c.lanes.clone())).collect();
                 Some(RenderRecord {
                     instrument: id.clone(),
                     slot,
@@ -613,6 +626,7 @@ impl Core {
                     // tick 0.
                     target: self.take_target(&id, self.track(&id).launched.map(|n| (n, 0))),
                     clips,
+                    lanes,
                     tempo: self.global(params::TEMPO),
                 })
             }
@@ -702,6 +716,7 @@ impl Core {
                         user: user.to_string(),
                         client: client.to_string(),
                         origin: origin.to_string(),
+                        moves: BTreeMap::new(),
                     });
                 }
             }
@@ -774,6 +789,106 @@ impl Core {
         }
     }
 
+    /// A parameter set by hand (a knob, a CC, `param.set`): while a take
+    /// records and its track plays a clip, the recorder's move goes into
+    /// that clip's lane for the parameter at the playhead (on the 1/16 grid;
+    /// the last move in a 16th wins). Other people's moves, and parameters
+    /// lanes cannot take, are not recorded.
+    pub(super) fn record_move(&mut self, path: &str, value: f64) {
+        let Some(id) = self.take.as_ref().filter(|t| self.acting.as_deref() == Some(t.user.as_str())).map(|t| t.instrument.clone()) else {
+            return;
+        };
+        if self.lane_target(path).is_err() {
+            return;
+        }
+        let Some(at) = self.track_playhead(&id) else { return };
+        let tick = at.tick / MOVE_GRID * MOVE_GRID;
+        // Moves in another placement of the same clip are another run.
+        let t = self.track(&id);
+        let from = match (t.playing, self.song_pos) {
+            (None, Some(pos)) => t.placements.iter().find(|p| p.start <= pos && pos < p.end()).map_or(u32::MAX, |p| p.start),
+            _ => u32::MAX,
+        };
+        if let Some(t) = self.take.as_mut() {
+            t.moves.entry((at.clip, path.to_string())).or_default().push((tick, value, from));
+        }
+    }
+
+    /// The `clip.lane.set` requests that write a take's knob moves. Moves
+    /// run forward through the clip until it loops (a pass can cross the
+    /// loop point) or another placement of it plays; each run replaces the
+    /// lane's points from its first move to its last, others stay (a lane
+    /// full of other points gives up those farthest from the runs); a clip
+    /// with no room for another lane is skipped.
+    fn move_requests(&self, t: &LiveTake) -> Vec<Request> {
+        let mut out = Vec::new();
+        // New lanes this pass adds to each clip, so it never asks for more
+        // than a clip can hold.
+        let mut added: BTreeMap<u32, usize> = BTreeMap::new();
+        for ((clip, path), moves) in &t.moves {
+            // Its clip or parameter may have gone during the take (a lane
+            // that cannot be set must not cost the pass its notes).
+            let Some(c) = self.track(&t.instrument).clips.get(clip) else { continue };
+            if self.lane_target(path).is_err() {
+                continue;
+            }
+            let lane = c.lanes.iter().find(|l| &l.path == path);
+            if lane.is_none() {
+                let n = added.entry(*clip).or_default();
+                if c.lanes.len() + *n >= MAX_LANES {
+                    tracing::warn!("recording {path} into clip {clip} of {}: it has {MAX_LANES} lanes", t.instrument);
+                    continue;
+                }
+                *n += 1;
+            }
+            // Runs (spans [lo, hi)) and the last value in each 16th.
+            let mut spans: Vec<(u32, u32)> = Vec::new();
+            let mut recorded: BTreeMap<u32, f64> = BTreeMap::new();
+            for (i, (tick, value, from)) in moves.iter().enumerate() {
+                match spans.last_mut() {
+                    Some(s) if i > 0 && *tick >= moves[i - 1].0 && *from == moves[i - 1].2 => s.1 = tick + MOVE_GRID,
+                    _ => spans.push((*tick, tick + MOVE_GRID)),
+                }
+                recorded.insert(*tick, *value);
+            }
+            let outside = |tick: u32| spans.iter().all(|(lo, hi)| tick < *lo || tick >= *hi);
+            let mut keep: Vec<LanePoint> = lane.map(|l| l.points.iter().filter(|p| outside(p.tick)).copied().collect()).unwrap_or_default();
+            let room = MAX_LANE_POINTS.saturating_sub(recorded.len());
+            let distance = |tick: u32| spans.iter().map(|(lo, hi)| lo.saturating_sub(tick).max(tick.saturating_sub(hi - 1))).min().unwrap_or(0);
+            while keep.len() > room {
+                // Drop the kept point farthest from the runs.
+                let far = (0..keep.len()).max_by_key(|i| distance(keep[*i].tick)).expect("not empty");
+                keep.remove(far);
+            }
+            let mut points: Vec<LanePoint> = recorded.iter().map(|(tick, value)| LanePoint { tick: *tick, value: *value }).chain(keep).collect();
+            points.sort_by_key(|p| p.tick);
+            out.push(Request::ClipLaneSet(LaneSetParams { instrument: Some(t.instrument.clone()), clip: Some(*clip), path: path.clone(), points }));
+        }
+        out
+    }
+
+    /// Dispatch a take's requests as one journal entry (one request as
+    /// itself, more as a `batch`): one undo step, replayed the same.
+    fn journal_requests(&mut self, mut requests: Vec<Request>, user: &str, client: &str, origin: &str) -> Result<(), RpcError> {
+        let (method, params) = if requests.len() == 1 {
+            let r = requests.remove(0);
+            let method = r.method();
+            let mut v = serde_json::to_value(&r).expect("request serializes");
+            let params = v.get_mut("params").map(Value::take).unwrap_or(Value::Null);
+            requests.push(r);
+            (method, params)
+        } else {
+            let list: Vec<Value> = requests.iter().map(|r| serde_json::to_value(r).expect("request serializes")).collect();
+            ("batch", json!({ "requests": list }))
+        };
+        self.journaled(user, client, origin, method, params, |c| {
+            for r in requests {
+                c.dispatch(r, origin, client, user)?;
+            }
+            Ok(())
+        })
+    }
+
     pub(super) fn write_take(&mut self, upto: f64, upto_pos: f64, end: bool) {
         let Some(mut t) = self.take.take() else { return };
         let (target, settings) = (self.live_target(&t), self.record.clone());
@@ -784,35 +899,28 @@ impl Core {
         // with the next pass instead of losing these notes.
         let unwritten = t.take.clone();
         let writes = t.take.flush(upto, upto_pos, end, &settings, &target, &existing);
-        if !writes.is_empty() {
+        let moves = self.move_requests(&t);
+        let unwritten_moves = std::mem::take(&mut t.moves);
+        if !writes.is_empty() || !moves.is_empty() {
             let (id, origin, client, user) = (t.instrument.clone(), t.origin.clone(), t.client.clone(), t.user.clone());
             // Journaled as the requests that make the same change (one
             // `clip.update`, or a `batch`), so a replay writes the same
-            // notes, and a pass is one undo step.
-            let mut requests = write_requests(&id, &writes, &existing);
-            let (method, params) = if requests.len() == 1 {
-                let r = requests.remove(0);
-                let method = r.method();
-                let mut v = serde_json::to_value(&r).expect("request serializes");
-                let params = v.get_mut("params").map(Value::take).unwrap_or(Value::Null);
-                requests.push(r);
-                (method, params)
-            } else {
-                let list: Vec<Value> = requests.iter().map(|r| serde_json::to_value(r).expect("request serializes")).collect();
-                ("batch", json!({ "requests": list }))
-            };
-            let result = self.journaled(&user, &client, &origin, method, params, |c| {
-                for r in requests {
-                    c.dispatch(r, &origin, &client, &user)?;
-                }
-                Ok(())
-            });
-            if let Err(e) = result {
+            // notes and lanes, and a pass is one undo step.
+            // Lanes first: setting one again gives the same lane, so if the
+            // notes then fail and are written next pass, nothing doubles.
+            let mut requests = moves;
+            if !writes.is_empty() {
+                requests.extend(write_requests(&id, &writes, &existing));
+            }
+            // Lanes go first and nothing is rolled back, so notes refused
+            // for good (too many events) still leave the pass's lanes.
+            if let Err(e) = self.journal_requests(requests, &user, &client, &origin) {
                 tracing::warn!("recording into {id}: {}", e.message);
                 // A busy engine may take it next pass; an invalid clip (too
                 // many events) never will.
                 if e.code != RpcError::invalid("").code {
                     t.take = unwritten;
+                    t.moves = unwritten_moves;
                 }
             }
         }

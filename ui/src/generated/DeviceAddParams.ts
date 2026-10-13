@@ -10,9 +10,10 @@ export type DeviceAddParams = { type: DeviceType,
  */
 id: string | null, name: string | null, 
 /**
- * The channel whose chain gets it; 0 is the master.
+ * An audio effect: the channel whose chain gets it (0 is the master).
+ * A modulator: none.
  */
-channel: number, 
+channel: number | null, 
 /**
  * Its place in the chain from 0 (default: the end).
  */

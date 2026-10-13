@@ -93,6 +93,18 @@ impl InstrumentType {
                 velocity: VEL_ON,
                 expressions: vec![accent],
             },
+            // 16 pads on GM drum notes from 36 (as `sampler::FIRST_NOTE`).
+            InstrumentType::Sampler => NoteLayout {
+                rows: (1..=16u8)
+                    .map(|k| NoteRow { note: 35 + k, id: format!("pad{k}"), name: format!("Pad {k}"), short: format!("P{k}") })
+                    .collect(),
+                low: 36,
+                high: 51,
+                mono: false,
+                gate: 1.0,
+                velocity: VEL_ON,
+                expressions: vec![accent],
+            },
             InstrumentType::Tb303 => NoteLayout {
                 rows: Vec::new(),
                 low: NOTE_MIN,

@@ -6,6 +6,7 @@ import type { DeviceType } from "./DeviceType";
  */
 export type ProjectDevice = { id: string, type: DeviceType, name: string, 
 /**
- * Whose insert chain: a channel number, or 0 for the master.
+ * Whose insert chain: a channel number, or 0 for the master; absent
+ * for a modulator.
  */
-channel: number, };
+channel?: number | null, };

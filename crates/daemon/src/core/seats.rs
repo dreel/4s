@@ -965,7 +965,7 @@ impl Core {
                 let step = (max - min) / RELATIVE_STEPS;
                 let step = if matches!(self.params[id].info.kind, ParamKind::Integer { .. }) { step.max(1.0) } else { step };
                 let value = self.params[id].value + delta * step;
-                self.set_param(path, value, origin).map(|_| ())
+                self.set_param_by_hand(path, value, origin).map(|_| ())
             }
         }
     }
@@ -1010,13 +1010,13 @@ impl Core {
             if !(ours || near || crossed) {
                 return Ok(());
             }
-            let set = self.set_param(path, min + v * (max - min), origin)?;
+            let set = self.set_param_by_hand(path, min + v * (max - min), origin)?;
             if let Some(p) = self.pickups.get_mut(&key) {
                 p.sent = Some(norm(set.value));
             }
             return Ok(());
         }
-        self.set_param(path, min + v * (max - min), origin)?;
+        self.set_param_by_hand(path, min + v * (max - min), origin)?;
         Ok(())
     }
 }

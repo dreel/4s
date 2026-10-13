@@ -81,7 +81,8 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   listening. `ui/test-results/groove.png` (from the Electron e2e) shows the UI.
 - `4s render --input "0.5:C2 1.0:D#2" --record --quantize 1/16` plays notes
   into a render and shows the clip a recording would leave (RFC 0008);
-  `4s record` / `4s record --off` record live into your focus.
+  `4s record` / `4s record --off` record live into your focus (notes,
+  and knob moves made meanwhile into the clip's automation lanes).
 - `4s song` shows the arrangement, which play always plays;
   `4s song place drums --at 1 --bars 4`, `4s song loop 2 5`, `4s locate 3`,
   and `4s render --from 3` work with it; `4s clip list|new|dup|select`
@@ -91,7 +92,11 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 - `4s device add delay --on 1` (or `--on master`) puts an audio effect in
   a channel's insert chain; `4s device list|mv|rm|types`, and its
   parameters are `<id>.*` (RFC 0010). `4s channel add --return` makes a
-  return bus and `4s send 1 3 40%` feeds it from channel 1.
+  return bus and `4s send 1 3 40%` feeds it from channel 1. `4s device add
+  lfo` and `4s mod route lfo.1 bass.cutoff 40%` modulate any continuous
+  parameter. `4s instrument add sampler` and `4s sampler load 1 kick.wav`
+  play samples on pads (notes 36-51). `4s clip lane drums mixer.1.pan
+  "0:-1 384:1"` automates a parameter while the clip plays.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history.

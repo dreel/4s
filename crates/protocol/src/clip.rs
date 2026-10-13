@@ -77,6 +77,42 @@ pub struct Clip {
     pub length: u32,
     /// Sorted by (tick, note).
     pub events: Vec<ClipEvent>,
+    /// Automation lanes (RFC 0010), at most `MAX_LANES`.
+    #[serde(default)]
+    pub lanes: Vec<Lane>,
+}
+
+/// Whether a parameter belongs to the transport (tempo, swing, the song's
+/// loop, launch quantize): the daemon counts time by these, so nothing but a
+/// hand (or a CC) moves them, not automation.
+pub fn transport_param(path: &str) -> bool {
+    TRANSPORT_PREFIXES.iter().any(|p| path.starts_with(p))
+}
+
+/// The transport's parameter path prefixes.
+pub const TRANSPORT_PREFIXES: [&str; 2] = ["transport.", "song."];
+
+/// Most automation lanes in a clip.
+pub const MAX_LANES: usize = 8;
+/// Most points in a lane.
+pub const MAX_LANE_POINTS: usize = 64;
+
+/// An automation lane (RFC 0010): a parameter's value over the clip, linear
+/// between points (before the first and after the last, the nearest
+/// point's value).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Lane {
+    /// A parameter path.
+    pub path: String,
+    /// Sorted by tick, unique ticks.
+    pub points: Vec<LanePoint>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LanePoint {
+    pub tick: u32,
+    /// In the parameter's own units.
+    pub value: f64,
 }
 
 /// A note a take is recording, not written yet: where it will go (the

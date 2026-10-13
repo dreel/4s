@@ -10,6 +10,7 @@ import { act, client, select, useApp, useSelected } from "../store";
 import { BassEditor } from "./BassEditor";
 import { DrumEditor } from "./DrumEditor";
 import { PianoRoll } from "./PianoRoll";
+import { SamplerEditor } from "./SamplerEditor";
 import { GM_NOTES } from "./voices";
 
 /** Ticks per step (a 16th), as in the protocol's `TICKS_PER_STEP`. */
@@ -265,6 +266,7 @@ export function Editor() {
       {current && roll && <PianoRoll id={current.id} drums={current.type === "tr808"} />}
       {current?.type === "tr808" && <DrumEditor id={current.id} />}
       {current?.type === "tb303" && <BassEditor id={current.id} />}
+      {current?.type === "sampler" && <SamplerEditor id={current.id} />}
     </section>
   );
 }

@@ -30,6 +30,8 @@ export type AppState = {
   history: History;
   /** The device whose panel is open (view state only). */
   device: string | null;
+  /** A modulator output waiting for a knob to map it to (view state). */
+  mapping: string | null;
 };
 
 export type History = {
@@ -52,6 +54,9 @@ export type LiveState = {
   lastNote: Record<string, number>;
   /** Notes a take is recording into each instrument, not written yet. */
   takeNotes: Record<string, TakeNote[]>;
+  /** Where modulation or automation has parameters now (RFC 0010); the
+   * snapshot's `params` keep the values set by hand. */
+  moving: Record<string, number>;
 };
 
 class Store<T> {
@@ -93,8 +98,9 @@ export const app = new Store<AppState>({
   choosingSeat: false,
   history: NO_HISTORY,
   device: null,
+  mapping: null,
 });
-export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {} });
+export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {}, moving: {} });
 
 /** Select an instrument for the editor. */
 export function select(id: string) {
@@ -136,6 +142,7 @@ const UI_EVENTS: EventEnvelope["event"]["type"][] = [
   "clip_deleted",
   "track",
   "located",
+  "sampler",
   "take_notes",
   "graph",
   "transport",
@@ -143,6 +150,7 @@ const UI_EVENTS: EventEnvelope["event"]["type"][] = [
   "playhead",
   "trigger",
   "meters",
+  "moving",
   "controller",
   "midi",
   "seats",
@@ -173,7 +181,7 @@ async function resync() {
   // No seat after a (re)connect or a project load: ask.
   if (!mySeat(app.state)) app.set({ choosingSeat: true });
   // Take notes come only as events: whatever was missed is stale.
-  live.set({ channels: {}, takeNotes: {} });
+  live.set({ channels: {}, takeNotes: {}, moving: snapshot.moving });
   for (const e of pending) if (e.seq > snapshot.seq) apply(e);
 }
 
@@ -211,6 +219,9 @@ function apply(env: EventEnvelope) {
       live.set({ channels, master: ev.master });
       return;
     }
+    case "moving":
+      live.set({ moving: ev.params });
+      return;
     case "trigger": {
       const now = performance.now();
       const key = ev.voice ? `${ev.instrument}.${ev.voice}` : ev.instrument;
@@ -284,6 +295,16 @@ function apply(env: EventEnvelope) {
     case "track":
       app.set({
         snapshot: { ...s, tracks: s.tracks.map((t) => (t.instrument === ev.track.instrument ? ev.track : t)) },
+      });
+      break;
+    case "sampler":
+      app.set({
+        snapshot: {
+          ...s,
+          samplers: s.samplers.some((x) => x.instrument === ev.info.instrument)
+            ? s.samplers.map((x) => (x.instrument === ev.info.instrument ? ev.info : x))
+            : [...s.samplers, ev.info],
+        },
       });
       break;
     case "located":

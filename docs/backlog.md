@@ -308,6 +308,75 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   keys only (`crates/daemon/src/journal.rs`, `plan`): undoing a device's
   add removes it even if another user edited its parameters since.
 
+- (2026-10-12, #42 review) a new effect settling at the engine's tempo
+  (`Command::AddEffect`) only matters live: offline renders snap every
+  effect at the render's tempo, so no render check can see it; a live check
+  would need the audio output (or engine feedback of the delay time).
+
+- (2026-10-12, modulators review) undo's ownership (`journal.rs`,
+  `owner`) does not know `mod:` keys: undoing an instrument's add removes
+  another user's routes to it without reporting them as skipped.
+- (2026-10-12, modulators review) the LFO bank's four outputs are spelled
+  out in `DeviceType::ports`, `modulator::LFOS`, and the UI's map buttons;
+  derive the UI's from the registry's ports and share one constant.
+
+- (2026-10-12, #43 review) routes to a removed target are pruned once at
+  the end of a change; if the same undo/redo then adds a device in the
+  same engine slot, the old route can touch it until the prune, which then
+  writes the old base into the new parameter (`graph_changed`,
+  `prune_routes`). Prune right after teardowns, or re-push the parameters.
+
+- (2026-10-12, sampler) a pad keeps the path it was loaded from until the
+  project is reloaded, even after a save copied it into the bundle (the
+  undo doc must not change on save); if that original is deleted, an undo
+  that reloads the pad fails (skipped). Point undo at the bundle copy, or
+  keep decoded samples by content.
+
+- (2026-10-12, automation lanes review) lanes: a lane whose engine
+  commands did not fit the queue is marked unsent and resent only at the
+  next edit or graph change (`sync_lanes`); until then it may play stale
+  points. Resend unsent lanes when the queue drains.
+- (2026-10-12, live values review) moving: `note_moved` scans the block's
+  list on each write (up to ~192x192 a block when routes and lanes are
+  full; bounded, no allocation); key it by route/lane slot if profiling
+  shows it. If the feedback ring drops some `Moved` but not `MovedDone`,
+  the daemon publishes a partial set for one period (markers flicker).
+  The CLI e2e checks for `moving` wait a fixed 0.3 s; poll instead if CI
+  gets flaky.
+- (2026-10-12, automation lanes review) lanes, engine cost: every
+  `SetParam` scans all clips' lanes to update bases, and `automate`'s
+  let-go loop is quadratic in `MAX_AUTOMATED` and routes. Bounded and
+  real-time safe, but worth a per-target "automated" count or bitset
+  before dense CC input or more instruments.
+- (2026-10-12, automation lanes) lanes: points are linear only (no curves
+  or steps). The step views set points on their steps only (a lane's
+  points between steps show as the value there, editable in the roll).
+- (2026-10-13, #48 review) lanes: no e2e for a pass at `MAX_EVENTS` still
+  writing its lanes; no Electron check for another client's edit during a
+  lane-point drag; the placement-runs e2e check uses wall-clock sleeps.
+  RFC 0010's play-start note says the target's smoother snaps; it is the
+  whole strip or device (`snap_target`).
+- (2026-10-12, knob recording) lanes: a knob moved before a take's first
+  step is not recorded (no playhead yet, `record_move`); moves are on the
+  1/16 grid; a recorded lane plays back over the knob while the take goes
+  on recording the next pass (no "touch" mode that lets go while a knob is
+  held). Moves on a track with nothing under the playhead are not
+  recorded (no clip is made for them, unlike notes).
+- (2026-10-12, knob recording review) the loop-crossing e2e check relies
+  on wall-clock sleeps; poll the playhead if it gets flaky. Unwritten knob
+  moves have no preview (notes have `take_notes`), so a take's automation
+  shows up only when its pass is written.
+- (2026-10-12, knob recording review) only requests record knob moves
+  (`acting` is unset otherwise): pitch bend, which is not a request, never
+  reaches a lane (it is not a parameter today).
+- (2026-10-12, knob recording review) hardware CCs are handled as the
+  host user, so a remote user's take never records moves made on a
+  hardware controller, even one driving their seat. Resolve the acting
+  user from the seat the device plays in.
+- (2026-10-12, #46 review) moving: a report from before a graph change can
+  land on the slot's new occupant for one meter period (tag reports with
+  a graph generation).
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

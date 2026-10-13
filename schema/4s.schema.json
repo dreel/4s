@@ -155,6 +155,14 @@
           "instrument": {
             "type": "string"
           },
+          "lanes": {
+            "default": [],
+            "description": "Automation lanes (RFC 0010), at most `MAX_LANES`.",
+            "items": {
+              "$ref": "#/$defs/Lane"
+            },
+            "type": "array"
+          },
           "length": {
             "description": "Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.",
             "format": "uint32",
@@ -372,10 +380,13 @@
         "description": "A device that is not an instrument, and where it sits.",
         "properties": {
           "channel": {
-            "description": "Audio effects: the channel whose insert chain holds it (0 = the\nmaster).",
+            "description": "Audio effects: the channel whose insert chain holds it (0 = the\nmaster); modulators: none.",
             "format": "uint32",
             "minimum": 0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -384,7 +395,7 @@
             "type": "string"
           },
           "position": {
-            "description": "Its place in that chain, from 0.",
+            "description": "Its place in that chain (or, a modulator, in the modulator rack),\nfrom 0.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
@@ -397,7 +408,6 @@
           "id",
           "type",
           "name",
-          "channel",
           "position"
         ],
         "type": "object"
@@ -433,6 +443,11 @@
           {
             "const": "reverb",
             "description": "A small Freeverb-style room.",
+            "type": "string"
+          },
+          {
+            "const": "lfo",
+            "description": "Four LFOs, free or synced to the transport (a modulator).",
             "type": "string"
           }
         ]
@@ -735,6 +750,23 @@
             "type": "object"
           },
           {
+            "description": "A sampler's pads changed (a sample loaded or cleared).",
+            "properties": {
+              "info": {
+                "$ref": "#/$defs/SamplerInfo"
+              },
+              "type": {
+                "const": "sampler",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "info"
+            ],
+            "type": "object"
+          },
+          {
             "description": "An instrument played (from the sequencer, a pad, MIDI, or an\naudition). Drums set `voice`; note instruments set `note`.",
             "properties": {
               "instrument": {
@@ -805,6 +837,27 @@
               "type",
               "channels",
               "master"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The parameters modulation or automation moves and where they are\n(all of them; absent ones are at their values set by hand), at\nmeter rate while any move, once when they stop (RFC 0010).",
+            "properties": {
+              "params": {
+                "additionalProperties": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              "type": {
+                "const": "moving",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "params"
             ],
             "type": "object"
           },
@@ -1019,6 +1072,13 @@
             },
             "type": "array"
           },
+          "mod_routes": {
+            "description": "Modulation routes, in the order they were made.",
+            "items": {
+              "$ref": "#/$defs/ModRoute"
+            },
+            "type": "array"
+          },
           "routes": {
             "additionalProperties": {
               "format": "uint32",
@@ -1033,7 +1093,8 @@
           "instruments",
           "channels",
           "routes",
-          "devices"
+          "devices",
+          "mod_routes"
         ],
         "type": "object"
       },
@@ -1095,6 +1156,11 @@
           {
             "const": "tb303",
             "description": "TB-303-style bass synth: one monophonic voice, a note pattern.",
+            "type": "string"
+          },
+          {
+            "const": "sampler",
+            "description": "16 pads, each a sample on its own note (RFC 0010).",
             "type": "string"
           }
         ]
@@ -1237,6 +1303,46 @@
         ],
         "type": "object"
       },
+      "Lane": {
+        "description": "An automation lane (RFC 0010): a parameter's value over the clip, linear\nbetween points (before the first and after the last, the nearest\npoint's value).",
+        "properties": {
+          "path": {
+            "description": "A parameter path.",
+            "type": "string"
+          },
+          "points": {
+            "description": "Sorted by tick, unique ticks.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
+      "LanePoint": {
+        "properties": {
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "In the parameter's own units.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "value"
+        ],
+        "type": "object"
+      },
       "MidiConnection": {
         "properties": {
           "device": {
@@ -1276,6 +1382,30 @@
           "input",
           "device",
           "profile"
+        ],
+        "type": "object"
+      },
+      "ModRoute": {
+        "description": "A modulation route (RFC 0010): a modulator output moving a continuous\nparameter by `depth` of its range around the value it is set to.",
+        "properties": {
+          "depth": {
+            "description": "-1..1.",
+            "format": "float",
+            "type": "number"
+          },
+          "source": {
+            "description": "A modulator output, `<id>.<k>` (`lfo.1`).",
+            "type": "string"
+          },
+          "target": {
+            "description": "A parameter path.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "depth"
         ],
         "type": "object"
       },
@@ -1679,6 +1809,55 @@
         ],
         "type": "object"
       },
+      "SamplerInfo": {
+        "description": "A sampler's loaded pads.",
+        "properties": {
+          "instrument": {
+            "type": "string"
+          },
+          "pads": {
+            "items": {
+              "$ref": "#/$defs/SamplerPad"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "instrument",
+          "pads"
+        ],
+        "type": "object"
+      },
+      "SamplerPad": {
+        "description": "A loaded pad of a sampler.",
+        "properties": {
+          "name": {
+            "description": "The file's name, without its folders.",
+            "type": "string"
+          },
+          "pad": {
+            "description": "1..16.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Where it is on the engine host.",
+            "type": "string"
+          },
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pad",
+          "name",
+          "path",
+          "seconds"
+        ],
+        "type": "object"
+      },
       "Seat": {
         "properties": {
           "config": {
@@ -2036,6 +2215,11 @@
             "const": "reverb",
             "description": "A small Freeverb-style room.",
             "type": "string"
+          },
+          {
+            "const": "lfo",
+            "description": "Four LFOs, free or synced to the transport (a modulator).",
+            "type": "string"
           }
         ]
       },
@@ -2050,6 +2234,11 @@
           {
             "const": "tb303",
             "description": "TB-303-style bass synth: one monophonic voice, a note pattern.",
+            "type": "string"
+          },
+          {
+            "const": "sampler",
+            "description": "16 pads, each a sample on its own note (RFC 0010).",
             "type": "string"
           }
         ]
@@ -2091,6 +2280,70 @@
         "required": [
           "device",
           "ccs"
+        ],
+        "type": "object"
+      },
+      "Lane": {
+        "description": "An automation lane (RFC 0010): a parameter's value over the clip, linear\nbetween points (before the first and after the last, the nearest\npoint's value).",
+        "properties": {
+          "path": {
+            "description": "A parameter path.",
+            "type": "string"
+          },
+          "points": {
+            "description": "Sorted by tick, unique ticks.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
+      "LanePoint": {
+        "properties": {
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "In the parameter's own units.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "value"
+        ],
+        "type": "object"
+      },
+      "ModRoute": {
+        "description": "A modulation route (RFC 0010): a modulator output moving a continuous\nparameter by `depth` of its range around the value it is set to.",
+        "properties": {
+          "depth": {
+            "description": "-1..1.",
+            "format": "float",
+            "type": "number"
+          },
+          "source": {
+            "description": "A modulator output, `<id>.<k>` (`lfo.1`).",
+            "type": "string"
+          },
+          "target": {
+            "description": "A parameter path.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "depth"
         ],
         "type": "object"
       },
@@ -2208,6 +2461,13 @@
               "null"
             ]
           },
+          "lanes": {
+            "description": "Automation lanes (RFC 0010).",
+            "items": {
+              "$ref": "#/$defs/Lane"
+            },
+            "type": "array"
+          },
           "length": {
             "default": 384,
             "description": "Ticks (where it loops).",
@@ -2251,10 +2511,13 @@
         "description": "An audio effect in a project file.",
         "properties": {
           "channel": {
-            "description": "Whose insert chain: a channel number, or 0 for the master.",
+            "description": "Whose insert chain: a channel number, or 0 for the master; absent\nfor a modulator.",
             "format": "uint32",
             "minimum": 0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -2269,8 +2532,7 @@
         "required": [
           "id",
           "type",
-          "name",
-          "channel"
+          "name"
         ],
         "type": "object"
       },
@@ -2455,6 +2717,13 @@
         },
         "type": "array"
       },
+      "mod_routes": {
+        "description": "Modulation routes (RFC 0010).",
+        "items": {
+          "$ref": "#/$defs/ModRoute"
+        },
+        "type": "array"
+      },
       "params": {
         "additionalProperties": {
           "format": "double",
@@ -2470,6 +2739,19 @@
           "type": "integer"
         },
         "description": "Source (`drums`, `drums.kick`) -> channel number.",
+        "type": "object"
+      },
+      "samples": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^\\d+$": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "description": "Samplers' samples by instrument id and pad: a path inside the\nbundle (`samples/...`) once saved, else where it is on the engine\nhost.",
         "type": "object"
       },
       "seats": {
@@ -3109,10 +3391,14 @@
         "description": "Add an audio effect to a channel's insert chain.",
         "properties": {
           "channel": {
-            "description": "The channel whose chain gets it; 0 is the master.",
+            "default": null,
+            "description": "An audio effect: the channel whose chain gets it (0 is the master).\nA modulator: none.",
             "format": "uint32",
             "minimum": 0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "id": {
             "default": null,
@@ -3144,8 +3430,7 @@
           }
         },
         "required": [
-          "type",
-          "channel"
+          "type"
         ],
         "type": "object"
       },
@@ -3223,6 +3508,11 @@
           {
             "const": "reverb",
             "description": "A small Freeverb-style room.",
+            "type": "string"
+          },
+          {
+            "const": "lfo",
+            "description": "Four LFOs, free or synced to the transport (a modulator).",
             "type": "string"
           }
         ]
@@ -3386,6 +3676,11 @@
             "const": "tb303",
             "description": "TB-303-style bass synth: one monophonic voice, a note pattern.",
             "type": "string"
+          },
+          {
+            "const": "sampler",
+            "description": "16 pads, each a sample on its own note (RFC 0010).",
+            "type": "string"
           }
         ]
       },
@@ -3479,6 +3774,110 @@
         "required": [
           "index",
           "value"
+        ],
+        "type": "object"
+      },
+      "Lane": {
+        "description": "An automation lane (RFC 0010): a parameter's value over the clip, linear\nbetween points (before the first and after the last, the nearest\npoint's value).",
+        "properties": {
+          "path": {
+            "description": "A parameter path.",
+            "type": "string"
+          },
+          "points": {
+            "description": "Sorted by tick, unique ticks.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
+      "LanePoint": {
+        "properties": {
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "In the parameter's own units.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "value"
+        ],
+        "type": "object"
+      },
+      "LaneRemoveParams": {
+        "properties": {
+          "clip": {
+            "default": null,
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "LaneSetParams": {
+        "description": "Set (add or replace) a clip's automation lane for a parameter.",
+        "properties": {
+          "clip": {
+            "default": null,
+            "description": "Default: the selected clip.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "points": {
+            "description": "1..`MAX_LANE_POINTS`, ticks below `MAX_CLIP_TICKS` (points past the\nclip's loop never play); sorted and made unique by tick (the last of\na tick wins), values clamped to the parameter's range.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
         ],
         "type": "object"
       },
@@ -3647,6 +4046,67 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "ModRoute": {
+        "description": "A modulation route (RFC 0010): a modulator output moving a continuous\nparameter by `depth` of its range around the value it is set to.",
+        "properties": {
+          "depth": {
+            "description": "-1..1.",
+            "format": "float",
+            "type": "number"
+          },
+          "source": {
+            "description": "A modulator output, `<id>.<k>` (`lfo.1`).",
+            "type": "string"
+          },
+          "target": {
+            "description": "A parameter path.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "depth"
+        ],
+        "type": "object"
+      },
+      "ModRouteParams": {
+        "description": "Route a modulator output to a parameter (or set an existing route's\ndepth).",
+        "properties": {
+          "depth": {
+            "description": "-1..1.",
+            "format": "float",
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "depth"
+        ],
+        "type": "object"
+      },
+      "ModUnrouteParams": {
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target"
+        ],
         "type": "object"
       },
       "NoteBinding": {
@@ -4029,6 +4489,13 @@
               "null"
             ]
           },
+          "lanes": {
+            "description": "Automation lanes (RFC 0010).",
+            "items": {
+              "$ref": "#/$defs/Lane"
+            },
+            "type": "array"
+          },
           "length": {
             "default": 384,
             "description": "Ticks (where it loops).",
@@ -4072,10 +4539,13 @@
         "description": "An audio effect in a project file.",
         "properties": {
           "channel": {
-            "description": "Whose insert chain: a channel number, or 0 for the master.",
+            "description": "Whose insert chain: a channel number, or 0 for the master; absent\nfor a modulator.",
             "format": "uint32",
             "minimum": 0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -4090,8 +4560,7 @@
         "required": [
           "id",
           "type",
-          "name",
-          "channel"
+          "name"
         ],
         "type": "object"
       },
@@ -4126,6 +4595,13 @@
             },
             "type": "array"
           },
+          "mod_routes": {
+            "description": "Modulation routes (RFC 0010).",
+            "items": {
+              "$ref": "#/$defs/ModRoute"
+            },
+            "type": "array"
+          },
           "params": {
             "additionalProperties": {
               "format": "double",
@@ -4141,6 +4617,19 @@
               "type": "integer"
             },
             "description": "Source (`drums`, `drums.kick`) -> channel number.",
+            "type": "object"
+          },
+          "samples": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "patternProperties": {
+                "^\\d+$": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "description": "Samplers' samples by instrument id and pad: a path inside the\nbundle (`samples/...`) once saved, else where it is on the engine\nhost.",
             "type": "object"
           },
           "seats": {
@@ -4536,6 +5025,97 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "SamplerGetParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "description": "Default: the first sampler.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SamplerLoadParams": {
+        "description": "Load a WAV file on the engine host into a pad.",
+        "properties": {
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pad": {
+            "description": "1..16.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Relative paths are under the data dir; absolute paths as given.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pad",
+          "path"
+        ],
+        "type": "object"
+      },
+      "SamplerPadParams": {
+        "properties": {
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pad": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pad"
+        ],
+        "type": "object"
+      },
+      "SamplerUploadParams": {
+        "description": "Send a WAV file to load into a pad (from a client on another machine).",
+        "properties": {
+          "data": {
+            "description": "The WAV file, base64 (at most `MAX_UPLOAD_BYTES` decoded).",
+            "type": "string"
+          },
+          "instrument": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The file's name.",
+            "type": "string"
+          },
+          "pad": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pad",
+          "name",
+          "data"
         ],
         "type": "object"
       },
@@ -5529,6 +6109,108 @@
         "type": "object"
       },
       {
+        "description": "A sampler's loaded pads.",
+        "properties": {
+          "method": {
+            "const": "sampler.get",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplerGetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Load a WAV on the engine host into a sampler's pad.",
+        "properties": {
+          "method": {
+            "const": "sampler.load",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplerLoadParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Send a WAV to load into a pad; journaled as the `sampler.load` of the\nfile it was stored as.",
+        "properties": {
+          "method": {
+            "const": "sampler.upload",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplerUploadParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Empty a pad.",
+        "properties": {
+          "method": {
+            "const": "sampler.clear",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplerPadParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Route a modulator output to a continuous parameter, with a depth\n(or change an existing route's depth).",
+        "properties": {
+          "method": {
+            "const": "mod.route",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ModRouteParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove a modulation route (its target goes back to its value).",
+        "properties": {
+          "method": {
+            "const": "mod.unroute",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/ModUnrouteParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
         "description": "Add a mixer channel (lowest free number).",
         "properties": {
           "method": {
@@ -6063,6 +6745,40 @@
           },
           "params": {
             "$ref": "#/$defs/ClipRefParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Set a clip's automation lane for a parameter (RFC 0010): while the\nclip plays, the parameter follows it.",
+        "properties": {
+          "method": {
+            "const": "clip.lane.set",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/LaneSetParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Remove a clip's automation lane.",
+        "properties": {
+          "method": {
+            "const": "clip.lane.remove",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/LaneRemoveParams"
           }
         },
         "required": [
@@ -6995,6 +7711,14 @@
           "instrument": {
             "type": "string"
           },
+          "lanes": {
+            "default": [],
+            "description": "Automation lanes (RFC 0010), at most `MAX_LANES`.",
+            "items": {
+              "$ref": "#/$defs/Lane"
+            },
+            "type": "array"
+          },
           "length": {
             "description": "Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.",
             "format": "uint32",
@@ -7212,10 +7936,13 @@
         "description": "A device that is not an instrument, and where it sits.",
         "properties": {
           "channel": {
-            "description": "Audio effects: the channel whose insert chain holds it (0 = the\nmaster).",
+            "description": "Audio effects: the channel whose insert chain holds it (0 = the\nmaster); modulators: none.",
             "format": "uint32",
             "minimum": 0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -7224,7 +7951,7 @@
             "type": "string"
           },
           "position": {
-            "description": "Its place in that chain, from 0.",
+            "description": "Its place in that chain (or, a modulator, in the modulator rack),\nfrom 0.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
@@ -7237,7 +7964,6 @@
           "id",
           "type",
           "name",
-          "channel",
           "position"
         ],
         "type": "object"
@@ -7274,6 +8000,11 @@
             "const": "reverb",
             "description": "A small Freeverb-style room.",
             "type": "string"
+          },
+          {
+            "const": "lfo",
+            "description": "Four LFOs, free or synced to the transport (a modulator).",
+            "type": "string"
           }
         ]
       },
@@ -7301,6 +8032,13 @@
             },
             "type": "array"
           },
+          "mod_routes": {
+            "description": "Modulation routes, in the order they were made.",
+            "items": {
+              "$ref": "#/$defs/ModRoute"
+            },
+            "type": "array"
+          },
           "routes": {
             "additionalProperties": {
               "format": "uint32",
@@ -7315,7 +8053,8 @@
           "instruments",
           "channels",
           "routes",
-          "devices"
+          "devices",
+          "mod_routes"
         ],
         "type": "object"
       },
@@ -7393,6 +8132,11 @@
             "const": "tb303",
             "description": "TB-303-style bass synth: one monophonic voice, a note pattern.",
             "type": "string"
+          },
+          {
+            "const": "sampler",
+            "description": "16 pads, each a sample on its own note (RFC 0010).",
+            "type": "string"
           }
         ]
       },
@@ -7436,6 +8180,46 @@
         ],
         "type": "object"
       },
+      "Lane": {
+        "description": "An automation lane (RFC 0010): a parameter's value over the clip, linear\nbetween points (before the first and after the last, the nearest\npoint's value).",
+        "properties": {
+          "path": {
+            "description": "A parameter path.",
+            "type": "string"
+          },
+          "points": {
+            "description": "Sorted by tick, unique ticks.",
+            "items": {
+              "$ref": "#/$defs/LanePoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "points"
+        ],
+        "type": "object"
+      },
+      "LanePoint": {
+        "properties": {
+          "tick": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "In the parameter's own units.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "value"
+        ],
+        "type": "object"
+      },
       "MidiConnection": {
         "properties": {
           "device": {
@@ -7475,6 +8259,30 @@
           "input",
           "device",
           "profile"
+        ],
+        "type": "object"
+      },
+      "ModRoute": {
+        "description": "A modulation route (RFC 0010): a modulator output moving a continuous\nparameter by `depth` of its range around the value it is set to.",
+        "properties": {
+          "depth": {
+            "description": "-1..1.",
+            "format": "float",
+            "type": "number"
+          },
+          "source": {
+            "description": "A modulator output, `<id>.<k>` (`lfo.1`).",
+            "type": "string"
+          },
+          "target": {
+            "description": "A parameter path.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "depth"
         ],
         "type": "object"
       },
@@ -7922,6 +8730,55 @@
         ],
         "type": "object"
       },
+      "SamplerInfo": {
+        "description": "A sampler's loaded pads.",
+        "properties": {
+          "instrument": {
+            "type": "string"
+          },
+          "pads": {
+            "items": {
+              "$ref": "#/$defs/SamplerPad"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "instrument",
+          "pads"
+        ],
+        "type": "object"
+      },
+      "SamplerPad": {
+        "description": "A loaded pad of a sampler.",
+        "properties": {
+          "name": {
+            "description": "The file's name, without its folders.",
+            "type": "string"
+          },
+          "pad": {
+            "description": "1..16.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Where it is on the engine host.",
+            "type": "string"
+          },
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pad",
+          "name",
+          "path",
+          "seconds"
+        ],
+        "type": "object"
+      },
       "Seat": {
         "properties": {
           "config": {
@@ -8188,6 +9045,15 @@
         },
         "type": "array"
       },
+      "moving": {
+        "additionalProperties": {
+          "format": "double",
+          "type": "number"
+        },
+        "default": {},
+        "description": "Parameters modulation or automation moves, and where they are now\n(`params` keeps the values set by hand). RFC 0010.",
+        "type": "object"
+      },
       "params": {
         "additionalProperties": {
           "format": "double",
@@ -8207,6 +9073,13 @@
       },
       "record": {
         "$ref": "#/$defs/RecordState"
+      },
+      "samplers": {
+        "description": "Each sampler's loaded pads (RFC 0010).",
+        "items": {
+          "$ref": "#/$defs/SamplerInfo"
+        },
+        "type": "array"
       },
       "seats": {
         "$ref": "#/$defs/SeatsState"
@@ -8240,7 +9113,8 @@
       "midi",
       "seats",
       "project",
-      "audio"
+      "audio",
+      "samplers"
     ],
     "title": "Snapshot",
     "type": "object"

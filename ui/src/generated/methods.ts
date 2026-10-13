@@ -41,6 +41,8 @@ import type { InstrumentTypesResult } from "./InstrumentTypesResult";
 import type { JournalGetParams } from "./JournalGetParams";
 import type { JournalGetResult } from "./JournalGetResult";
 import type { KnobParams } from "./KnobParams";
+import type { LaneRemoveParams } from "./LaneRemoveParams";
+import type { LaneSetParams } from "./LaneSetParams";
 import type { LocateParams } from "./LocateParams";
 import type { MidiConnectParams } from "./MidiConnectParams";
 import type { MidiDisconnectParams } from "./MidiDisconnectParams";
@@ -49,6 +51,9 @@ import type { MidiModelsResult } from "./MidiModelsResult";
 import type { MidiPortsResult } from "./MidiPortsResult";
 import type { MidiRenameParams } from "./MidiRenameParams";
 import type { MidiSetSeatParams } from "./MidiSetSeatParams";
+import type { ModRouteParams } from "./ModRouteParams";
+import type { ModRoutesResult } from "./ModRoutesResult";
+import type { ModUnrouteParams } from "./ModUnrouteParams";
 import type { NoteParams } from "./NoteParams";
 import type { NoteSetParams } from "./NoteSetParams";
 import type { NotesGetParams } from "./NotesGetParams";
@@ -75,6 +80,11 @@ import type { Recording } from "./Recording";
 import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
 import type { RouteSetParams } from "./RouteSetParams";
+import type { SamplerGetParams } from "./SamplerGetParams";
+import type { SamplerInfo } from "./SamplerInfo";
+import type { SamplerLoadParams } from "./SamplerLoadParams";
+import type { SamplerPadParams } from "./SamplerPadParams";
+import type { SamplerUploadParams } from "./SamplerUploadParams";
 import type { Seat } from "./Seat";
 import type { SeatApplyLayoutParams } from "./SeatApplyLayoutParams";
 import type { SeatBindParams } from "./SeatBindParams";
@@ -128,6 +138,12 @@ export interface Methods {
   "device.add": { params: DeviceAddParams; result: DeviceInfo };
   "device.remove": { params: DeviceRefParams; result: Graph };
   "device.move": { params: DeviceMoveParams; result: Graph };
+  "sampler.get": { params: SamplerGetParams; result: SamplerInfo };
+  "sampler.load": { params: SamplerLoadParams; result: SamplerInfo };
+  "sampler.upload": { params: SamplerUploadParams; result: SamplerInfo };
+  "sampler.clear": { params: SamplerPadParams; result: SamplerInfo };
+  "mod.route": { params: ModRouteParams; result: ModRoutesResult };
+  "mod.unroute": { params: ModUnrouteParams; result: ModRoutesResult };
   "channel.add": { params: ChannelAddParams; result: ChannelInfo };
   "channel.remove": { params: ChannelRemoveParams; result: Graph };
   "channel.rename": { params: ChannelRenameParams; result: ChannelInfo };
@@ -160,6 +176,8 @@ export interface Methods {
   "clip.duplicate": { params: ClipRefParams; result: Clip };
   "clip.rename": { params: ClipRenameParams; result: Clip };
   "clip.delete": { params: ClipRefParams; result: TrackInfo };
+  "clip.lane.set": { params: LaneSetParams; result: Clip };
+  "clip.lane.remove": { params: LaneRemoveParams; result: Clip };
   "clip.select": { params: ClipRefParams; result: TrackInfo };
   "clip.launch": { params: ClipLaunchParams; result: TrackInfo };
   "batch": { params: BatchParams; result: BatchResult };
@@ -230,6 +248,12 @@ export const METHODS: MethodName[] = [
   "device.add",
   "device.remove",
   "device.move",
+  "sampler.get",
+  "sampler.load",
+  "sampler.upload",
+  "sampler.clear",
+  "mod.route",
+  "mod.unroute",
   "channel.add",
   "channel.remove",
   "channel.rename",
@@ -262,6 +286,8 @@ export const METHODS: MethodName[] = [
   "clip.duplicate",
   "clip.rename",
   "clip.delete",
+  "clip.lane.set",
+  "clip.lane.remove",
   "clip.select",
   "clip.launch",
   "batch",

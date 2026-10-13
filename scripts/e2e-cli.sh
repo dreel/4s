@@ -938,14 +938,137 @@ check "add a return bus" "ch 2 Verb" s channel add --return --name Verb
 check "every track channel gets a send to it" "mixer.1.send.2" s params mixer.1.send
 s device add reverb --on 2 >/dev/null
 s set reverb.mix 1 >/dev/null
-check "no send, no tail" "tail 0.00" python3 "$TMP/tail.py"
+check "no send, no tail" "no tail" bash -c "T=\$(python3 '$TMP/tail.py' | cut -d' ' -f2); python3 -c \"print('no tail' if \$T < 0.002 else \$T)\""
 check "a send feeds the return" "<- return <- sends from 1 50%  [reverb]" bash -c "$BIN/4s send 1 2 50% >/dev/null && $BIN/4s mixer"
-check "...and the reverb adds a tail" "tail 0.01" python3 "$TMP/tail.py"
-check "post-fader: a muted track sends nothing" "tail 0.00" bash -c "$BIN/4s set mixer.1.mute on >/dev/null && python3 '$TMP/tail.py'"
+check "...and the reverb adds a tail" "a tail" bash -c "T=\$(python3 '$TMP/tail.py' | cut -d' ' -f2); python3 -c \"print('a tail' if \$T > 0.004 else \$T)\""
+check "post-fader: a muted track sends nothing" "no tail" bash -c "$BIN/4s set mixer.1.mute on >/dev/null; T=\$(python3 '$TMP/tail.py' | cut -d' ' -f2); python3 -c \"print('no tail' if \$T < 0.002 else \$T)\""
+check "soloing the return keeps the track that feeds it" "a tail" bash -c "$BIN/4s set mixer.1.mute off >/dev/null; $BIN/4s set mixer.2.solo on >/dev/null; T=\$(python3 '$TMP/tail.py' | cut -d' ' -f2); $BIN/4s set mixer.2.solo off >/dev/null; python3 -c \"print('a tail' if \$T > 0.004 else \$T)\""
 s set mixer.1.mute off >/dev/null
 check "instruments cannot feed a return" "is a return bus" s route drums 2
 check "returns save and load back" "<- return <- sends from 1 50%" bash -c "$BIN/4s project save buses >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load buses >/dev/null && $BIN/4s mixer"
+check "an undo does not turn a channel number reused as a return back into a track" "skipped: channel:3" bash -c "$BIN/4s channel add --name Three >/dev/null; $BIN/4s --user alice channel rm 3 >/dev/null; $BIN/4s channel add --return --name R3 >/dev/null; $BIN/4s --user alice undo"
+check "...which stays a return" "ch 3  R3           vol 100%  pan C          <- return" s mixer
+s channel rm 3 >/dev/null
 check "removing a return removes its sends, and undo brings them back" "mixer.1.send.2 = 0.5" bash -c "$BIN/4s channel rm 2 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s get mixer.1.send.2"
+# Modulators (RFC 0010): an LFO moving a filter's cutoff around its value.
+s project new >/dev/null
+s pattern set closed_hat "xxxxxxxxxxxxxxxx" >/dev/null
+s device add filter --on 1 >/dev/null
+s set filter.cutoff 0.5 >/dev/null
+RMS() { "$BIN/4s" --json render | python3 -c "import json,sys;print(json.load(sys.stdin)['rms'])"; }
+export -f RMS
+check "add an LFO bank to the rack" "lfo        lfo     LFO          in the modulator rack" s device add lfo
+check "its parameters are per LFO" "lfo.1.rate" s params lfo.1
+check "route LFO 1 to the cutoff" "lfo.1 -> filter.cutoff depth +40%" s mod route lfo.1 filter.cutoff 40%
+check "only continuous parameters take modulation" "not continuous" s mod route lfo.1 filter.mode 50%
+check "unknown outputs are refused" "no modulator output 'lfo.9'" s mod route lfo.9 filter.cutoff 50%
+check "the LFO opens the filter on the hats (renders differ with and without it)" "modulated" bash -c "A=\$(RMS); $BIN/4s mod unroute lfo.1 filter.cutoff >/dev/null; B=\$(RMS); python3 -c \"print('modulated' if abs(\$A - \$B) > 0.3 * \$B else (\$A, \$B))\""
+check "param get shows the value set by hand, not the modulated one" "filter.cutoff = 0.5" bash -c "$BIN/4s mod route lfo.1 filter.cutoff -40% >/dev/null && $BIN/4s get filter.cutoff"
+check "removing the LFO drops its routes" "(no modulation routes)" bash -c "$BIN/4s device rm lfo >/dev/null && $BIN/4s mod"
+check "...and undo brings them back" "lfo.1 -> filter.cutoff depth -40%" bash -c "$BIN/4s undo >/dev/null && $BIN/4s mod"
+check "routes save and load back" "lfo.1 -> filter.cutoff depth -40%" bash -c "$BIN/4s project save mods >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load mods >/dev/null && $BIN/4s mod"
+check "removing the target drops the route" "(no modulation routes)" bash -c "$BIN/4s device rm filter >/dev/null && $BIN/4s mod"
+check "a session with modulation replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/mods.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/mods.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+# The sampler (RFC 0010): a WAV on pad 1, played from a clip, saved inside
+# the bundle.
+s project new >/dev/null
+python3 - "$TMP/tone.wav" <<'PY'
+import math, struct, sys
+sr = 44100; n = int(sr * 0.3)
+data = b''.join(struct.pack('<h', int(20000 * math.sin(2 * math.pi * 220 * i / sr) * (1 - i / n))) for i in range(n))
+fmt = struct.pack('<IHHIIHH', 16, 1, 1, sr, sr * 2, 2, 16)
+open(sys.argv[1], 'wb').write(b'RIFF' + struct.pack('<I', 36 + len(data)) + b'WAVEfmt ' + fmt + b'data' + struct.pack('<I', len(data)) + data)
+PY
+check "add a sampler" "sampler    sampler" s instrument add sampler
+s clip launch sampler >/dev/null
+check "a file here is sent to the engine and loaded into a pad" "sampler pad 1  tone.wav                 0.30s" s sampler load 1 "$TMP/tone.wav"
+check "...journaled as the load of the stored file" "sampler.load" s journal --limit 1
+check "pads are rows of the step view" "P1   x--- x---" bash -c "$BIN/4s step sampler 1 pad1 >/dev/null; $BIN/4s step sampler 5 pad1 | grep P1"
+check "the pad plays from the clip" "triggers: 2 (sampler 2)  detected onsets: 2" bash -c "$BIN/4s render | grep triggers"
+check "a pad with no sample stays silent" "triggers: 2 (sampler 2)" bash -c "$BIN/4s step sampler 9 pad2 >/dev/null; $BIN/4s render | grep triggers"
+check "tune moves its pitch" "sampler.1.tune = 12" s set sampler.1.tune 12
+check "non-WAV files are refused, and nothing is stored" "nothing stored" bash -c "$BIN/4s sampler load 2 Cargo.toml 2>&1 | grep -q sampler.upload && test ! -e '$FOURS_DATA_DIR/samples/Cargo.toml' && echo nothing stored"
+check "a path on the engine host loads directly" "sampler pad 3  host.wav" bash -c "mkdir -p '$FOURS_DATA_DIR/samples' && cp '$TMP/tone.wav' '$FOURS_DATA_DIR/samples/host.wav' && $BIN/4s sampler load 3 samples/host.wav | grep 'pad 3'"
+check "a choke group cuts the pad it shares (a silent pad 2 shortens pad 1)" "choked" bash -c "$BIN/4s set sampler.1.tune 0 >/dev/null; $BIN/4s step sampler 5 pad1 --off >/dev/null; $BIN/4s sampler load 2 '$FOURS_DATA_DIR/samples/host.wav' >/dev/null; $BIN/4s set sampler.2.gain 0 >/dev/null; $BIN/4s step sampler 2 pad2 >/dev/null; A=\$($BIN/4s --json render | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"rms\"])'); $BIN/4s set sampler.1.choke 1 >/dev/null; $BIN/4s set sampler.2.choke 1 >/dev/null; B=\$($BIN/4s --json render | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"rms\"])'); $BIN/4s sampler clear 2 >/dev/null; $BIN/4s sampler clear 3 >/dev/null; $BIN/4s step sampler 2 pad2 --off >/dev/null; python3 -c \"print('choked' if \$B < 0.93 * \$A else (\$A, \$B))\""
+check "saving copies the sample into the bundle" "samples/sampler.1.tone.wav" bash -c "$BIN/4s project save sampled >/dev/null && ls '$FOURS_DATA_DIR/projects/sampled.4s/samples' && grep -o 'samples/sampler.1.tone.wav' '$FOURS_DATA_DIR/projects/sampled.4s/project.json'"
+check "after a save the project needs only the bundle's copy" "sampled.4s" bash -c "rm '$FOURS_DATA_DIR/samples/tone.wav' && $BIN/4s project save"
+check "...so it loads without the original, under its own name" "sampler pad 1  tone.wav" bash -c "rm '$TMP/tone.wav' && $BIN/4s project new >/dev/null && $BIN/4s project load sampled >/dev/null && $BIN/4s sampler"
+check "saving again keeps one copy under the same name" "1 samples/sampler.1.tone.wav" bash -c "$BIN/4s project save >/dev/null && echo \$(ls '$FOURS_DATA_DIR/projects/sampled.4s/samples' | wc -l) \$(grep -o 'samples/sampler.1.tone.wav' '$FOURS_DATA_DIR/projects/sampled.4s/project.json')"
+check "saving under a new name does not stack the name" "1 samples/sampler.1.tone.wav" bash -c "$BIN/4s project save copied >/dev/null && echo \$(ls '$FOURS_DATA_DIR/projects/copied.4s/samples' | wc -l) \$(grep -o 'samples/sampler.1.tone.wav' '$FOURS_DATA_DIR/projects/copied.4s/project.json')"
+check "clearing a pad, and undo" "sampler pad 1  tone.wav" bash -c "$BIN/4s sampler clear 1 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler"
+check "removing the sampler and undo bring its samples back" "sampler pad 1" bash -c "$BIN/4s instrument rm sampler >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler"
+check "a session with samples replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/smp.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/smp.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+# Automation lanes (RFC 0010): a clip's lane moves a parameter while the
+# clip plays; the value set by hand comes back when nothing plays it.
+s project new >/dev/null
+s pattern set kick "x-x-x-x-x-x-x-x-" >/dev/null
+cat > "$TMP/lr.py" <<PY
+import json, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render']))
+l, rr = r['left']['rms'], r['right']['rms']
+# Hard left from the first hit (a lane's first value jumps there at play).
+print('left' if r['right']['peak'] < 0.001 else 'even' if abs(rr - l) < 0.01 else (l, rr, r['right']['peak']))
+PY
+check "a centered kick renders even" "even" python3 "$TMP/lr.py"
+check "a lane on channel 1's pan" "lane mixer.1.pan: 0:-1 192:-1" s clip lane drums mixer.1.pan "0:-1 192:-1"
+check "...pans the render left" "left" python3 "$TMP/lr.py"
+check "...and leaves the value set by hand" "pan C" bash -c "$BIN/4s mixer | grep 'ch 1'"
+check "while playing, get shows where the lane has it" "mixer.1.pan = 0  (now -1: modulated or automated)" bash -c "$BIN/4s play >/dev/null; sleep 0.3; $BIN/4s get mixer.1.pan; $BIN/4s stop >/dev/null"
+check "...and state.get lists it under moving, until it stops" "{}" bash -c "sleep 0.3; $BIN/4s call state.get | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"moving\"])'"
+check "the transport takes no automation" "the transport's" s clip lane drums transport.tempo "0:100"
+check "nor does the song's loop (the daemon counts time by it)" "the transport's" s clip lane drums song.loop_end "0:2"
+check "nor does modulation" "the transport's" bash -c "$BIN/4s device add lfo >/dev/null && $BIN/4s mod route lfo.1 song.loop_end 40%; $BIN/4s device rm lfo >/dev/null"
+check "nor do toggles" "is a toggle" s clip lane drums mixer.1.mute "0:1"
+check "values are clamped to the parameter's range" "lane mixer.1.volume: 0:1" s clip lane drums mixer.1.volume "0:9"
+check "a duplicate copies the lanes" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s clip dup drums | grep pan"
+check "undoing a duplicate takes the copy and its lanes, and leaves the original's" "drums: clips *1; kept" bash -c "$BIN/4s undo >/dev/null && echo \$($BIN/4s clip list drums | grep -o 'drums: clips [^ ]*') \$($BIN/4s clip show drums | grep -q 'lane mixer.1.pan' && echo kept)"
+check "removing a lane is one undo step" "undid: clip.lane.remove" bash -c "$BIN/4s clip lane drums mixer.1.volume --rm >/dev/null && $BIN/4s undo"
+check "lanes save with the project and load back" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s project save lanes >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load lanes >/dev/null && $BIN/4s clip show drums"
+check "a lane on an unknown parameter is dropped on load (a warning in the log), and the rest loads" "1
+ignored the lane for 'mixer.9.pan'" bash -c "sed -i.bak 's/mixer.1.pan/mixer.9.pan/' '$FOURS_DATA_DIR/projects/lanes.4s/project.json' && $BIN/4s project load lanes >/dev/null && $BIN/4s clip show drums | grep -c 'lane ' && $BIN/4s daemon logs | grep -o \"ignored the lane for 'mixer.9.pan'\" | tail -1; mv '$FOURS_DATA_DIR/projects/lanes.4s/project.json.bak' '$FOURS_DATA_DIR/projects/lanes.4s/project.json'"
+s project load lanes >/dev/null
+check "a whole-number parameter's lane points are rounded" "lane filter.mode: 0:2" bash -c "$BIN/4s device add filter --on 1 >/dev/null && $BIN/4s clip lane drums filter.mode '0:1.6' | grep filter.mode"
+s clip lane drums filter.mode --rm >/dev/null
+check "a lane on an effect goes with the effect" "no lane" bash -c "$BIN/4s clip lane drums filter.cutoff '0:0.1' >/dev/null && $BIN/4s device rm filter >/dev/null && ($BIN/4s clip show drums | grep -q filter.cutoff || echo no lane)"
+check "...and undo brings both back" "lane filter.cutoff: 0:0.1" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show drums"
+check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null && python3 '$TMP/lr.py'"
+# Knob moves while recording become a lane in the clip under the playhead
+# (on the 1/16 grid), written with the pass: one undo step.
+cat > "$TMP/autorec.sh" <<SH
+$BIN/4s tempo 240 >/dev/null
+$BIN/4s clip length drums 64 >/dev/null
+$BIN/4s record --count-in 0 >/dev/null
+sleep 0.2
+for v in -1 -0.5 0 0.5 1; do $BIN/4s set mixer.1.pan \$v >/dev/null; sleep 0.15; done
+$BIN/4s stop >/dev/null
+SH
+check "knob moves while recording become a lane, rising with the knob" "rising" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null 2>&1; bash '$TMP/autorec.sh'; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; v=[p[\"value\"] for p in l]; t=[p[\"tick\"] for p in l]; print(\"rising\" if len(v)>=3 and v==sorted(v) and all(x%24==0 for x in t) else l)'"
+check "...written with the pass, one undo step" "undid: clip.lane.set" s undo
+check "...which removes the lane" "no lane" bash -c "$BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || echo no lane"
+check "a pass across the loop point keeps the earlier pass's points" "kept" bash -c "$BIN/4s clip length drums 16 >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.15; for i in 1 2 3 4 5 6 7 8 9; do $BIN/4s set mixer.1.pan 0.\$i >/dev/null; sleep 0.07; done; sleep 0.3; for i in 1 2 3; do $BIN/4s set mixer.1.pan -0.5 >/dev/null; sleep 0.07; done; $BIN/4s stop >/dev/null; $BIN/4s clip length drums 32 >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; print(\"kept\" if any(p[\"tick\"]>=192 and p[\"value\"]>0 for p in l) and any(p[\"value\"]==-0.5 for p in l) else l)'"
+s clip lane drums mixer.1.pan --rm >/dev/null
+s set mixer.1.pan 0 >/dev/null
+check "another player's moves meanwhile are not recorded, only the recorder's" "lane mixer.1.volume" bash -c "$BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s --user bob set mixer.1.pan 0.7 >/dev/null; $BIN/4s set mixer.1.volume 0.5 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || $BIN/4s clip show drums | grep lane"
+s clip lane drums mixer.1.volume --rm >/dev/null
+s set mixer.1.volume 1 >/dev/null
+check "a mapped CC's moves are recorded too" "lane mixer.1.pan: " bash -c "$BIN/4s cc map keys 21 mixer.1.pan >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s midi send keys B0 15 40 >/dev/null; sleep 0.15; $BIN/4s midi send keys B0 15 7F >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s cc unmap keys 21 >/dev/null; $BIN/4s clip show drums | grep 'lane mixer.1.pan'"
+s clip lane drums mixer.1.pan --rm >/dev/null
+s set mixer.1.pan 0 >/dev/null
+check "a clip with room for one more lane takes one, and the pass keeps its notes" "8 lanes, 1 notes" bash -c "$BIN/4s clip lane drums filter.cutoff --rm >/dev/null 2>&1; for k in kick snare clap closed_hat open_hat low_tom high_tom; do $BIN/4s clip lane drums drums.\$k.level 0:0.5 >/dev/null; done; $BIN/4s clip clear drums >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s set mixer.1.volume 0.5 >/dev/null; $BIN/4s set mixer.1.pan 0.5 >/dev/null; $BIN/4s key C2 --for 0.05 >/dev/null; sleep 0.3; $BIN/4s stop >/dev/null; echo \$($BIN/4s clip show drums | grep -c lane) lanes, \$($BIN/4s clip show drums | head -1 | grep -o '[0-9]* notes')"
+for k in kick snare clap closed_hat open_hat low_tom high_tom; do s clip lane drums drums.$k.level --rm >/dev/null; done
+for p in mixer.1.volume mixer.1.pan; do $BIN/4s clip lane drums $p --rm >/dev/null 2>&1 || true; done
+s set mixer.1.volume 1 >/dev/null
+s set mixer.1.pan 0 >/dev/null
+s clip length drums 16 >/dev/null
+check "moves in two placements of a clip are separate runs: the points between them stay" "separate runs" bash -c "$BIN/4s song back >/dev/null; $BIN/4s song place drums --at 1 --bars 1 >/dev/null; $BIN/4s song place drums --at 2 --bars 1 >/dev/null; $BIN/4s clip lane drums mixer.1.pan '0:0 144:0.9 336:0' >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.12; $BIN/4s set mixer.1.pan -0.5 >/dev/null; sleep 1.45; $BIN/4s set mixer.1.pan -0.7 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l={p[\"tick\"]: p[\"value\"] for p in [x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]}; v=list(l.values()); a=[t for t,x in l.items() if x==-0.5]; b=[t for t,x in l.items() if x==-0.7]; print(\"separate runs\" if l.get(144)==0.9 and a and b and a[0]<144<b[0] else l)'"
+s song rm drums 2 >/dev/null
+s song rm drums 1 >/dev/null
+s clip launch drums 1 --now >/dev/null
+s clip lane drums mixer.1.pan --rm >/dev/null
+s set mixer.1.pan 0 >/dev/null
+check "a removed device's parameters leave moving at once" "moving then gone" bash -c "$BIN/4s device add filter --on 1 >/dev/null; $BIN/4s device add lfo --id lfo9 >/dev/null; $BIN/4s mod route lfo9.1 filter.cutoff 50% >/dev/null; sleep 0.3; M=\$($BIN/4s call state.get | python3 -c 'import json,sys; print(int(\"filter.cutoff\" in json.load(sys.stdin)[\"moving\"]))'); $BIN/4s device rm filter >/dev/null; G=\$($BIN/4s call state.get | python3 -c 'import json,sys; print(\"gone\" if \"filter.cutoff\" not in json.load(sys.stdin)[\"moving\"] else \"there\")'); $BIN/4s device rm lfo9 >/dev/null; [ \$M -gt 0 ] && echo moving then \$G || echo never moving"
+s tempo 120 >/dev/null
+check "a session with lanes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/lanes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/lanes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status

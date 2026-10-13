@@ -50,11 +50,18 @@ Explicit methods for things that are not a single parameter: transport
 devices (`device.*`, RFC 0010: the registry of every device type, and
 audio effects added to, moved in, and removed from insert chains; return
 buses are channels added with `kind: "return"`, fed by the
-`mixer.<n>.send.<m>` parameters), the
+`mixer.<n>.send.<m>` parameters; modulators sit in the rack and
+`mod.route` / `mod.unroute` connect their outputs to continuous
+parameters; `sampler.load` reads a WAV on the engine host into a pad,
+`sampler.upload` sends one from a client, journaled as the load of the
+stored file), the
 song (`song.*`: each track's arrangement, RFC 0008, and `song.back`
 from launched clips, RFC 0009), the
 instrument graph (`instrument.*`, `channel.*`,
-`route.set`), clips (`clip.*`: timed note events, RFC 0007; `clip.update`
+`route.set`), clips (`clip.*`: timed note events, RFC 0007; `clip.lane.set` /
+`clip.lane.remove`: automation lanes, RFC 0010, whose live values, and
+modulation's, are `moving` in the snapshot, the `moving` event, and
+`param.get`; `clip.update`
 removes and adds in one step, and is how recorded takes are journaled;
 `clip.quantize` takes `events` to quantize only those notes, as
 `4s clip quantize --notes` does;
@@ -85,6 +92,8 @@ Everything that is a value is a parameter with a stable path, e.g.
   integer / toggle) with range, default, unit.
 - `param.get {path}`
 - `param.set {path, value}` -- clamped to range; returns the applied value.
+  While the caller records a take, the move also goes into the playing
+  clip's automation lane (RFC 0010).
 
 Clients build their controls from the registry, so new parameters appear in
 the UI and CLI without client changes. See [engine.md](engine.md) for the
@@ -123,7 +132,10 @@ current parameter set.
   Everything else is shared. A bridge must therefore track holders per
   local client (see [topology.md](topology.md)).
 - High-rate events: `playhead` (per step), `trigger` (per hit), `meters`
-  (~30 Hz, suppressed while silent). JSON is fine at these rates.
+  (~30 Hz, suppressed while silent), `moving` (~30 Hz while modulation or
+  automation moves anything, which an LFO route does even while stopped;
+  once when it stops). JSON is fine at these
+  rates.
 
 ## Parity guarantees
 

@@ -62,8 +62,10 @@ Per block of up to 256 frames (blocks also split at step boundaries):
 4. Track channels send post-fader to **return** channels
    (`mixer.<n>.send.<m>`, ramped per block, through the return's balance);
    returns then run their chains and faders like any channel, after every
-   track (so a send never feeds itself). Another channel's solo does not
-   silence a return.
+   track (so a send never feeds itself). Track solos gate the tracks and
+   return solos the returns: soloing a track keeps the returns (its sends
+   reach them); soloing only returns plays just them, the tracks still
+   sending but their dry signal leaving the master.
 5. Channels sum into the master, which runs its own insert chain, then
    applies its fader and a soft clipper above 0.8.
 
@@ -92,6 +94,35 @@ smoothed).
 | `filter` | `mode` (0 low, 1 band, 2 high pass), `cutoff` (0..1, 20 Hz..20 kHz), `resonance` | 1.0 |
 | `delay` | `sync` (on), `division` (1/32, 1/16, 1/8t, 1/8, 1/8d (default), 1/4, 1/4d, 1/2, 1 bar), `time` (free: 1 ms..2 s), `feedback` (0..0.95), `pingpong`, `damping` (a low-pass in the feedback path) | 0.35 |
 | `reverb` | `size`, `damping`, `width` (Freeverb's eight combs and four all-passes per side) | 0.3 |
+
+## Modulators
+
+Modulators (`crates/engine/src/modulator.rs`, RFC 0010) sit in
+`MAX_MODULATORS` = 8 slots, built and dropped on the control side like
+effects. At the start of every rendered block each one advances, and every
+**modulation route** (`MAX_MOD_ROUTES` = 64, set by `SetModRoute`) moves its
+target to its **base** (the value last set on it with `SetParam`) plus the
+sum of its routes' `depth x range x output`, clamped to its range, through
+the same `set_param` path as any change. Clearing a route (or removing its
+modulator) puts the target back at its base.
+
+- `lfo`: four LFOs (`<id>.<k>.shape`: sine, triangle, saw up, saw down,
+  square, sample and hold; `sync` (on) with `division` (1/16 .. 4 bars,
+  default a bar) on a beat clock that runs from play (it does not follow
+  a loop's wrap or a locate while playing, so a period that does not divide
+  the loop drifts across passes), or a free `rate`
+  (0.01..20 Hz); `phase`). Outputs `<id>.1` .. `<id>.4`, -1..1.
+
+## Automation lanes
+
+Each clip-table entry holds up to `MAX_LANES` = 8 **automation lanes**
+(`SetLane`, `SetLanePoint`; RFC 0010): a target, its range, its value set
+by hand, and up to 64 (tick, value) points. Every block, after
+modulation, each track playing a clip writes that clip's lanes' values at
+its playhead (linear between points), so automation overrides modulation
+on the same target. A target no playing lane covers goes back to its
+value set by hand (`SetParam` keeps it current, as it does a route's
+base).
 
 ## Instruments
 
@@ -140,6 +171,24 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 12-108). String form (CLI, project files): space-separated tokens, `C2` note
 (C4 = MIDI 60), `!` accent, `~` slide, `-` rest, e.g.
 `"C2! - C2 D#2~ G2 - C2 -"`.
+
+### `sampler` (default id `sampler`, RFC 0010)
+
+- 16 pads; pad k plays on note `35 + k` (GM drum notes from 36, as its note
+  layout's rows), so the step view and the Block treat it as a drum
+  machine. Polyphonic (16 voices, the quietest stolen), linear
+  interpolation, one stereo output.
+- Per pad (`<id>.<k>.*`): `gain`, `pan`, `tune` (-24..24 st), `start` and
+  `end` (0..1 of the sample), `attack` (to 0.5 s), `release` (to 2 s),
+  `oneshot` (on: plays to the end; off: a held note releases), `choke`
+  (0 none, 1..8: a pad stops the others in its group). `gain`, `tune`,
+  `start`, `end`, `attack`, and `oneshot` are read when a note starts (a
+  knob or an LFO on them changes the next notes); `pan` and `release`
+  follow while a note plays.
+- Samples are decoded (8/16/24/32-bit integer or 32-bit float WAV, mono
+  doubled) and resampled to the engine rate on the control side, sent in
+  with `SetSample` as shared buffers, and handed back to be dropped when
+  replaced; at most 60 s each.
 
 ## Sequencer
 

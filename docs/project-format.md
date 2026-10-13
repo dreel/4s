@@ -27,9 +27,16 @@ It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010)
   `channels` (`{n, name}`, in display order; a return bus has `"kind":
   "return"`, RFC 0010), and `routes`
   (`source -> channel number`, e.g. `"drums": 1`, `"drums.kick": 3`).
-- Audio effects (RFC 0010) under `devices`, each chain in order: `{id,
-  type, name, channel}` (channel 0 is the master). Their parameters are in
-  `params` under their ids. Absent when there are none.
+- Audio effects and modulators (RFC 0010) under `devices`, each chain in
+  order: `{id, type, name, channel}` (channel 0 is the master; a modulator
+  has none). Their parameters are in `params` under their ids. Modulation
+  routes under `mod_routes`: `{source, target, depth}`. Both absent when
+  empty.
+- Samplers' samples under `samples`: instrument id -> pad -> path. Saving
+  copies each sample into the bundle's `samples/` folder and stores the
+  path inside the bundle (`samples/<id>.<pad>.<file>`), so a bundle
+  moves between machines whole; a missing file leaves its pad empty with
+  a warning.
 - Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,
   `"bass.cutoff": 0.3`).
 - Each instrument's track (RFC 0008, RFC 0009) under `tracks`: its clip
@@ -40,7 +47,9 @@ It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010)
   most readable form that says exactly the same thing: a `pattern` (drum
   step strings per voice, or a note string; only for clips of whole
   steps) or `events` (`tick:note:len:vel` tokens, see `format_events`),
-  with a `name` when it is not its id. An instrument with one empty
+  with a `name` when it is not its id, and its automation `lanes`
+  (`{path, points: [{tick, value}]}`, RFC 0010) when it has any. An
+  instrument with one empty
   one-bar clip, nothing placed, and nothing launched is left out.
 - The controller: whether the grid page follows the playhead.
 - Seats (RFC 0007), by name: `focus`, `knob_page`, note `bindings`, `cc`

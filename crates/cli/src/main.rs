@@ -66,7 +66,8 @@ enum Cmd {
     State,
     /// List parameters with current values.
     Params { prefix: Option<String> },
-    /// Read a parameter, e.g. `4s get drums.kick.level`.
+    /// Read a parameter, e.g. `4s get drums.kick.level`: the value set by
+    /// hand, and `(now <value> ...)` while modulation or automation moves it.
     Get { path: String },
     /// Set a parameter, e.g. `4s set mixer.1.volume 35%`. Accepts numbers,
     /// percentages, and on/off.
@@ -81,7 +82,11 @@ enum Cmd {
     Stop,
     /// Record live notes into an instrument's clip (RFC 0008): `4s record`
     /// starts (playing after the count-in if stopped), `4s record --off`
-    /// ends it, keeping what was played. Settings stay for the next take.
+    /// ends it, keeping what was played. Your knob moves meanwhile (`4s set`,
+    /// CCs, the UI) go into the clip's automation lanes (RFC 0010), replacing
+    /// a lane's points from your first move to your last in each pass (on
+    /// each side of the loop point when a pass crosses it).
+    /// Settings stay for the next take.
     Record {
         /// End the take.
         #[arg(long, conflicts_with = "show")]
@@ -191,6 +196,24 @@ enum Cmd {
     Instrument {
         #[command(subcommand)]
         cmd: InstrumentCmd,
+    },
+    /// Modulation routes (RFC 0010): `4s mod` lists them; `4s mod route
+    /// lfo.1 bass.cutoff 40%` moves `bass.cutoff` by 40% of its range with
+    /// LFO 1 of the `lfo` device (negative depths invert it).
+    Mod {
+        #[command(subcommand)]
+        cmd: Option<ModCmd>,
+    },
+    /// A sampler's pads (RFC 0010): `4s sampler` lists them; `4s sampler
+    /// load 1 kick.wav [--instrument pads]` loads a WAV into pad 1 (pads
+    /// 1-16 play notes 36-51). A file on this machine is sent to the engine; a path that
+    /// is not here is read on the engine host.
+    Sampler {
+        #[command(subcommand)]
+        cmd: Option<SamplerCmd>,
+        /// Which sampler (default: the first).
+        #[arg(long, global = true)]
+        instrument: Option<String>,
     },
     /// Set a track channel's send to a return bus, e.g. `4s send 1 3 40%`
     /// (shorthand for `set mixer.1.send.3`).
@@ -439,12 +462,13 @@ enum DeviceCmd {
     /// Effects and where they sit.
     List,
     /// Add an effect to a channel's insert chain (`--on master` for the
-    /// master's), at the end unless `--at` (1-based).
+    /// master's), at the end unless `--at` (1-based), or a modulator (`lfo`,
+    /// no `--on`) to the rack.
     Add {
-        /// filter, delay, or reverb.
+        /// filter, delay, reverb, or lfo.
         kind: String,
         #[arg(long)]
-        on: String,
+        on: Option<String>,
         #[arg(long)]
         at: Option<u32>,
         #[arg(long)]
@@ -463,6 +487,28 @@ enum DeviceCmd {
         #[arg(long)]
         at: Option<u32>,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SamplerCmd {
+    /// Load a WAV into a pad (1-16).
+    Load { pad: u32, file: String },
+    /// Empty a pad.
+    Clear { pad: u32 },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ModCmd {
+    /// Route a modulator output to a continuous parameter (or change the
+    /// depth of an existing route): depth -1..1 or a percentage.
+    Route {
+        source: String,
+        target: String,
+        #[arg(allow_hyphen_values = true)]
+        depth: String,
+    },
+    /// Remove a route.
+    Unroute { source: String, target: String },
 }
 
 /// A chain: a channel number, or `master` (0).
@@ -818,6 +864,21 @@ enum ClipCmd {
         #[arg(long, allow_hyphen_values = true)]
         notes: Option<String>,
     },
+    /// Automate a parameter over the clip while it plays (RFC 0010):
+    /// `tick:value` points, linear between them, e.g.
+    /// `4s clip lane drums mixer.1.pan "0:-1 192:1 384:-1"`. Continuous
+    /// and whole-number parameters; `--rm` removes the lane. When nothing
+    /// plays the clip, the parameter goes back to its value set by hand.
+    Lane {
+        instrument: String,
+        path: String,
+        /// `tick:value` tokens (values in the parameter's units, or a
+        /// percentage).
+        #[arg(allow_hyphen_values = true)]
+        points: Option<String>,
+        #[arg(long)]
+        rm: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1115,6 +1176,17 @@ fn step_index(n: u32) -> Result<u32> {
     Ok(n - 1)
 }
 
+/// `tick:value` tokens.
+fn lane_points(s: &str) -> Result<Vec<LanePoint>> {
+    s.split_whitespace()
+        .map(|t| {
+            let (tick, value) = t.split_once(':').ok_or_else(|| anyhow!("'{t}': points are tick:value"))?;
+            let tick = tick.parse().map_err(|_| anyhow!("'{t}': the tick is a whole number"))?;
+            Ok(LanePoint { tick, value: parse_value(value)? })
+        })
+        .collect()
+}
+
 /// Parse `0.35`, `35%`, `on`/`off`, `true`/`false`.
 fn parse_value(s: &str) -> Result<f64> {
     let t = s.trim().to_ascii_lowercase();
@@ -1216,7 +1288,17 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                     for x in clear {
                         expressions.insert(x.clone(), false);
                     }
-                    let note = note.as_ref().map(String::as_str).map(|n| Voice::parse(n).filter(|_| n.parse::<u8>().is_err()).map_or_else(|| note_arg(n), |v| Ok(v.gm_note()))).transpose()?;
+                    // `pad3`: a sampler's pad 3 (note 38); `kick`: a drum voice.
+                    let note_of = |n: &str| -> Result<u8> {
+                        if let Some(k) = n.strip_prefix("pad").and_then(|k| k.parse::<u8>().ok()).filter(|k| (1..=16).contains(k)) {
+                            return Ok(35 + k);
+                        }
+                        match Voice::parse(n).filter(|_| n.parse::<u8>().is_err()) {
+                            Some(v) => Ok(v.gm_note()),
+                            None => note_arg(n),
+                        }
+                    };
+                    let note = note.as_deref().map(note_of).transpose()?;
                     vec![Request::StepSet(StepSetParams {
                         instrument: instrument.clone(),
                         clip: *clip,
@@ -1282,6 +1364,41 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 keep_channels: *keep_channels,
             })],
         },
+        Cmd::Sampler { cmd, instrument } => match cmd {
+            None => vec![Request::SamplerGet(SamplerGetParams { instrument: instrument.clone() })],
+            Some(SamplerCmd::Load { pad, file }) => {
+                let local = std::path::Path::new(file);
+                if local.is_file() {
+                    let data = std::fs::read(local).map_err(|e| anyhow!("read {file}: {e}"))?;
+                    if data.len() > MAX_UPLOAD_BYTES {
+                        bail!("{file} is over {} MB", MAX_UPLOAD_BYTES / 1024 / 1024);
+                    }
+                    let name = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sample.wav".into());
+                    vec![Request::SamplerUpload(SamplerUploadParams {
+                        instrument: instrument.clone(),
+                        pad: *pad,
+                        name,
+                        data: base64_encode(&data),
+                    })]
+                } else {
+                    vec![Request::SamplerLoad(SamplerLoadParams { instrument: instrument.clone(), pad: *pad, path: file.clone() })]
+                }
+            }
+            Some(SamplerCmd::Clear { pad }) => {
+                vec![Request::SamplerClear(SamplerPadParams { instrument: instrument.clone(), pad: *pad })]
+            }
+        },
+        Cmd::Mod { cmd } => match cmd {
+            None => vec![Request::StateGet(e)],
+            Some(ModCmd::Route { source, target, depth }) => vec![Request::ModRoute(ModRouteParams {
+                source: source.clone(),
+                target: target.clone(),
+                depth: parse_value(depth)? as f32,
+            })],
+            Some(ModCmd::Unroute { source, target }) => {
+                vec![Request::ModUnroute(ModUnrouteParams { source: source.clone(), target: target.clone() })]
+            }
+        },
         Cmd::Send { from, to, level } => {
             vec![Request::ParamSet(ParamSetParams { path: format!("mixer.{from}.send.{to}"), value: parse_value(level)? })]
         }
@@ -1289,10 +1406,10 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             DeviceCmd::Types => vec![Request::DeviceTypes(e)],
             DeviceCmd::List => vec![Request::DeviceList(e)],
             DeviceCmd::Add { kind, on, at, id, name } => vec![Request::DeviceAdd(DeviceAddParams {
-                kind: DeviceType::parse(kind).ok_or_else(|| anyhow!("unknown device type '{kind}' (filter, delay, reverb)"))?,
+                kind: DeviceType::parse(kind).ok_or_else(|| anyhow!("unknown device type '{kind}' (filter, delay, reverb, lfo)"))?,
                 id: id.clone(),
                 name: name.clone(),
-                channel: chain_arg(on)?,
+                channel: on.as_deref().map(chain_arg).transpose()?,
                 position: at.map(|a| one_based(a, "position")).transpose()?,
             })],
             DeviceCmd::Rm { id } => vec![Request::DeviceRemove(DeviceRefParams { id: id.clone() })],
@@ -1482,6 +1599,14 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 strength: strength.as_deref().map(|v| parse_value(v).map(|v| v as f32)).transpose()?,
                 events: notes.as_deref().map(event_keys).transpose()?,
             }),
+            ClipCmd::Lane { instrument, path, points, rm } => match (rm, points) {
+                (true, None) => Request::ClipLaneRemove(LaneRemoveParams { instrument: Some(instrument), clip: *clip, path }),
+                (false, Some(p)) => {
+                    Request::ClipLaneSet(LaneSetParams { instrument: Some(instrument), clip: *clip, path, points: lane_points(&p)? })
+                }
+                (true, Some(_)) => bail!("--rm takes no points"),
+                (false, None) => bail!("a lane needs points (\"tick:value ...\") or --rm"),
+            },
         }],
         Cmd::Song { cmd } => match cmd.clone().unwrap_or(SongCmd::Show) {
             SongCmd::Show => vec![Request::StateGet(e.clone()), Request::SongGet(e)],
@@ -1795,18 +1920,30 @@ fn print_mixer(s: &Snapshot) {
     println!("master        vol {:>3.0}%{}", p("mixer.master.volume") * 100.0, inserts(&s.graph.devices, MASTER));
 }
 
+fn print_routes(routes: &[ModRoute]) {
+    if routes.is_empty() {
+        println!("(no modulation routes)");
+    }
+    for r in routes {
+        println!("{} -> {} depth {:+.0}%", r.source, r.target, r.depth * 100.0);
+    }
+}
+
 /// Where a device sits, by the channel's number or `master`.
 fn chain_name(n: u32) -> String {
     if n == MASTER { "master".into() } else { format!("ch {n}") }
 }
 
 fn print_device(d: &DeviceInfo) {
-    println!("{:<10} {:<7} {:<12} on {} at {}", d.id, d.kind.id(), d.name, chain_name(d.channel), d.position + 1);
+    match d.channel {
+        Some(n) => println!("{:<10} {:<7} {:<12} on {} at {}", d.id, d.kind.id(), d.name, chain_name(n), d.position + 1),
+        None => println!("{:<10} {:<7} {:<12} in the modulator rack", d.id, d.kind.id(), d.name),
+    }
 }
 
 /// A chain's inserts, ` [filter, delay]`, or nothing.
 fn inserts(devices: &[DeviceInfo], n: u32) -> String {
-    let ids: Vec<&str> = devices.iter().filter(|d| d.channel == n).map(|d| d.id.as_str()).collect();
+    let ids: Vec<&str> = devices.iter().filter(|d| d.channel == Some(n)).map(|d| d.id.as_str()).collect();
     if ids.is_empty() { String::new() } else { format!("  [{}]", ids.join(", ")) }
 }
 
@@ -1831,7 +1968,7 @@ fn print_graph(g: &Graph) {
     if !unrouted.is_empty() {
         println!("unrouted main outs: {}", unrouted.join(", "));
     }
-    if g.devices.iter().any(|d| d.channel == MASTER) {
+    if g.devices.iter().any(|d| d.channel == Some(MASTER)) {
         println!("master{}", inserts(&g.devices, MASTER));
     }
 }
@@ -1901,6 +2038,10 @@ fn print_clip(c: &Clip) {
         println!("  {:>5}  {at:<12} {name:<4} len {:<3} vel {}", e.tick, e.len, e.velocity);
     }
     println!("  {}", format_events(&c.events));
+    for l in &c.lanes {
+        let points: Vec<String> = l.points.iter().map(|p| format!("{}:{}", p.tick, p.value)).collect();
+        println!("  lane {}: {}", l.path, points.join(" "));
+    }
 }
 
 fn fmt_note_range(b: &NoteBinding) -> String {
@@ -2106,7 +2247,11 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
         }
         Cmd::Get { .. } | Cmd::Set { .. } | Cmd::Tempo { .. } | Cmd::Send { .. } => {
             let v: ParamValue = serde_json::from_value(last)?;
-            println!("{} = {}", v.path, v.value);
+            match v.moving {
+                // Modulation or automation has it elsewhere (RFC 0010).
+                Some(now) => println!("{} = {}  (now {now}: modulated or automated)", v.path, v.value),
+                None => println!("{} = {}", v.path, v.value),
+            }
         }
         Cmd::Play | Cmd::Stop => {
             let t: TransportState = serde_json::from_value(last)?;
@@ -2188,6 +2333,20 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
             }
         }
         Cmd::Device { cmd: DeviceCmd::Add { .. } } => print_device(&serde_json::from_value(last)?),
+        Cmd::Sampler { .. } => {
+            let info: SamplerInfo = serde_json::from_value(last)?;
+            if info.pads.is_empty() {
+                println!("{}: no samples", info.instrument);
+            }
+            for p in &info.pads {
+                println!("{} pad {:<2} {:<24} {:.2}s", info.instrument, p.pad, p.name, p.seconds);
+            }
+        }
+        Cmd::Mod { cmd: None } => {
+            let s: Snapshot = serde_json::from_value(last)?;
+            print_routes(&s.graph.mod_routes);
+        }
+        Cmd::Mod { .. } => print_routes(&serde_json::from_value::<ModRoutesResult>(last)?.routes),
         Cmd::Device { .. } => print_graph(&serde_json::from_value(last)?),
         Cmd::Instrument { .. }
         | Cmd::Route { .. }
@@ -2729,7 +2888,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "send 1 2 50%", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
+            "send 1 2 50%", "sampler", "sampler load 1 /nope.wav", "sampler load 1 Cargo.toml", "sampler clear 1", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",
@@ -2745,7 +2904,7 @@ mod tests {
             "daemon status", "daemon stop", "undo", "redo", "history", "journal",
             "clip", "clip show bass", "clip set bass 0:C2:12", "clip add bass 36 C3 --len 6", "clip rm bass 36 C3",
             "clip length bass 12", "clip clear bass", "clip quantize bass 1/8", "clip update bass --rm 0:C2", "clip new bass", "clip dup bass",
-            "clip rename bass B --clip 2", "clip del bass --clip 2", "clip select bass 1", "clip launch bass 2", "clip list", "song",
+            "clip rename bass B --clip 2", "clip del bass --clip 2", "clip lane bass mixer.1.pan 0:-1", "clip lane bass mixer.1.pan --rm", "clip select bass 1", "clip launch bass 2", "clip list", "song",
             "step bass", "step bass 3 C2 --set accent",
             "song place drums --at 1 --bars 4", "song rm drums 1", "song mv drums 1 3", "song back", "locate 5",
             "batch []", "record", "record --off",

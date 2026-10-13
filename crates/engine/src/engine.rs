@@ -31,10 +31,11 @@
 use crate::dsp::{Smoother, soft_clip};
 use crate::effect::{AudioEffect, COMMON_PARAMS, ProcessContext};
 use crate::instrument::{Instrument, MAX_BLOCK, MAX_OUTPUTS};
+use crate::modulator::{ModContext, Modulator};
 use crate::params::*;
 use fours_protocol::{
     ClipEvent, DEFAULT_CLIP_LENGTH, MAX_CHANNELS, MAX_CLIP_TICKS, MAX_CLIPS, MAX_EFFECTS, MAX_EVENTS, MAX_INSERTS,
-    MAX_INSTRUMENTS, MAX_PLACEMENTS, OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
+    MAX_INSTRUMENTS, MAX_LANE_POINTS, MAX_LANES, MAX_MOD_ROUTES, MAX_MODULATORS, MAX_PLACEMENTS, OutputWidth, PPQ, TICKS_PER_BAR, TICKS_PER_STEP,
 };
 use std::f32::consts::TAU;
 
@@ -45,7 +46,7 @@ const MAX_ACTIVE: usize = 64;
 const METER_HZ: f32 = 30.0;
 
 /// Where a parameter lives inside the engine.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ParamTarget {
     Global(usize),
     Instrument { slot: u8, index: u16 },
@@ -55,6 +56,22 @@ pub enum ParamTarget {
     Effect { slot: u8, index: u16 },
     /// A track channel's send level to a return channel (0-based indexes).
     Send { ch: u8, ret: u8 },
+    /// A modulator's parameter.
+    Modulator { slot: u8, index: u16 },
+}
+
+/// A modulation route as the engine runs it: a modulator output moving a
+/// target by `depth` of its range (`min..max`) around `base`, the value
+/// last set on it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModRoute {
+    pub source: u8,
+    pub output: u8,
+    pub target: ParamTarget,
+    pub depth: f32,
+    pub min: f32,
+    pub max: f32,
+    pub base: f32,
 }
 
 /// The insert chain index of the master (channels are 0..MAX_CHANNELS).
@@ -64,6 +81,8 @@ pub const MASTER_CHAIN: u8 = MAX_CHANNELS as u8;
 pub enum Returned {
     Instrument(Box<dyn Instrument>),
     Effect(Box<dyn AudioEffect>),
+    Modulator(Box<dyn Modulator>),
+    Sample(std::sync::Arc<[f32]>),
 }
 
 /// Control messages into the engine. Channel fields are 0-based indexes.
@@ -82,7 +101,24 @@ pub enum Command {
     /// A channel's (or, `MASTER_CHAIN`, the master's) insert chain: the
     /// first `len` effect slots of `slots`, in order.
     SetChain { ch: u8, slots: [u8; MAX_INSERTS], len: u8 },
-    /// Remove every event from a clip (an index in the clip table).
+    /// Give a sampler's pad a sample (interleaved stereo at the engine's
+    /// rate), or none; the old one is handed back.
+    SetSample { slot: u8, pad: u8, sample: Option<std::sync::Arc<[f32]>> },
+    /// Put a modulator in a modulator slot (replacing any there).
+    AddModulator { slot: u8, modulator: Box<dyn Modulator> },
+    RemoveModulator { slot: u8 },
+    /// Set modulation route `index` (its target's current value is its
+    /// base), or (`None`) clear it, putting its target back at its base.
+    SetModRoute { index: u8, route: Option<ModRoute> },
+    /// Set a clip's automation lane: its target (`None`: no lane), the
+    /// target's value set by hand, its range, and how many of its points
+    /// it uses (the points themselves stay: a retargeted lane keeps them);
+    /// `whole`: the parameter takes whole numbers, so values are rounded.
+    SetLane { clip: u16, lane: u8, target: Option<ParamTarget>, base: f32, min: f32, max: f32, whole: bool, len: u8 },
+    /// Set point `index` of a lane (a lane's points are in tick order).
+    SetLanePoint { clip: u16, lane: u8, index: u8, tick: u32, value: f32 },
+    /// Empty a clip (an index in the clip table): no events, no lanes, the
+    /// default length.
     ClearClip { clip: u16 },
     /// Add an event (replacing one at the same tick and note).
     AddEvent { clip: u16, event: ClipEvent },
@@ -120,6 +156,12 @@ impl std::fmt::Debug for Command {
             Command::AddEffect { slot, .. } => write!(f, "AddEffect({slot})"),
             Command::RemoveEffect { slot } => write!(f, "RemoveEffect({slot})"),
             Command::SetChain { ch, slots, len } => write!(f, "SetChain({ch}, {:?})", &slots[..(*len as usize).min(MAX_INSERTS)]),
+            Command::AddModulator { slot, .. } => write!(f, "AddModulator({slot})"),
+            Command::SetSample { slot, pad, sample } => write!(f, "SetSample({slot}, {pad}, {:?})", sample.as_ref().map(|s| s.len())),
+            Command::RemoveModulator { slot } => write!(f, "RemoveModulator({slot})"),
+            Command::SetModRoute { index, route } => write!(f, "SetModRoute({index}, {route:?})"),
+            Command::SetLane { clip, lane, target, .. } => write!(f, "SetLane({clip}, {lane}, {target:?})"),
+            Command::SetLanePoint { clip, lane, index, tick, value } => write!(f, "SetLanePoint({clip}, {lane}, {index}, {tick}, {value})"),
             Command::ClearClip { clip } => write!(f, "ClearClip({clip})"),
             Command::AddEvent { clip, event } => write!(f, "AddEvent({clip}, {event:?})"),
             Command::RemoveEvent { clip, tick, note } => write!(f, "RemoveEvent({clip}, {tick}, {note})"),
@@ -162,6 +204,12 @@ pub enum Feedback {
     Stopped { time: f64 },
     /// Peak (left, right) per channel index since the last meter message.
     Meters { channels: [[f32; 2]; MAX_CHANNELS], master: [f32; 2] },
+    /// A parameter modulation or automation moved, and where it is now
+    /// (at meter rate, one per moved parameter, then `MovedDone`).
+    Moved { target: ParamTarget, value: f32 },
+    /// The end of a meter period's `Moved` messages: parameters not in them
+    /// are at their values set by hand.
+    MovedDone,
 }
 
 struct Slot {
@@ -214,7 +262,60 @@ struct ClipStore {
     /// Sorted by (tick, note); at most `MAX_EVENTS`.
     events: Vec<ClipEvent>,
     length: u32,
+    lanes: [LaneStore; MAX_LANES],
 }
+
+/// An automation lane in the clip table (RFC 0010): a target, its value set
+/// by hand (`base`, restored when no playing clip automates it), its range,
+/// and up to `MAX_LANE_POINTS` (tick, value) points sorted by tick.
+#[derive(Clone, Copy)]
+struct LaneStore {
+    target: Option<ParamTarget>,
+    base: f32,
+    min: f32,
+    max: f32,
+    whole: bool,
+    points: [(u32, f32); MAX_LANE_POINTS],
+    len: u8,
+}
+
+impl Default for LaneStore {
+    fn default() -> Self {
+        Self { target: None, base: 0.0, min: 0.0, max: 1.0, whole: false, points: [(0, 0.0); MAX_LANE_POINTS], len: 0 }
+    }
+}
+
+impl LaneStore {
+    /// The value at clip tick `tick`: linear between points, the nearest
+    /// point's value outside them.
+    fn value(&self, tick: f32) -> Option<f32> {
+        let pts = &self.points[..self.len as usize];
+        let first = pts.first()?;
+        if tick <= first.0 as f32 {
+            return Some(first.1);
+        }
+        for w in pts.windows(2) {
+            if tick < w[1].0 as f32 {
+                let t = (tick - w[0].0 as f32) / (w[1].0 - w[0].0).max(1) as f32;
+                return Some(w[0].1 + (w[1].1 - w[0].1) * t);
+            }
+        }
+        pts.last().map(|p| p.1)
+    }
+}
+
+/// Most parameters automated at once: every lane of a clip on every track.
+const MAX_AUTOMATED: usize = MAX_INSTRUMENTS * MAX_LANES;
+/// Where play start's jump of the lanes' first values is (`snap_lanes`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapLanes {
+    Off,
+    Armed,
+    First,
+}
+
+/// Most parameters moved at once (by modulation or automation).
+const MAX_MOVED: usize = MAX_AUTOMATED + MAX_MOD_ROUTES;
 
 impl ClipStore {
     fn position(&self, e: &ClipEvent) -> Result<usize, usize> {
@@ -245,10 +346,13 @@ struct Track {
     /// (absolute tick it ends at, note), for notes the clips started.
     active: [(u64, u8); MAX_ACTIVE],
     num_active: usize,
+    /// The clip playing at the last tick and its tick there (automation).
+    at: Option<(u16, u32)>,
 }
 
 impl Track {
     fn reset(&mut self) {
+        self.at = None;
         self.placements.clear();
         self.launched = None;
         self.pending = None;
@@ -262,6 +366,7 @@ impl Track {
             pending: None,
             active: [(0, 0); MAX_ACTIVE],
             num_active: 0,
+            at: None,
         }
     }
 
@@ -313,6 +418,13 @@ impl Click {
     }
 }
 
+/// Whether any track channel, or any return, is soloed.
+#[derive(Clone, Copy)]
+struct Solo {
+    tracks: bool,
+    returns: bool,
+}
+
 struct Channel {
     active: bool,
     /// A return bus: fed by sends, not silenced by another channel's solo.
@@ -349,17 +461,21 @@ impl Channel {
     }
 
     /// Targets: gain (with mute/solo), mono pan, balance.
-    fn targets(&self, any_solo: bool) -> [f32; 5] {
+    fn targets(&self, any_solo: Solo) -> [f32; 5] {
         let muted = self.params[CH_MUTE] >= 0.5;
         let soloed = self.params[CH_SOLO] >= 0.5;
-        let audible = !muted && (!any_solo || soloed || self.ret);
+        // Track solos gate the tracks, return solos the returns: soloing a
+        // track keeps the returns it feeds, soloing a return keeps the
+        // tracks that feed it.
+        let gate = if self.ret { any_solo.returns } else { any_solo.tracks };
+        let audible = !muted && (!gate || soloed);
         let gain = if audible { volume_to_gain(self.params[CH_VOLUME]) } else { 0.0 };
         let (ml, mr) = mono_pan(self.params[CH_PAN]);
         let (bl, br) = balance(self.params[CH_PAN]);
         [gain, ml, mr, bl, br]
     }
 
-    fn snap(&mut self, any_solo: bool) {
+    fn snap(&mut self, any_solo: Solo) {
         let [g, ml, mr, bl, br] = self.targets(any_solo);
         self.gain.value = g;
         self.mono_l.value = ml;
@@ -388,6 +504,30 @@ pub struct Engine {
     sends_at: [[f32; MAX_CHANNELS]; MAX_CHANNELS],
     /// Scratch for a track channel's post-fader signal.
     post: Vec<f32>,
+    /// How much of the tracks' dry signal reaches the master (0 while only
+    /// returns are soloed), as the last block ended.
+    dry_to_master: f32,
+    modulators: Vec<Option<Box<dyn Modulator>>>,
+    routes: [Option<ModRoute>; MAX_MOD_ROUTES],
+    /// Parameters automation set in the last block, with their bases.
+    automated: [Option<(ParamTarget, f32)>; MAX_AUTOMATED],
+    /// Where modulation and automation put parameters in the last block
+    /// (the first `moved_len`), reported at meter rate.
+    moved: [(ParamTarget, f32); MAX_MOVED],
+    moved_len: usize,
+    /// Whether the last meter period reported any, and meter periods since
+    /// a quiet engine last said "none": it says so once, then about once a
+    /// second (so a dropped report does not leave a stale value for good).
+    moved_reported: bool,
+    moved_quiet: u32,
+    /// Play just happened: the lanes' first values jump straight to where
+    /// they start instead of ramping through the parameter smoothers.
+    /// `Armed` at play, `First` at the first tick after any count-in, off
+    /// after that tick's first block (whether or not a clip plays).
+    snap_lanes: SnapLanes,
+    /// Beats since the song's tick 0, advanced every block (synced LFOs
+    /// follow it; it runs while stopped too).
+    beat: f64,
     master: Smoother,
     master_bus: Vec<f32>,
     master_peak: [f32; 2],
@@ -428,7 +568,7 @@ impl Engine {
             slots: (0..MAX_INSTRUMENTS).map(|_| None).collect(),
             tracks: (0..MAX_INSTRUMENTS).map(|_| Track::new()).collect(),
             clips: (0..MAX_CLIPS)
-                .map(|_| ClipStore { events: Vec::with_capacity(MAX_EVENTS), length: DEFAULT_CLIP_LENGTH })
+                .map(|_| ClipStore { events: Vec::with_capacity(MAX_EVENTS), length: DEFAULT_CLIP_LENGTH, lanes: [LaneStore::default(); MAX_LANES] })
                 .collect(),
             channels: (0..MAX_CHANNELS).map(|_| Channel::new(sr)).collect(),
             effects: (0..MAX_EFFECTS).map(|_| None).collect(),
@@ -438,6 +578,16 @@ impl Engine {
             sends: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
             sends_at: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
             post: vec![0.0; MAX_BLOCK * 2],
+            dry_to_master: 1.0,
+            modulators: (0..MAX_MODULATORS).map(|_| None).collect(),
+            routes: [None; MAX_MOD_ROUTES],
+            automated: [None; MAX_AUTOMATED],
+            moved: [(ParamTarget::Global(0), 0.0); MAX_MOVED],
+            moved_len: 0,
+            moved_reported: false,
+            moved_quiet: 0,
+            snap_lanes: SnapLanes::Off,
+            beat: 0.0,
             master: Smoother::new(sr, 0.01, volume_to_gain(globals[MASTER_VOLUME])),
             master_bus: vec![0.0; MAX_BLOCK * 2],
             master_peak: [0.0; 2],
@@ -526,6 +676,8 @@ impl Engine {
         for ch in &mut self.channels {
             ch.snap(any_solo);
         }
+        self.sends_at = self.sends;
+        self.dry_to_master = if any_solo.returns && !any_solo.tracks { 0.0 } else { 1.0 };
         self.master.value = volume_to_gain(self.globals[MASTER_VOLUME]);
         for slot in self.slots.iter_mut().flatten() {
             slot.instrument.snap();
@@ -537,8 +689,9 @@ impl Engine {
         }
     }
 
-    fn any_solo(&self) -> bool {
-        self.channels.iter().any(|c| c.active && c.params[CH_SOLO] >= 0.5)
+    fn any_solo(&self) -> Solo {
+        let soloed = |ret: bool| self.channels.iter().any(|c| c.active && c.ret == ret && c.params[CH_SOLO] >= 0.5);
+        Solo { tracks: soloed(false), returns: soloed(true) }
     }
 
     /// Apply a command. A removed instrument is handed back so the caller can
@@ -546,39 +699,68 @@ impl Engine {
     #[must_use]
     pub fn apply(&mut self, cmd: Command, emit: &mut impl FnMut(Feedback)) -> Option<Returned> {
         match cmd {
-            Command::SetParam { target, value } => match target {
-                ParamTarget::Global(i) => {
-                    if let Some(g) = self.globals.get_mut(i) {
-                        *g = value;
+            Command::SetParam { target, value } => {
+                // A modulated target's routes move around the new value, and
+                // automation comes back to it.
+                for r in self.routes.iter_mut().flatten().filter(|r| r.target == target) {
+                    r.base = value;
+                }
+                for c in self.clips.iter_mut() {
+                    for l in c.lanes.iter_mut().filter(|l| l.target == Some(target)) {
+                        l.base = value;
                     }
                 }
-                ParamTarget::Instrument { slot, index } => {
-                    if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
-                        s.instrument.set_param(index as usize, value);
+                for a in self.automated.iter_mut().flatten().filter(|a| a.0 == target) {
+                    a.1 = value;
+                }
+                self.write_param(target, value);
+            }
+            Command::SetSample { slot, pad, sample } => {
+                let old = match self.slots.get_mut(slot as usize) {
+                    Some(Some(s)) => s.instrument.set_sample(pad as usize, sample),
+                    _ => sample,
+                };
+                return old.map(Returned::Sample);
+            }
+            Command::AddModulator { slot, modulator } => {
+                let Some(s) = self.modulators.get_mut(slot as usize) else { return Some(Returned::Modulator(modulator)) };
+                return s.replace(modulator).map(Returned::Modulator);
+            }
+            Command::RemoveModulator { slot } => {
+                self.forget_automated(|t| matches!(t, ParamTarget::Modulator { slot: s, .. } if s == slot));
+                // Its routes go first, their targets back at their bases.
+                for i in 0..MAX_MOD_ROUTES {
+                    if let Some(r) = self.routes[i].filter(|r| r.source == slot) {
+                        self.routes[i] = None;
+                        self.write_param(r.target, r.base);
                     }
                 }
-                ParamTarget::Channel { ch, index } => {
-                    if let Some(c) = self.channels.get_mut(ch as usize)
-                        && (index as usize) < CHANNEL_PARAMS
+                return self.modulators.get_mut(slot as usize)?.take().map(Returned::Modulator);
+            }
+            Command::SetLane { clip, lane, target, base, min, max, whole, len } => {
+                if let Some(l) = self.clips.get_mut(clip as usize).and_then(|c| c.lanes.get_mut(lane as usize)) {
+                    *l = LaneStore { target, base, min, max, whole, len: len.min(MAX_LANE_POINTS as u8), points: l.points };
+                }
+            }
+            Command::SetLanePoint { clip, lane, index, tick, value } => {
+                if let Some(l) = self.clips.get_mut(clip as usize).and_then(|c| c.lanes.get_mut(lane as usize))
+                    && (index as usize) < MAX_LANE_POINTS
+                {
+                    l.points[index as usize] = (tick, value);
+                }
+            }
+            Command::SetModRoute { index, route } => {
+                if let Some(cell) = self.routes.get_mut(index as usize) {
+                    let old = std::mem::replace(cell, route);
+                    // Its target goes back to its base unless another route
+                    // still moves it (a route shifting to another index).
+                    if let Some(o) = old.filter(|o| route.is_none_or(|r| r.target != o.target))
+                        && !self.routes.iter().flatten().any(|r| r.target == o.target)
                     {
-                        c.params[index as usize] = value;
+                        self.write_param(o.target, o.base);
                     }
                 }
-                ParamTarget::Send { ch, ret } => {
-                    if (ch as usize) < MAX_CHANNELS && (ret as usize) < MAX_CHANNELS {
-                        self.sends[ch as usize][ret as usize] = value.clamp(0.0, 1.0);
-                    }
-                }
-                ParamTarget::Effect { slot, index } => {
-                    if let Some(Some(e)) = self.effects.get_mut(slot as usize) {
-                        match index as usize {
-                            0 => e.bypass = value >= 0.5,
-                            1 => e.mix = value.clamp(0.0, 1.0),
-                            i => e.effect.set_param(i - COMMON_PARAMS, value),
-                        }
-                    }
-                }
-            },
+            }
             Command::AddEffect { slot, effect } => {
                 // Never drop an effect here: an invalid slot hands it back.
                 let Some(s) = self.effects.get_mut(slot as usize) else { return Some(Returned::Effect(effect)) };
@@ -589,6 +771,7 @@ impl Engine {
                 return s.replace(EffectSlot { effect, bypass: false, mix: 0.0, wet, idle: false }).map(|e| Returned::Effect(e.effect));
             }
             Command::RemoveEffect { slot } => {
+                self.forget_automated(|t| matches!(t, ParamTarget::Effect { slot: s, .. } if s == slot));
                 // Out of every chain first, so nothing runs a missing slot.
                 for c in 0..=MAX_CHANNELS {
                     let len = self.chain_len[c] as usize;
@@ -617,6 +800,7 @@ impl Engine {
                 return s.replace(Slot { instrument, routes: [None; MAX_OUTPUTS] }).map(|s| Returned::Instrument(s.instrument));
             }
             Command::RemoveInstrument { slot } => {
+                self.forget_automated(|t| matches!(t, ParamTarget::Instrument { slot: s, .. } if s == slot));
                 if let Some(t) = self.tracks.get_mut(slot as usize) {
                     t.reset();
                 }
@@ -659,6 +843,7 @@ impl Engine {
                 if let Some(c) = self.clips.get_mut(clip as usize) {
                     c.events.clear();
                     c.length = DEFAULT_CLIP_LENGTH;
+                    c.lanes = [LaneStore::default(); MAX_LANES];
                 }
             }
             Command::AddEvent { clip, event } => {
@@ -752,6 +937,12 @@ impl Engine {
             }
             Command::Play { count_in } => {
                 self.release_clip_notes(None);
+                // No clip plays (nor automates) until the first tick after
+                // any count-in, and then lanes start where they are.
+                for t in self.tracks.iter_mut() {
+                    t.at = None;
+                }
+                self.snap_lanes = SnapLanes::Armed;
                 // Waiting switches land; launched clips start with the song.
                 for slot in 0..self.tracks.len() {
                     let t = &self.tracks[slot];
@@ -765,6 +956,9 @@ impl Engine {
                 // Whole bars, so swing pairs and beats line up with the song.
                 self.count_in = (count_in as u64).div_ceil(TICKS_PER_BAR as u64) * TICKS_PER_BAR as u64;
                 self.song_pos = self.start_pos;
+                // Synced modulators count from the song's start (the
+                // count-in is before it).
+                self.beat = (self.start_pos as f64 - self.count_in as f64) / PPQ as f64;
                 self.ended = false;
                 self.wrapped_at = None;
                 self.next_tick_at = self.pos as f64;
@@ -787,6 +981,178 @@ impl Engine {
             }
         }
         None
+    }
+
+    /// Set a parameter in the engine (no base update: modulation uses it
+    /// too).
+    fn write_param(&mut self, target: ParamTarget, value: f32) {
+        match target {
+            ParamTarget::Global(i) => {
+                if let Some(g) = self.globals.get_mut(i) {
+                    *g = value;
+                }
+            }
+            ParamTarget::Instrument { slot, index } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.set_param(index as usize, value);
+                }
+            }
+            ParamTarget::Channel { ch, index } => {
+                if let Some(c) = self.channels.get_mut(ch as usize)
+                    && (index as usize) < CHANNEL_PARAMS
+                {
+                    c.params[index as usize] = value;
+                }
+            }
+            ParamTarget::Send { ch, ret } => {
+                if (ch as usize) < MAX_CHANNELS && (ret as usize) < MAX_CHANNELS {
+                    self.sends[ch as usize][ret as usize] = value.clamp(0.0, 1.0);
+                }
+            }
+            ParamTarget::Effect { slot, index } => {
+                if let Some(Some(e)) = self.effects.get_mut(slot as usize) {
+                    match index as usize {
+                        0 => e.bypass = value >= 0.5,
+                        1 => e.mix = value.clamp(0.0, 1.0),
+                        i => e.effect.set_param(i - COMMON_PARAMS, value),
+                    }
+                }
+            }
+            ParamTarget::Modulator { slot, index } => {
+                if let Some(Some(m)) = self.modulators.get_mut(slot as usize) {
+                    m.set_param(index as usize, value);
+                }
+            }
+        }
+    }
+
+    /// Jump a parameter's smoother (and those sharing its strip or device)
+    /// to where it is heading.
+    fn snap_target(&mut self, target: ParamTarget) {
+        match target {
+            ParamTarget::Global(i) if i == MASTER_VOLUME => self.master.value = volume_to_gain(self.globals[MASTER_VOLUME]),
+            ParamTarget::Global(_) | ParamTarget::Modulator { .. } => {}
+            ParamTarget::Channel { ch, .. } => {
+                let any_solo = self.any_solo();
+                if let Some(c) = self.channels.get_mut(ch as usize) {
+                    c.snap(any_solo);
+                }
+            }
+            ParamTarget::Instrument { slot, .. } => {
+                if let Some(Some(s)) = self.slots.get_mut(slot as usize) {
+                    s.instrument.snap();
+                }
+            }
+            ParamTarget::Effect { slot, .. } => {
+                let ctx = ProcessContext { tempo: self.globals[TEMPO].clamp(20.0, 300.0) };
+                if let Some(Some(e)) = self.effects.get_mut(slot as usize) {
+                    e.effect.snap(&ctx);
+                    e.wet.value = if e.bypass { 0.0 } else { e.mix };
+                }
+            }
+            ParamTarget::Send { ch, ret } => {
+                if let (Some(at), Some(to)) = (self.sends_at.get_mut(ch as usize), self.sends.get(ch as usize)) {
+                    at[ret as usize % MAX_CHANNELS] = to[ret as usize % MAX_CHANNELS];
+                }
+            }
+        }
+    }
+
+    /// Forget automated targets whose slot goes, so letting go of them later
+    /// does not write a stale value into whatever takes the slot next.
+    fn forget_automated(&mut self, gone: impl Fn(ParamTarget) -> bool) {
+        for a in self.automated.iter_mut() {
+            if a.is_some_and(|(t, _)| gone(t)) {
+                *a = None;
+            }
+        }
+    }
+
+    /// Set every parameter a playing clip automates to its lane's value at
+    /// the clip's position; parameters no longer automated go back to their
+    /// bases. After modulation, so a lane overrides a route on its target.
+    fn automate(&mut self) {
+        let mut now: [Option<(ParamTarget, f32)>; MAX_AUTOMATED] = [None; MAX_AUTOMATED];
+        let mut count = 0;
+        if self.playing {
+            for slot in 0..self.tracks.len() {
+                if self.slots[slot].is_none() {
+                    continue;
+                }
+                let Some((clip, pos)) = self.tracks[slot].at else { continue };
+                for k in 0..MAX_LANES {
+                    let l = &self.clips[clip as usize].lanes[k];
+                    let (Some(target), Some(v)) = (l.target, l.value(pos as f32)) else { continue };
+                    let (base, min, max, whole) = (l.base, l.min, l.max, l.whole);
+                    if count < MAX_AUTOMATED && !now[..count].iter().flatten().any(|a| a.0 == target) {
+                        now[count] = Some((target, base));
+                        count += 1;
+                        let v = if whole { v.round() } else { v };
+                        self.write_param(target, v.clamp(min, max));
+                        self.note_moved(target, v.clamp(min, max));
+                        // Every lane starts on play's first tick, even one
+                        // automating its target when play came.
+                        if self.snap_lanes == SnapLanes::First {
+                            self.snap_target(target);
+                        }
+                    }
+                }
+            }
+        }
+        // What automation let go of goes back to its value set by hand (a
+        // modulated one is already there, moved by its routes this block).
+        for i in 0..MAX_AUTOMATED {
+            if let Some((target, base)) = self.automated[i]
+                && !now[..count].iter().flatten().any(|a| a.0 == target)
+                && !self.routes.iter().flatten().any(|r| r.target == target)
+            {
+                self.write_param(target, base);
+            }
+        }
+        self.automated = now;
+        if self.snap_lanes == SnapLanes::First {
+            self.snap_lanes = SnapLanes::Off;
+        }
+    }
+
+    /// Advance the modulators by `n` frames and move every modulated target
+    /// to its base plus its routes' sum.
+    fn modulate(&mut self, n: usize) {
+        let ctx = ModContext { sr: self.sr, tempo: self.globals[TEMPO].clamp(20.0, 300.0), beat: self.beat };
+        self.beat += n as f64 / self.sr as f64 * ctx.tempo as f64 / 60.0;
+        // Modulators run whether routed or not, so a free LFO's phase does
+        // not depend on when it was first routed.
+        for m in self.modulators.iter_mut().flatten() {
+            m.advance(n, &ctx);
+        }
+        if self.routes.iter().all(Option::is_none) {
+            return;
+        }
+        for i in 0..MAX_MOD_ROUTES {
+            let Some(r) = self.routes[i] else { continue };
+            // Each target once: at its first route.
+            if self.routes[..i].iter().flatten().any(|q| q.target == r.target) {
+                continue;
+            }
+            let mut v = r.base;
+            for q in self.routes[i..].iter().flatten().filter(|q| q.target == r.target) {
+                let out = self.modulators.get(q.source as usize).and_then(|m| m.as_ref()).map_or(0.0, |m| m.output(q.output as usize));
+                v += q.depth * (q.max - q.min) * out;
+            }
+            self.write_param(r.target, v.clamp(r.min, r.max));
+            self.note_moved(r.target, v.clamp(r.min, r.max));
+        }
+    }
+
+    /// Remember where a parameter was moved this block (the last write wins:
+    /// automation after modulation).
+    fn note_moved(&mut self, target: ParamTarget, value: f32) {
+        if let Some(m) = self.moved[..self.moved_len].iter_mut().find(|m| m.0 == target) {
+            m.1 = value;
+        } else if self.moved_len < MAX_MOVED {
+            self.moved[self.moved_len] = (target, value);
+            self.moved_len += 1;
+        }
     }
 
     fn sixteenth(&self) -> f64 {
@@ -871,6 +1237,9 @@ impl Engine {
         }
         // Ticks from the song's start, after any count-in.
         let song = tick - self.count_in;
+        if self.snap_lanes == SnapLanes::Armed {
+            self.snap_lanes = SnapLanes::First;
+        }
         let time = self.time();
         let looping = self.song_loop();
         // A range loops when the song reaches its end (playing from past it
@@ -915,18 +1284,20 @@ impl Engine {
             // What plays here: a launched clip, looping from where it
             // started; else the placement under the song position (notes
             // end with it).
-            let (clip, pos, until) = match t.launched {
-                Some((c, since)) => {
-                    let c = &self.clips[c as usize];
-                    (c, ((song - since) % c.length.max(1) as u64) as u32, None)
-                }
+            let (index, pos, until) = match t.launched {
+                Some((c, since)) => (c, ((song - since) % self.clips[c as usize].length.max(1) as u64) as u32, None),
                 None => {
-                    let Some(p) = t.placement_at(song_pos) else { continue };
-                    let c = &self.clips[p.clip as usize];
+                    let Some(p) = t.placement_at(song_pos) else {
+                        t.at = None;
+                        continue;
+                    };
                     let into = song_pos - p.start as u64;
-                    (c, ((into + p.offset as u64) % c.length.max(1) as u64) as u32, Some(p.length as u64 - into))
+                    let len = self.clips[p.clip as usize].length.max(1) as u64;
+                    (p.clip, ((into + p.offset as u64) % len) as u32, Some(p.length as u64 - into))
                 }
             };
+            t.at = Some((index, pos));
+            let clip = &self.clips[index as usize];
             let first = clip.events.partition_point(|e| e.tick < pos);
             for e in clip.events[first..].iter().take_while(|e| e.tick == pos) {
                 let velocity = e.velocity as f32 / 127.0;
@@ -982,6 +1353,9 @@ impl Engine {
     }
 
     fn render_block(&mut self, out: &mut [f32], channels: usize, n: usize) {
+        self.moved_len = 0;
+        self.modulate(n);
+        self.automate();
         for s in self.slots.iter_mut().flatten() {
             s.instrument.render(n);
         }
@@ -1027,7 +1401,14 @@ impl Engine {
         let master = &mut self.master_bus[..n * 2];
         master.fill(0.0);
         // Track channels first (their sends feed the returns), then the
-        // returns: inserts, then the fader, into the master.
+        // returns: inserts, then the fader, into the master. Soloing only
+        // returns hears just them: the tracks still send, but their dry
+        // signal leaves the master.
+        let solo = self.any_solo();
+        // Ramped across the block, so toggling a return's solo does not click.
+        let dry_from = self.dry_to_master;
+        let dry_to = if solo.returns && !solo.tracks { 0.0 } else { 1.0 };
+        self.dry_to_master = dry_to;
         for returns in [false, true] {
             for i in 0..MAX_CHANNELS {
                 let ch = &mut self.channels[i];
@@ -1044,8 +1425,9 @@ impl Engine {
                     let r = ch.bus[f * 2 + 1] * g;
                     ch.peak[0] = ch.peak[0].max(l.abs());
                     ch.peak[1] = ch.peak[1].max(r.abs());
-                    self.master_bus[f * 2] += l;
-                    self.master_bus[f * 2 + 1] += r;
+                    let to_master = if returns { 1.0 } else { dry_from + (dry_to - dry_from) * (f + 1) as f32 / n as f32 };
+                    self.master_bus[f * 2] += l * to_master;
+                    self.master_bus[f * 2 + 1] += r * to_master;
                     self.post[f * 2] = l;
                     self.post[f * 2 + 1] = r;
                 }
@@ -1113,6 +1495,15 @@ impl Engine {
         }
         emit(Feedback::Meters { channels, master: self.master_peak });
         self.master_peak = [0.0; 2];
+        self.moved_quiet += 1;
+        if self.moved_len > 0 || self.moved_reported || self.moved_quiet >= METER_HZ as u32 {
+            for &(target, value) in &self.moved[..self.moved_len] {
+                emit(Feedback::Moved { target, value });
+            }
+            emit(Feedback::MovedDone);
+            self.moved_reported = self.moved_len > 0;
+            self.moved_quiet = 0;
+        }
     }
 }
 
@@ -1498,6 +1889,78 @@ pub(crate) mod tests {
         assert!(return_peak(1.0, 0.0) > 0.05, "{}", return_peak(1.0, 0.0));
         assert!(return_peak(1.0, 1.0) < 1e-4, "muted: {}", return_peak(1.0, 1.0));
         assert!(return_peak(0.0, 0.0) < 1e-4, "no send: {}", return_peak(0.0, 0.0));
+    }
+
+    /// A modulation route moves its target around the value set on it: an
+    /// LFO on channel 0's pan swings the kick between the sides; clearing
+    /// the route puts the pan back where it was set.
+    #[test]
+    fn a_route_modulates_around_the_base() {
+        let mut e = drum_engine();
+        let pan = ParamTarget::Channel { ch: 0, index: CH_PAN as u8 };
+        let mut apply = |e: &mut Engine, c| {
+            let _ = e.apply(c, &mut |_| {});
+        };
+        apply(&mut e, Command::AddModulator { slot: 0, modulator: crate::modulator::make(fours_protocol::DeviceType::Lfo) });
+        apply(&mut e, Command::SetParam { target: pan, value: 0.2 });
+        let route = ModRoute { source: 0, output: 0, target: pan, depth: 0.5, min: -1.0, max: 1.0, base: 0.2 };
+        apply(&mut e, Command::SetModRoute { index: 0, route: Some(route) });
+        apply(&mut e, Command::Play { count_in: 0 });
+        // One bar's sine at 120 bpm: a beat in (0.5 s) it is at its top.
+        render_secs(&mut e, 0.5, &mut vec![]);
+        let top = e.channels[0].params[CH_PAN];
+        assert!((top - 1.0).abs() < 0.05, "base 0.2 + 0.5 x range 2: {top}");
+        render_secs(&mut e, 1.0, &mut vec![]);
+        let bottom = e.channels[0].params[CH_PAN];
+        assert!((bottom + 0.8).abs() < 0.05, "0.2 - 1.0 three beats in: {bottom}");
+        // Setting the pan moves the base; clearing the route goes back to it.
+        apply(&mut e, Command::SetParam { target: pan, value: -0.3 });
+        apply(&mut e, Command::SetModRoute { index: 0, route: None });
+        assert_eq!(e.channels[0].params[CH_PAN], -0.3);
+    }
+
+    /// An automation lane moves its parameter while its clip plays and lets
+    /// go of it (back to the value set by hand) when nothing plays it: a
+    /// ramp on channel 0's pan from -1 to 1 over the launched clip's bar.
+    #[test]
+    fn a_lane_automates_while_its_clip_plays() {
+        let mut e = drum_engine();
+        let pan = ParamTarget::Channel { ch: 0, index: CH_PAN as u8 };
+        let mut apply = |e: &mut Engine, c| {
+            let _ = e.apply(c, &mut |_| {});
+        };
+        apply(&mut e, Command::SetParam { target: pan, value: 0.25 });
+        apply(&mut e, Command::Launch { slot: 0, clip: Some(0), now: false });
+        apply(&mut e, Command::SetLane { clip: 0, lane: 0, target: Some(pan), base: 0.25, min: -1.0, max: 1.0, whole: false, len: 2 });
+        apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 0, tick: 0, value: -1.0 });
+        apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 1, tick: 384, value: 1.0 });
+        assert_eq!(e.channels[0].params[CH_PAN], 0.25, "stopped: the value set by hand");
+        apply(&mut e, Command::Play { count_in: 0 });
+        let mut fb = vec![];
+        render_secs(&mut e, 1.0, &mut fb);
+        let mid = e.channels[0].params[CH_PAN];
+        assert!(mid.abs() < 0.05, "half the bar: {mid}");
+        assert!(fb.iter().any(|f| matches!(f, Feedback::Moved { target, .. } if *target == pan)), "it reports the moved pan");
+        apply(&mut e, Command::Stop);
+        let mut fb = vec![];
+        render_secs(&mut e, 0.5, &mut fb);
+        assert_eq!(e.channels[0].params[CH_PAN], 0.25, "let go: back to the value set by hand");
+        // Once settled it says so once, not every meter period.
+        let dones = fb.iter().filter(|f| matches!(f, Feedback::MovedDone)).count();
+        assert!(!fb.iter().any(|f| matches!(f, Feedback::Moved { .. })) && dones == 1, "settled once: {dones}");
+        // From play, a lane's first value is there at once (no ramp from the
+        // value set by hand through the smoother).
+        apply(&mut e, Command::SetLanePoint { clip: 0, lane: 0, index: 1, tick: 384, value: -1.0 });
+        apply(&mut e, Command::Play { count_in: 0 });
+        render_secs(&mut e, 0.002, &mut vec![]);
+        let (now, want) = (e.channels[0].bal_r.value, e.channels[0].targets(e.any_solo())[4]);
+        assert!((now - want).abs() < 1e-6, "hard left from the first block: {now} vs {want}");
+        apply(&mut e, Command::Stop);
+        render_secs(&mut e, 0.1, &mut vec![]);
+        // A count-in plays no clip, so nothing is automated yet.
+        apply(&mut e, Command::Play { count_in: TICKS_PER_BAR });
+        render_secs(&mut e, 0.5, &mut vec![]);
+        assert_eq!(e.channels[0].params[CH_PAN], 0.25, "counting in");
     }
 
     /// A waiting launch lands on a loop's wrap: a one-bar loop over bar 2

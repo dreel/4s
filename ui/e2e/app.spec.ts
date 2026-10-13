@@ -1197,6 +1197,173 @@ test("returns: a return bus with a reverb, fed by a send knob on a track strip",
   await expect(rpc("route.set", { source: "drums", channel: 2, swap: false })).rejects.toThrow("return bus");
 });
 
+test("automation lanes: add a lane in the piano roll, add, drag, and remove points, remove the lane", async () => {
+  const { page, rpc } = h;
+  const lanes = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).lanes;
+  await page.getByTestId("view-roll").click();
+  await page.getByTestId("roll-zoom").selectOption("1");
+  // A lane on channel 1's pan starts flat at the value set by hand.
+  await page.getByTestId("lane-add").fill("mixer.1.pan");
+  await page.getByTestId("lane-add").press("Enter");
+  await expect.poll(lanes).toEqual([{ path: "mixer.1.pan", points: [{ tick: 0, value: 0 }] }]);
+  const strip = page.getByTestId("lane-mixer.1.pan");
+  await strip.scrollIntoViewIfNeeded();
+  const box = (await strip.boundingBox())!;
+  // 1 px per tick; the strip's top is the range's top (pan 1). A click
+  // near a beat lands on the 1/16 grid.
+  await page.mouse.click(box.x + 190, box.y + 2);
+  await expect.poll(lanes).toEqual([{ path: "mixer.1.pan", points: [{ tick: 0, value: 0 }, { tick: 192, value: 1 }] }]);
+  // Drag the first point to the bottom (pan -1).
+  await expect(page.getByTestId("lane-point-mixer.1.pan-192")).toBeVisible();
+  const first = (await page.getByTestId("lane-point-mixer.1.pan-0").boundingBox())!;
+  await page.mouse.move(first.x + 4, first.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(first.x + 4, box.y + 30);
+  await page.mouse.move(first.x + 4, box.y + box.height - 2);
+  await page.mouse.up();
+  await expect.poll(async () => (await lanes())[0].points[0]).toEqual({ tick: 0, value: -1 });
+  // The value set by hand stays.
+  expect((await rpc("param.get", { path: "mixer.1.pan" })).value).toBe(0);
+  await page.getByTestId("pianoroll-drums").screenshot({ path: "test-results/lanes.png" });
+  // Alt-click removes a point; the x removes the lane.
+  await page.keyboard.down("Alt");
+  await page.getByTestId("lane-point-mixer.1.pan-192").click();
+  await page.keyboard.up("Alt");
+  await expect.poll(async () => (await lanes())[0].points.length).toBe(1);
+  await page.getByTestId("lane-remove-mixer.1.pan").click();
+  await expect.poll(lanes).toEqual([]);
+  await expect(strip).toHaveCount(0);
+});
+
+test("automation lanes in the step view: a bar per step, set a point, paint across steps, remove a point and the lane", async () => {
+  const { page, rpc } = h;
+  const points = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).lanes[0]?.points ?? [];
+  await page.getByTestId("step-lane-add-drums").fill("mixer.1.pan");
+  await page.getByTestId("step-lane-add-drums").press("Enter");
+  await expect(page.getByTestId("step-lane-drums-mixer.1.pan")).toBeVisible();
+  // Step 5 (tick 96), pressed near its top: pan near 1.
+  const c4 = page.getByTestId("lane-cell-drums-mixer.1.pan-4");
+  await c4.scrollIntoViewIfNeeded();
+  const b4 = (await c4.boundingBox())!;
+  await page.mouse.click(b4.x + b4.width / 2, b4.y + 1);
+  await expect.poll(async () => (await points()).find((p: { tick: number }) => p.tick === 96)?.value).toBeGreaterThan(0.85);
+  await expect(c4).toHaveAttribute("data-point", "true");
+  // Paint steps 9..12 at the bottom in one jump (the steps a fast drag
+  // skips are filled): one edit, pan near -1 at ticks 192..264.
+  const at = async (s: number) => (await page.getByTestId(`lane-cell-drums-mixer.1.pan-${s}`).boundingBox())!;
+  const [b8, b11] = [await at(8), await at(11)];
+  await page.mouse.move(b8.x + b8.width / 2, b8.y + b8.height - 1);
+  await page.mouse.down();
+  await page.mouse.move(b11.x + b11.width / 2, b11.y + b11.height - 1);
+  await page.mouse.up();
+  await expect.poll(async () => (await points()).filter((p: { value: number }) => p.value < -0.85).map((p: { tick: number }) => p.tick)).toEqual([192, 216, 240, 264]);
+  await page.getByTestId("step-view-drums").screenshot({ path: "test-results/step-lanes.png" });
+  // Alt-click removes step 5's point; the x removes the lane.
+  await page.keyboard.down("Alt");
+  await c4.click();
+  await page.keyboard.up("Alt");
+  await expect.poll(async () => (await points()).some((p: { tick: number }) => p.tick === 96)).toBe(false);
+  await page.getByTestId("step-lane-remove-drums-mixer.1.pan").click();
+  await expect.poll(async () => (await rpc("clip.get", { instrument: "drums", clip: null })).lanes).toEqual([]);
+  // A 303's step columns carry a bar per lane: pressing one sets its step.
+  await rpc("instrument.add", { type: "tb303", id: null, name: null, channel: null, no_channel: false });
+  await rpc("clip.lane.set", { instrument: "bass", clip: null, path: "bass.cutoff", points: [{ tick: 0, value: 0.2 }] });
+  await page.getByTestId("select-bass").click();
+  const bass = page.getByTestId("lane-cell-bass-bass.cutoff-2");
+  await bass.scrollIntoViewIfNeeded();
+  const bb = (await bass.boundingBox())!;
+  await page.mouse.click(bb.x + bb.width / 2, bb.y + 1);
+  await expect
+    .poll(async () => (await rpc("clip.get", { instrument: "bass", clip: null })).lanes[0].points.map((p: { tick: number }) => p.tick))
+    .toEqual([0, 48]);
+});
+
+test("modulators: an LFO from the rack, mapped onto a knob by pressing it, depth and unroute", async () => {
+  const { page, rpc } = h;
+  const routes = async () => (await rpc("state.get", {})).graph.mod_routes;
+  await page.getByTestId("add-lfo").click();
+  await expect(page.getByTestId("rack-lfo")).toBeVisible();
+  await expect(page.getByTestId("device-panel-lfo")).toBeVisible();
+  await expect(page.getByTestId("knob-lfo.1.rate")).toBeVisible();
+  // Map mode: press an output, then a knob (the master volume).
+  await page.getByTestId("map-lfo.2").click();
+  await expect(page.getByTestId("mapping")).toContainText("lfo.2");
+  await page.getByTestId("fader-master").scrollIntoViewIfNeeded();
+  await page.getByTestId("knob-mixer.1.pan").click();
+  await expect.poll(routes).toEqual([{ source: "lfo.2", target: "mixer.1.pan", depth: 0.5 }]);
+  await expect(page.getByTestId("mapping")).toHaveCount(0);
+  // The knob was not turned, only routed.
+  expect((await rpc("param.get", { path: "mixer.1.pan" })).value).toBe(0);
+  // Depth from the route's slider, then remove it.
+  await page.getByTestId("depth-lfo.2-mixer.1.pan").fill("-25");
+  await expect.poll(async () => (await routes())[0]?.depth).toBe(-0.25);
+  await page.getByTestId("unroute-lfo.2-mixer.1.pan").click();
+  await expect.poll(routes).toEqual([]);
+  // Escape cancels map mode.
+  await page.getByTestId("map-lfo.1").click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("mapping")).toHaveCount(0);
+});
+
+test("moving values: knobs and faders show where an LFO or a lane has them, beside the value set by hand", async () => {
+  const { page, rpc } = h;
+  const knob = page.getByTestId("knob-mixer.1.pan");
+  await page.getByTestId("fader-master").scrollIntoViewIfNeeded();
+  await expect(knob).not.toHaveAttribute("data-moving", /./);
+  // An LFO on channel 1's pan: the knob gets a second marker that moves.
+  await rpc("device.add", { type: "lfo", id: null, name: null, channel: null, position: null });
+  await rpc("mod.route", { source: "lfo.1", target: "mixer.1.pan", depth: 0.5 });
+  await expect(knob).toHaveAttribute("data-moving", /./);
+  await expect(knob).toHaveAttribute("data-value", "0");
+  await expect(knob).toHaveAttribute("title", /now .*modulated or automated/);
+  await rpc("mod.unroute", { source: "lfo.1", target: "mixer.1.pan" });
+  await expect(knob).not.toHaveAttribute("data-moving", /./);
+  // A lane on channel 1's volume while playing: the fader's marker sits at
+  // the lane's value, and goes when it stops.
+  await rpc("clip.lane.set", { instrument: "drums", clip: null, path: "mixer.1.volume", points: [{ tick: 0, value: 0.25 }] });
+  await rpc("transport.play", {});
+  await expect(page.getByTestId("fader-1-moving")).toBeVisible();
+  expect((await rpc("state.get", {})).moving).toEqual({ "mixer.1.volume": 0.25 });
+  await rpc("transport.stop", {});
+  await expect(page.getByTestId("fader-1-moving")).toHaveCount(0);
+  await rpc("clip.lane.remove", { instrument: "drums", clip: null, path: "mixer.1.volume" });
+  await rpc("device.remove", { id: "lfo" });
+});
+
+test("sampler: load a WAV into a pad from this computer, play it from the step view, clear it", async () => {
+  const { page, rpc } = h;
+  // A 0.2 s 220 Hz tone as a 16-bit mono WAV.
+  const sr = 44100;
+  const n = Math.round(sr * 0.2);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sr, 24);
+  buf.writeUInt32LE(sr * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(12000 * Math.sin((2 * Math.PI * 220 * i) / sr)), 44 + i * 2);
+  await rpc("instrument.add", { type: "sampler", id: "pads", name: null, channel: null, no_channel: false });
+  await page.getByTestId("select-pads").click();
+  await expect(page.getByTestId("sampler-editor-pads")).toBeVisible();
+  await page.getByTestId("pad-load-pads-1").setInputFiles({ name: "tone.wav", mimeType: "audio/wav", buffer: buf });
+  await expect(page.getByTestId("pad-pads-1")).toContainText("tone.wav");
+  expect((await rpc("sampler.get", { instrument: "pads" })).pads.map((p) => p.pad)).toEqual([1]);
+  // Pads are rows of the step view.
+  await page.getByTestId("step-pad1-0").click();
+  await expect.poll(async () => (await rpc("clip.get", { instrument: "pads", clip: null })).events.map((e) => e.note)).toEqual([36]);
+  // The selected pad's knobs.
+  await expect(page.getByTestId("knob-pads.1.tune")).toBeVisible();
+  await page.getByTestId("pad-clear-pads-1").click();
+  await expect(page.getByTestId("pad-pads-1")).toContainText("empty");
+});
+
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
   const { page, rpc } = h;
   // Pad row 1 (snare), column 3 -> snare step 2.

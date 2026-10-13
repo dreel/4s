@@ -30,6 +30,14 @@ pub struct ProjectFile {
     /// master). Their parameters are in `params` under their ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub devices: Vec<ProjectDevice>,
+    /// Modulation routes (RFC 0010).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mod_routes: Vec<crate::device::ModRoute>,
+    /// Samplers' samples by instrument id and pad: a path inside the
+    /// bundle (`samples/...`) once saved, else where it is on the engine
+    /// host.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub samples: BTreeMap<String, BTreeMap<u32, String>>,
     /// Parameter values by path. Unknown paths are ignored on load; missing
     /// paths take their defaults.
     pub params: BTreeMap<String, f64>,
@@ -62,8 +70,10 @@ pub struct ProjectDevice {
     #[ts(rename = "type")]
     pub kind: crate::device::DeviceType,
     pub name: String,
-    /// Whose insert chain: a channel number, or 0 for the master.
-    pub channel: u32,
+    /// Whose insert chain: a channel number, or 0 for the master; absent
+    /// for a modulator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -105,12 +115,15 @@ pub struct ProjectClip {
     pub pattern: Option<ProjectPattern>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events: Option<String>,
+    /// Automation lanes (RFC 0010).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lanes: Vec<crate::clip::Lane>,
 }
 
 impl Default for ProjectClip {
     /// An empty one-bar clip.
     fn default() -> Self {
-        Self { name: None, length: default_clip_length(), pattern: None, events: None }
+        Self { name: None, length: default_clip_length(), pattern: None, events: None, lanes: Vec::new() }
     }
 }
 
