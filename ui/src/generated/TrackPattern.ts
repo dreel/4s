@@ -3,6 +3,6 @@ import type { Voice } from "./Voice";
 
 /**
  * Steps for one track. Each entry is 0 (off), 1 (on), or 2 (accent).
- * Always `MAX_STEPS` long; `sequencer.length` sets how many are played.
+ * Always `MAX_STEPS` long; the clip's length sets how many are played.
  */
 export type TrackPattern = { voice: Voice, steps: Array<number>, };

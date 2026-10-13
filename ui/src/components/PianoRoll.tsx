@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ClipEvent } from "../generated/ClipEvent";
 import type { EventKey } from "../generated/EventKey";
 import type { TakeNote } from "../generated/TakeNote";
-import { act, client, useApp, useLive } from "../store";
+import { act, client, useApp, useLive, useSelectedClipTick } from "../store";
 import { noteName } from "./BassEditor";
 import { GM_NOTES, voiceShort } from "./voices";
 import type { Voice } from "../generated/Voice";
@@ -55,11 +55,7 @@ type Drag =
 export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
   const track = useApp((s) => s.snapshot?.tracks.find((t) => t.instrument === id));
   const clip = useApp((s) => s.snapshot?.clips.find((c) => c.instrument === id && c.id === track?.selected));
-  const stepsLength = useApp((s) => s.snapshot?.params["sequencer.length"] ?? 16);
-  const songMode = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
-  const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
-  const step = useApp((s) => s.snapshot?.transport.step ?? null);
-  const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
+  const head = useSelectedClipTick(id);
   const taking = useLive((s) => s.takeNotes[id] ?? NO_TAKE);
   const [snap, setSnap] = useState(STEP);
   const [zoom, setZoom] = useState(2);
@@ -75,7 +71,7 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
   }, []);
 
   const events = clip?.events ?? [];
-  const length = clip?.length ?? stepsLength * STEP;
+  const length = clip?.length ?? BAR;
   const px = zoom; // pixels per tick
   // Rows, top first: a drum machine's voices (and any other notes in the
   // clip), else pitches C1..C5, widened to fit the clip's notes.
@@ -213,16 +209,6 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
     void update(remove, out);
   };
 
-  // The playhead, where this clip is playing.
-  let head: number | null = null;
-  if (playing && tick !== null) {
-    if (songMode) {
-      const p = track.arrangement.find((q) => q.clip === clip.id && q.start <= tick && tick < q.start + q.length);
-      if (p) head = (tick - p.start + p.offset) % length;
-    } else if (clip.length !== null) head = tick % length;
-    else if (step !== null) head = step * STEP;
-  }
-
   const ghosts = taking.filter((n) => n.clip === clip.id && rowOf(n.note) >= 0);
   // A copy leaves the originals where they are.
   const shown = drag?.kind === "copy" ? events : events.map(moved);
@@ -273,22 +259,21 @@ export function PianoRoll({ id, drums }: { id: string; drums: boolean }) {
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-1" title="the clip's own length; empty follows sequencer.length">
+        <label className="flex items-center gap-1" title="the clip's length: where it loops">
           length (steps)
           <input
             className="w-14 px-1 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-zinc-200"
             type="number"
             min={1}
             max={64}
-            placeholder={`${stepsLength}`}
-            defaultValue={clip.length === null ? "" : Math.round(clip.length / STEP)}
+            defaultValue={Math.round(clip.length / STEP)}
             key={`${clip.id}-${clip.length}`}
             data-testid="roll-length"
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
             onBlur={(e) => {
               // Sent once, when done typing (one undo step).
-              const v = e.target.value === "" ? null : Math.min(64, Math.max(1, Math.round(Number(e.target.value)))) * STEP;
-              if (v !== clip.length && (v === null || Number.isFinite(v))) {
+              const v = Math.min(64, Math.max(1, Math.round(Number(e.target.value)))) * STEP;
+              if (v !== clip.length && Number.isFinite(v)) {
                 void act(client.call("clip.length", { instrument: id, clip: clip.id, length: v }));
               }
             }}

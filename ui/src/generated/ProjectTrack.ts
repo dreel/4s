@@ -17,4 +17,8 @@ clips: { [key in number]: ProjectClip },
 /**
  * Placements on the song timeline, by start.
  */
-arrangement?: Array<Placement>, };
+arrangement?: Array<Placement>, 
+/**
+ * The clip the track loops instead of its arrangement (RFC 0009).
+ */
+launched?: number | null, };

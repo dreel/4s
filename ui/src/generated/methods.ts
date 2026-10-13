@@ -10,6 +10,7 @@ import type { ChannelRenameParams } from "./ChannelRenameParams";
 import type { Clip } from "./Clip";
 import type { ClipEventsParams } from "./ClipEventsParams";
 import type { ClipGetParams } from "./ClipGetParams";
+import type { ClipLaunchParams } from "./ClipLaunchParams";
 import type { ClipLengthParams } from "./ClipLengthParams";
 import type { ClipNewParams } from "./ClipNewParams";
 import type { ClipQuantizeParams } from "./ClipQuantizeParams";
@@ -83,6 +84,7 @@ import type { SeatUnbindParams } from "./SeatUnbindParams";
 import type { SeatUnmapCcParams } from "./SeatUnmapCcParams";
 import type { SetStepParams } from "./SetStepParams";
 import type { Snapshot } from "./Snapshot";
+import type { SongBackParams } from "./SongBackParams";
 import type { SongInfo } from "./SongInfo";
 import type { SongMoveParams } from "./SongMoveParams";
 import type { SongPlaceParams } from "./SongPlaceParams";
@@ -143,11 +145,13 @@ export interface Methods {
   "clip.rename": { params: ClipRenameParams; result: Clip };
   "clip.delete": { params: ClipRefParams; result: TrackInfo };
   "clip.select": { params: ClipRefParams; result: TrackInfo };
+  "clip.launch": { params: ClipLaunchParams; result: TrackInfo };
   "batch": { params: BatchParams; result: BatchResult };
   "song.get": { params: Empty; result: SongInfo };
   "song.place": { params: SongPlaceParams; result: TrackInfo };
   "song.remove": { params: SongRemoveParams; result: TrackInfo };
   "song.move": { params: SongMoveParams; result: TrackInfo };
+  "song.back": { params: SongBackParams; result: SongInfo };
   "voice.trigger": { params: TriggerParams; result: Empty };
   "voice.note_on": { params: NoteParams; result: Empty };
   "voice.note_off": { params: NoteParams; result: Empty };
@@ -236,11 +240,13 @@ export const METHODS: MethodName[] = [
   "clip.rename",
   "clip.delete",
   "clip.select",
+  "clip.launch",
   "batch",
   "song.get",
   "song.place",
   "song.remove",
   "song.move",
+  "song.back",
   "voice.trigger",
   "voice.note_on",
   "voice.note_off",

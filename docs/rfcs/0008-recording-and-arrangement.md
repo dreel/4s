@@ -1,6 +1,9 @@
 # RFC 0008: Recording and the arrangement
 
 - Status: accepted (phases A, B1, and B2 implemented, C in progress; see "Implementation notes")
+- Superseded in part: pattern mode (`song.mode`) and `sequencer.length` are
+  gone; the transport always plays the arrangement, and clip launching
+  replaces pattern mode ([RFC 0009](0009-sequencing-model.md)).
 - Author: Sam (@dreel), drafted with Claude
 - Created: 2026-10-09
 - Discussion: the PR that introduces this RFC.

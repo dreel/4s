@@ -47,13 +47,16 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 
 Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop/locate`), recording (`transport.record`, RFC 0008),
-the song (`song.*`: each track's arrangement, RFC 0008), the
+the song (`song.*`: each track's arrangement, RFC 0008, and `song.back`
+from launched clips, RFC 0009), the
 instrument graph (`instrument.*`, `channel.*`,
 `route.set`), clips (`clip.*`: timed note events, RFC 0007; `clip.update`
 removes and adds in one step, and is how recorded takes are journaled;
 `clip.quantize` takes `events` to quantize only those notes, as
 `4s clip quantize --notes` does;
 `clip.new/duplicate/rename/delete/select` manage each instrument's pool,
+`clip.launch` loops a clip on its track instead of its arrangement, from
+the next `transport.launch_quantize` boundary while playing,
 and the others take an optional `clip`, default the selected one),
 `batch` (several requests as one journal entry and undo step) and their step
 views (`pattern.*`, drum steps and note steps),
@@ -67,7 +70,7 @@ daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md
 ### Generic parameters
 
 Everything that is a value is a parameter with a stable path, e.g.
-`transport.tempo`, `sequencer.length`, `drums.kick.decay`, `bass.cutoff`,
+`transport.tempo`, `song.loop`, `drums.kick.decay`, `bass.cutoff`,
 `mixer.2.volume`, `mixer.master.volume`. Three methods cover them all:
 
 - `param.list {prefix?}` -- the registry: path, label, kind (continuous /

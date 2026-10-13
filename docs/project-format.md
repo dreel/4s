@@ -21,7 +21,7 @@ mysong.4s/
 snapshot; loading applies it. One set of types covers the API and the file, and
 agents can generate or edit projects directly.
 
-It contains (format version 5; RFC 0004, RFC 0007, RFC 0008):
+It contains (format version 6; RFC 0004, RFC 0007, RFC 0008, RFC 0009):
 
 - The graph: `instruments` (`{id, type, name}`, in creation order),
   `channels` (`{n, name}`, in display order), and `routes`
@@ -29,14 +29,16 @@ It contains (format version 5; RFC 0004, RFC 0007, RFC 0008):
   Effects come later.
 - Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,
   `"bass.cutoff": 0.3`).
-- Each instrument's track (RFC 0008) under `tracks`: its clip pool by
-  id, the `selected` clip (what pattern mode plays), and its `arrangement`
-  (placements `{clip, start, length, offset}` in ticks, 384 a bar). Each
-  clip is in the most readable form that says exactly the same thing: a
-  `pattern` (drum step strings per voice, or a note string) or `events`
-  (`tick:note:len:vel` tokens, see `format_events`), with an optional own
-  `length` in ticks and a `name` when it is not its id. An instrument with
-  one empty clip is left out.
+- Each instrument's track (RFC 0008, RFC 0009) under `tracks`: its clip
+  pool by id, the `selected` clip (what the editors edit), its
+  `arrangement` (placements `{clip, start, length, offset}` in ticks, 384 a
+  bar), and the `launched` clip it loops instead of its arrangement, if
+  any. Each clip has a `length` in ticks (where it loops) and is in the
+  most readable form that says exactly the same thing: a `pattern` (drum
+  step strings per voice, or a note string; only for clips of whole
+  steps) or `events` (`tick:note:len:vel` tokens, see `format_events`),
+  with a `name` when it is not its id. An instrument with one empty
+  one-bar clip, nothing placed, and nothing launched is left out.
 - The controller: whether the grid page follows the playhead.
 - Seats (RFC 0007), by name: `focus`, `knob_page`, note `bindings`, `cc`
   maps, and `knobs` that follow the focus. Seats with nothing set are left
@@ -46,11 +48,11 @@ It contains (format version 5; RFC 0004, RFC 0007, RFC 0008):
 
 ```json
 "tracks": {
-  "bass": { "selected": 1, "clips": { "1": { "pattern": "C2! - C2 D#2~ G2 - C2 -" } } },
+  "bass": { "selected": 1, "clips": { "1": { "length": 192, "pattern": "C2! - C2 D#2~ G2 - C2 -" } }, "launched": 1 },
   "drums": {
     "selected": 2,
     "clips": {
-      "1": { "pattern": { "kick": "X---x---X---x---", "snare": "----x-------x---" } },
+      "1": { "length": 384, "pattern": { "kick": "X---x---X---x---", "snare": "----x-------x---" } },
       "2": { "name": "Fill", "length": 72, "events": "0:C3:12:89 36:D#3:6:100" }
     },
     "arrangement": [
@@ -61,8 +63,9 @@ It contains (format version 5; RFC 0004, RFC 0007, RFC 0008):
 }
 ```
 
-Song mode and its loop are parameters (`song.mode`, `song.loop`,
-`song.loop_start`, `song.loop_end`), saved with the others.
+The song's loop and where launches land are parameters (`song.loop`,
+`song.loop_start`, `song.loop_end`, `transport.launch_quantize`), saved
+with the others.
 
 A project is applied all or nothing: it is validated (ids, channel numbers,
 pool limits of 16 instruments, 32 channels, 256 clips, and 256 placements
@@ -93,7 +96,11 @@ a track) before anything changes.
   instrument's pattern or clip into `tracks` as clip 1 of its pool,
   selected, with no arrangement. `focus` became a
   reserved instrument id; a project with an instrument called `focus` must
-  be renamed by hand.
+  be renamed by hand. v5 -> v6 (RFC 0009) drops `song.mode` and
+  `sequencer.length`: a project saved in pattern mode launches each
+  track's selected clip (an instrument without a track gets one, its empty
+  clip launched), so it plays as it did, and a clip without a length gets
+  `sequencer.length` (default 16 steps) in ticks.
 - Parameters are stored by path, so added params take their defaults from the
   parameter registry. Unknown paths are warned about (whether they are kept or
   dropped is decided when building).

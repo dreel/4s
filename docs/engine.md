@@ -1,6 +1,6 @@
 # Engine
 
-Status: v3 (RFC 0004, RFC 0007, RFC 0008 phases A and B). Instruments added and removed at runtime (a
+Status: v4 (RFC 0004, RFC 0007, RFC 0008 phases A and B, RFC 0009 phase 1). Instruments added and removed at runtime (a
 TR-808-style drum machine and a TB-303-style bass synth), each played by a
 clip of timed note events on a shared tick clock with swing, and a
 multi-channel stereo mixer. Code: `crates/engine`.
@@ -121,20 +121,17 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 ## Sequencer
 
 - One shared clock: 96 ticks per quarter note (`PPQ`), 24 per 16th step
-  (`TICKS_PER_STEP`). The playhead counts steps of `sequencer.length`
-  (1-64).
-  Shortening it while playing past the new end goes back to step 1;
-  lengthening it continues where it was.
-- Swing (`transport.swing` 0..1) delays every second 16th: each pair keeps its
-  length and the first note takes 50%..75% of it. Ticks inside a step are
-  spaced evenly.
-- Each instrument slot has a **clip** (RFC 0007): up to `MAX_EVENTS` = 1024
-  events `{tick, len, note, velocity}`, looping at its own length or, by
-  default, at `sequencer.length` steps (clips of different lengths make
-  polymeters; a clip with its own length loops from play, unaffected by
-  changes to `sequencer.length`). On every tick the engine releases the notes that end there,
-  then starts the events that begin there, sample-accurately inside audio
-  blocks.
+  (`TICKS_PER_STEP`), on the song timeline: the transport always plays the
+  arrangement from the locate point (RFC 0009), and `Feedback::Step`
+  reports each step of the song position.
+- Swing (`transport.swing` 0..1) delays every second 16th of the song
+  position: each pair keeps its length and the first note takes 50%..75%
+  of it. Ticks inside a step are spaced evenly.
+- **Clips** (RFC 0007): up to `MAX_EVENTS` = 1024 events `{tick, len,
+  note, velocity}`, each clip looping at its own length (1 tick to 64
+  steps; one bar by default). On every tick the engine releases the notes
+  that end there, then starts the events that begin there,
+  sample-accurately inside audio blocks.
 - Clip storage is preallocated per slot; the daemon edits it with
   `ClearClip`, `AddEvent`, `RemoveEvent`, and `SetClipLength` commands, so
   nothing is allocated or freed on the audio thread.
@@ -147,18 +144,28 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
   mixed after the master fader and its meter, while `metronome.on`, and
   always during a count-in. `Play { count_in }` runs whole bars of clicks
   before tick 0.
-- **Clip table and song mode** (RFC 0008 phase B): clips live in one
+- **Clip table and the song** (RFC 0008 phase B): clips live in one
   preallocated table (`MAX_CLIPS` = 256, each `MAX_EVENTS`) shared by all
-  slots; each slot has a selected clip and up to `MAX_PLACEMENTS` = 256
-  placements `{start, length, offset, clip}`. Pattern mode
-  (`song.mode` off) plays each slot's selected clip as above. Song mode
-  plays, per slot, the placement under the song position, from `offset`
-  into its clip and looping at the clip's length; its notes end with the
-  placement. It plays from the locate point (`Locate`), and at the song's
-  end (the last placement's end) loops the whole song (`song.loop` 1),
-  loops bars `song.loop_start..song.loop_end` when the playhead reaches
-  the range's end (2), or reports `SongEnd` (0) and the daemon stops
-  (unless recording, which goes on past it).
+  slots; each slot has up to `MAX_PLACEMENTS` = 256 placements `{start,
+  length, offset, clip}`. Each slot plays the placement under the song
+  position, from `offset` into its clip and looping at the clip's length;
+  its notes end with the placement. Play starts from the locate point
+  (`Locate`), and at the song's end (the last placement's end) loops the
+  whole song (`song.loop` 1), loops bars `song.loop_start..song.loop_end`
+  when the playhead reaches the range's end (2), or reports `SongEnd` (0)
+  and the daemon stops (unless recording, which goes on past it, or a slot
+  plays a launched clip).
+- **Clip launching** (RFC 0009): `Launch { slot, clip, now }` makes a slot
+  loop a clip instead of its placements (or, with no clip, go back to
+  them). While playing it waits in the slot's preallocated state for the
+  first tick whose song position is a multiple of
+  `transport.launch_quantize` (none, a beat, a bar, two, four), or the
+  next tick with `now`; stopped or counting in, it lands at once, and
+  every launched clip starts from its beginning when play starts. A
+  launched clip loops from the tick it started, whatever the song does (a
+  loop's wrap or a locate does not move it); a switch ends the slot's clip
+  notes and reports `Feedback::Launched { slot, clip, tick }`, from which
+  the daemon knows where the clip is (playheads, recording).
 - Step patterns are views over clips (`crates/protocol/src/clip.rs`): a
   drum step is an event on the step's first tick at the voice's GM note,
   velocity 89 (on, 0.7) or 127 (accent), one step long; a 303 step is an
@@ -171,13 +178,12 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 |------|-------|---------|
 | `transport.tempo` | 20-300 bpm | 120 |
 | `transport.swing` | 0-1 | 0 |
-| `sequencer.length` | 1-64 steps (integer) | 16 |
 | `mixer.master.volume` | 0-1 | 0.8 |
 | `metronome.on` | toggle (not undone) | off |
 | `metronome.level` | 0-1 (squared taper) | 0.6 |
-| `song.mode` | toggle (off pattern, on song) | off |
 | `song.loop` | 0 off, 1 the song, 2 bars (integer) | 1 |
 | `song.loop_start` / `song.loop_end` | bars from 0, end exclusive (integer) | 0 / 4 |
+| `transport.launch_quantize` | 0 none, 1 a beat, 2 a bar, 3 two bars, 4 four bars (integer) | 2 |
 | `mixer.<n>.volume` | 0-1 (squared taper) | 1.0 (unity) |
 | `mixer.<n>.pan` | -1..1 (pan for mono sources, balance for stereo) | 0 |
 | `mixer.<n>.mute` / `.solo` | toggle | off |

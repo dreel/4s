@@ -16,7 +16,7 @@ tail: number | null,
  */
 path: string | null, sample_rate: number | null, 
 /**
- * Song tick to start from, in song mode (default: the locate point).
+ * Song tick to start from (default: the locate point).
  */
 from: number | null, 
 /**

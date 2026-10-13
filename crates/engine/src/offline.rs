@@ -15,18 +15,18 @@ pub struct RenderInstrument {
     pub params: Vec<f32>,
     /// Channel index (0-based) per output, main first.
     pub routes: Vec<Option<u8>>,
-    /// The clip pattern mode plays (an index into `RenderSpec::clips`).
-    pub selected: Option<u16>,
+    /// The clip it loops instead of its arrangement, if launched (an index
+    /// in the clip table).
+    pub launched: Option<u16>,
     /// Its arrangement, by start.
     pub placements: Vec<Placement>,
 }
 
-/// A clip in the engine's clip table: length in ticks (`None` follows
-/// `sequencer.length`) and events.
+/// A clip in the engine's clip table: length in ticks and events.
 #[derive(Clone, Debug)]
 pub struct RenderClip {
     pub index: u16,
-    pub length: Option<u32>,
+    pub length: u32,
     pub events: Vec<ClipEvent>,
 }
 
@@ -39,7 +39,7 @@ pub struct RenderSpec {
     pub channels: Vec<(u8, [f32; crate::params::CHANNEL_PARAMS])>,
     pub instruments: Vec<RenderInstrument>,
     pub clips: Vec<RenderClip>,
-    /// Where song mode plays from.
+    /// Where play starts from.
     pub start: u32,
 }
 
@@ -69,7 +69,9 @@ impl RenderSpec {
             for (o, ch) in inst.routes.iter().enumerate() {
                 let _ = e.apply(Command::SetRoute { slot, output: o as u8, channel: *ch }, &mut fb);
             }
-            let _ = e.apply(Command::SelectClip { slot, clip: inst.selected }, &mut fb);
+            if inst.launched.is_some() {
+                let _ = e.apply(Command::Launch { slot, clip: inst.launched, now: true }, &mut fb);
+            }
             for placement in &inst.placements {
                 let _ = e.apply(Command::AddPlacement { slot, placement: *placement }, &mut fb);
             }
@@ -276,10 +278,10 @@ mod tests {
                 kind: InstrumentType::Tr808,
                 params,
                 routes,
-                selected: Some(0),
+                launched: Some(0),
                 placements: Vec::new(),
             }],
-            clips: vec![RenderClip { index: 0, length: None, events }],
+            clips: vec![RenderClip { index: 0, length: fours_protocol::DEFAULT_CLIP_LENGTH, events }],
             start: 0,
         }
     }

@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use ts_rs::TS;
 
-/// Maximum number of steps a pattern can hold. The active length is the
-/// `sequencer.length` parameter.
+/// Maximum number of steps a pattern (and a clip, in 16ths) can hold.
 pub const MAX_STEPS: usize = 64;
 
 /// Number of drum tracks in a `tr808` (one per voice, one per Livid Block
@@ -291,7 +290,7 @@ pub struct ParamValue {
 // ---------------------------------------------------------------------------
 
 /// Steps for one track. Each entry is 0 (off), 1 (on), or 2 (accent).
-/// Always `MAX_STEPS` long; `sequencer.length` sets how many are played.
+/// Always `MAX_STEPS` long; the clip's length sets how many are played.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct TrackPattern {
     pub voice: Voice,
@@ -327,12 +326,15 @@ pub struct InstrumentPattern {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct TransportState {
     pub playing: bool,
-    /// Current step while playing.
+    /// The song position in steps, while playing.
     pub step: Option<u32>,
-    /// Song tick playing (song mode), while playing.
+    /// The song tick playing, while playing.
     pub tick: Option<u32>,
-    /// Song tick song mode plays from (`transport.locate`).
+    /// Song tick play starts from (`transport.locate`).
     pub start: u32,
+    /// Where each track is playing, by instrument id (tracks playing
+    /// nothing are left out), while playing.
+    pub clips: BTreeMap<String, crate::clip::ClipPlayhead>,
 }
 
 /// How a recording pass treats the notes already in the clip.
@@ -823,9 +825,10 @@ pub enum Event {
     /// Recording started or ended, or its settings changed.
     Record { state: RecordState },
     /// A step started. `time` is engine time in seconds; `tick` is the song
-    /// tick (in song mode, where the song plays; else from play).
-    Playhead { step: u32, tick: u32, time: f64 },
-    /// Song mode's start point moved (`transport.locate`).
+    /// tick and `step` the same in steps; `clips` where each track is
+    /// playing (as `TransportState`).
+    Playhead { step: u32, tick: u32, time: f64, clips: BTreeMap<String, crate::clip::ClipPlayhead> },
+    /// The start point moved (`transport.locate`).
     Located { tick: u32 },
     /// An instrument played (from the sequencer, a pad, MIDI, or an
     /// audition). Drums set `voice`; note instruments set `note`.

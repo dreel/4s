@@ -55,11 +55,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   `midi.input` doesn't cap its length.
 - (2026-10-09, #25 follow-up) a seat-level `pitch_bend` is ignored for a
   model device until its layout is applied (the layout's own target wins).
-- (2026-10-10, recording branch review) recording: a take maps song ticks onto
-  the loop by the current length, but the global loop keeps its own
-  position when `sequencer.length` changes while playing; a length change
-  during a take places later notes off. Report the loop position with
-  `Feedback::Live` (`crates/daemon/src/core/record.rs`, `Take::flush`).
 - (2026-10-10, recording branch review) recording: `Feedback::Live` is sent even
   when the instrument ignores the note (a non-GM note on a `tr808`), so
   recording into a drum machine stores silent events
@@ -103,10 +98,7 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   `voices.ts` (and the record quantize grids into `Transport.tsx`, from
   `clip.rs`'s `GRIDS`); export them through the generated bindings.
 - (2026-10-09, #24 review) editor: the hidden-note count misses extra 303
-  chord notes on a step's first tick, and a clip length that isn't a whole
-  number of steps shows as "loops every 2.5 steps".
-- (2026-10-09, #24 review) `notes_result.length` reports `sequencer.length`
-  even when the clip has its own length.
+  chord notes on a step's first tick.
 - (2026-10-09, #25 review) `Seat.defaults` is a display string; the UI gets
   the device name with `d.split(" ")[0]` (`ui/src/components/Seats.tsx`).
   Make it structured (`{device, model, label}`).
@@ -165,9 +157,6 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 - (2026-10-10, song branch review) `song.loop_start` and `song.loop_end`
   are set separately, so `start >= end` is accepted and the loop silently
   does nothing; the CLI checks it, the UI inputs and `param.set` do not.
-- (2026-10-10, song branch review) turning `song.mode` on while playing
-  goes on from the locate point plus the time played (the engine's song
-  position counts in pattern mode too), not from the locate point.
 - (2026-10-10, song branch review) `apply_sets`' clip-table check counts a
   restored instrument's clip 1 twice (conservative: with exactly enough
   free entries the undo is refused); `validate_project` covers the load's
@@ -270,6 +259,28 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   goes to another track (a selection stays on its tracks), and each move
   or copy there adds a clip to that pool, even if it already has the same
   notes; a drum clip's notes on a 303 play as pitches (and the reverse).
+
+- (2026-10-12, clip launching) a clip length change while it is launched
+  keeps its loop counted from when it started (`(tick - start) % length`),
+  so shortening it can jump into the middle of the new loop; recording
+  into it maps notes the same way, which stays consistent.
+- (2026-10-12, clip launching) `song.back` with no instrument returns every
+  track that has a launch, even one launched by someone else; a per-seat
+  scope may be wanted once several performers launch at once.
+- (2026-10-12, clip launching) a launch that is pending when its clip is
+  deleted goes back at once (`delete_clip`); a pending launch of another
+  clip on the same track is dropped too (the engine keeps one pending
+  switch per slot).
+- (2026-10-12, clip launching) undoing an edit by another user that
+  deleted a launched clip restores the launch even if the track was
+  launched elsewhere since: `launched:<id>` has no per-user conflict check
+  beyond the doc's (`apply_clip_sets`).
+
+- (2026-10-12, clip launching review) deleting a launched clip frees its
+  engine clip-table entry at once, while the engine plays it until the
+  `now` return lands on the next tick; a `clip.new` in the same batch that
+  reuses the entry could sound for that tick on the deleted clip's track.
+  Free the entry on `Feedback::Launched` (`delete_clip`).
 
 ## Mismatches
 

@@ -24,8 +24,9 @@ routes: { [key in string]: number },
  */
 params: { [key in string]: number }, 
 /**
- * Per instrument id (RFC 0008): its clip pool, selected clip, and
- * arrangement. An instrument left out has one empty clip.
+ * Per instrument id (RFC 0008): its clip pool, selected clip,
+ * arrangement, and launched clip. An instrument left out has one empty
+ * one-bar clip and follows its (empty) arrangement.
  */
 tracks: { [key in string]: ProjectTrack }, controller: ProjectController, 
 /**

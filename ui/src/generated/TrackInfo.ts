@@ -3,7 +3,19 @@ import type { ClipHeader } from "./ClipHeader";
 import type { Placement } from "./Placement";
 
 /**
- * An instrument's track: its clip pool, the selected clip, and its
- * arrangement (placements sorted by start, not overlapping).
+ * An instrument's track: its clip pool, the selected clip (what editors
+ * edit), its arrangement (placements sorted by start, not overlapping),
+ * and the clip it loops instead of its arrangement, if launched (RFC
+ * 0009).
  */
-export type TrackInfo = { instrument: string, selected: number, clips: Array<ClipHeader>, arrangement: Array<Placement>, };
+export type TrackInfo = { instrument: string, selected: number, clips: Array<ClipHeader>, arrangement: Array<Placement>, 
+/**
+ * The launched clip the track plays instead of its arrangement; null
+ * follows the arrangement.
+ */
+launched: number | null, 
+/**
+ * A launch or a return to the arrangement is waiting for its quantize
+ * boundary (while playing).
+ */
+pending: boolean, };

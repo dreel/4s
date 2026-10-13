@@ -69,7 +69,7 @@ impl RecordSettings {
 const EARLY: f64 = TICKS_PER_STEP as f64;
 
 /// A played note: when (ticks from play, for spans and lengths), where (the
-/// song position heard; in pattern mode the same), and what.
+/// song position heard), and what.
 #[derive(Clone, Copy, Debug)]
 struct Played {
     tick: f64,
@@ -79,13 +79,14 @@ struct Played {
     velocity: u8,
 }
 
-/// Where a take's notes go when it is written.
+/// Where a take's notes go when it is written (RFC 0009).
 #[derive(Clone, Debug)]
 pub enum TakeTarget {
-    /// Pattern mode: the selected clip, looping at `length` ticks.
-    Clip { clip: u32, length: u32 },
-    /// Song mode: the track's arrangement (each placement with its clip's
-    /// loop length), the song loop, and the id a new clip would get.
+    /// The launched clip the track is playing, looping at `length` ticks
+    /// from tick `start` from play.
+    Clip { clip: u32, length: u32, start: u64 },
+    /// The track's arrangement (each placement with its clip's loop
+    /// length), the song loop, and the id a new clip would get.
     Song { placements: Vec<(Placement, u32)>, looping: Option<(u32, u32)>, next_id: u32 },
 }
 
@@ -109,8 +110,8 @@ pub struct Take {
     closed: Vec<Played>,
     /// Start of the span not written yet: tick from play and song position.
     from: (f64, f64),
-    /// The clip this take made in song mode (id, start, length), which grows
-    /// as notes come after it.
+    /// The clip this take made in the arrangement (id, start, length),
+    /// which grows as notes come after it.
     made: Option<(u32, u32, u32)>,
 }
 
@@ -153,8 +154,9 @@ impl Take {
     }
 
     /// The notes not written yet, where they will go (unquantized; held
-    /// notes as long as they are at tick `now`). In song mode, notes with no
-    /// placement under them are left out (they make a clip when written).
+    /// notes as long as they are at tick `now`). In the arrangement, notes
+    /// with no placement under them are left out (they make a clip when
+    /// written).
     pub fn preview(&self, now: f64, target: &TakeTarget) -> Vec<TakeNote> {
         let held = self.open.iter().map(|p| (Played { end: now.max(p.tick + 1.0), ..*p }, true));
         self.closed
@@ -163,9 +165,9 @@ impl Take {
             .chain(held)
             .filter_map(|(p, held)| {
                 let (clip, tick, clen) = match target {
-                    TakeTarget::Clip { clip, length } => {
+                    TakeTarget::Clip { clip, length, start } => {
                         let l = (*length).max(1);
-                        (*clip, (p.tick.rem_euclid(l as f64).round() as u32) % l, l)
+                        (*clip, ((p.tick - *start as f64).rem_euclid(l as f64).round() as u32) % l, l)
                     }
                     TakeTarget::Song { placements, .. } => {
                         let at = p.pos.floor().max(0.0) as u32;
@@ -184,7 +186,7 @@ impl Take {
     /// play, song position `pos`, starts.
     pub fn due(&self, tick: u64, pos: u64, target: &TakeTarget) -> bool {
         match target {
-            TakeTarget::Clip { length, .. } => tick >= next_flush(self.from.0, *length),
+            TakeTarget::Clip { length, start, .. } => tick >= next_flush(self.from.0 - *start as f64, *length) + start,
             // A song loop writes a step before its end; without one, the
             // take is written when it ends.
             TakeTarget::Song { looping: Some((ls, le)), .. } => {
@@ -231,11 +233,12 @@ impl Take {
         };
         let mut writes = Vec::new();
         match target {
-            TakeTarget::Clip { clip, length } => {
+            TakeTarget::Clip { clip, length, start } => {
                 let length = (*length).max(1);
+                let start = *start as f64;
                 if s.mode == RecordMode::Replace && b > a {
                     let l = length as f64;
-                    let (la, lb) = (a.rem_euclid(l), b.rem_euclid(l));
+                    let (la, lb) = ((a - start).rem_euclid(l), (b - start).rem_euclid(l));
                     let covered = |t: u32| {
                         let t = t as f64;
                         b - a >= l || if la <= lb { t >= la && t < lb } else { t >= la || t < lb }
@@ -243,7 +246,7 @@ impl Take {
                     edits.entry(*clip).or_insert_with(|| existing(*clip)).retain(|e| !covered(e.tick));
                 }
                 for p in notes {
-                    let local = (p.tick.rem_euclid(length as f64).round() as u32) % length;
+                    let local = ((p.tick - start).rem_euclid(length as f64).round() as u32) % length;
                     let len = ((p.end - p.tick).round() as u32).clamp(1, length);
                     put(&mut edits, *clip, ClipEvent { tick: quantize(local, length), len, note: p.note, velocity: p.velocity });
                 }
@@ -302,8 +305,8 @@ impl Take {
         out
     }
 
-    /// Song mode: notes with no placement under them go in clips this take
-    /// makes, in order: whole bars around them, each inside the gap between
+    /// The arrangement: notes with no placement under them go in clips this
+    /// take makes, in order: whole bars around them, each inside the gap between
     /// placements its notes start in (it does not cut other placements), at
     /// most the longest clip; the clip the take made last grows to fit
     /// notes that go on past it.
@@ -455,7 +458,7 @@ pub fn write_requests(instrument: &str, writes: &[Write], existing: &dyn Fn(u32)
                 out.push(Request::ClipLength(ClipLengthParams {
                     instrument: Some(instrument.to_string()),
                     clip: Some(*clip),
-                    length: Some(*length),
+                    length: *length,
                 }));
                 out.push(update(*clip, events));
                 out.push(place(*clip, *start, *length));
@@ -474,7 +477,7 @@ pub fn record_feedback(
     s: &RecordSettings,
     target: &TakeTarget,
     tempo: f64,
-    clips: &mut BTreeMap<u32, (Option<u32>, Vec<ClipEvent>)>,
+    clips: &mut BTreeMap<u32, (u32, Vec<ClipEvent>)>,
 ) {
     let offset = ms_to_ticks(s.offset_ms, tempo);
     let start = match feedback.iter().find_map(|f| if let Feedback::Step { pos, .. } = f { Some(*pos) } else { None }) {
@@ -484,12 +487,12 @@ pub fn record_feedback(
     let mut take = Take::new(0.0, start);
     let mut target = target.clone();
     let (mut last, mut last_pos) = (0u64, start as u64);
-    let apply = |writes: Vec<Write>, clips: &mut BTreeMap<u32, (Option<u32>, Vec<ClipEvent>)>, target: &mut TakeTarget| {
+    let apply = |writes: Vec<Write>, clips: &mut BTreeMap<u32, (u32, Vec<ClipEvent>)>, target: &mut TakeTarget| {
         for w in writes {
             match w {
-                Write::Clip { clip, events } => clips.entry(clip).or_default().1 = events,
+                Write::Clip { clip, events } => clips.entry(clip).or_insert((DEFAULT_CLIP_LENGTH, Vec::new())).1 = events,
                 Write::New { clip, start, length, events } | Write::Grow { clip, start, length, events } => {
-                    clips.insert(clip, (Some(length), events));
+                    clips.insert(clip, (length, events));
                     if let TakeTarget::Song { placements, next_id, .. } = target {
                         let p = Placement { clip, start, length, offset: 0 };
                         let laid = place(&placements.iter().map(|(p, _)| *p).collect::<Vec<_>>(), p);
@@ -537,14 +540,14 @@ pub struct RenderRecord {
     pub settings: RecordSettings,
     pub target: TakeTarget,
     /// The track's clips by id: (name, length, events).
-    pub clips: BTreeMap<u32, (String, Option<u32>, Vec<ClipEvent>)>,
+    pub clips: BTreeMap<u32, (String, u32, Vec<ClipEvent>)>,
     pub tempo: f64,
 }
 
 impl RenderRecord {
     /// Record a render's feedback: the clips the take would change or make.
     pub fn clips(&self, feedback: &[Feedback]) -> Vec<Clip> {
-        let mut clips: BTreeMap<u32, (Option<u32>, Vec<ClipEvent>)> =
+        let mut clips: BTreeMap<u32, (u32, Vec<ClipEvent>)> =
             self.clips.iter().map(|(n, (_, l, e))| (*n, (*l, e.clone()))).collect();
         record_feedback(feedback, self.slot, &self.settings, &self.target, self.tempo, &mut clips);
         clips
@@ -567,9 +570,6 @@ pub(super) struct LiveTake {
     pub instrument: String,
     pub slot: u8,
     pub user: String,
-    /// Recording into the arrangement (song mode when it started), else the
-    /// selected clip.
-    pub song: bool,
     /// The connection that started it (`conn:<id>`), whose seat the
     /// journal records.
     pub client: String,
@@ -609,7 +609,9 @@ impl Core {
                     instrument: id.clone(),
                     slot,
                     settings,
-                    target: self.take_target(&id, self.song_mode()),
+                    // A render plays from the start: a launched clip from
+                    // tick 0.
+                    target: self.take_target(&id, self.track(&id).launched.map(|n| (n, 0))),
                     clips,
                     tempo: self.global(params::TEMPO),
                 })
@@ -618,20 +620,24 @@ impl Core {
         Ok(RenderInput { notes, record })
     }
 
-    /// Where a take into an instrument goes now: its selected clip in
-    /// pattern mode, its arrangement in song mode (`song`: which, fixed when
-    /// the take started).
-    pub(super) fn take_target(&self, id: &str, song: bool) -> TakeTarget {
+    /// Where a take into an instrument goes: the launched clip it plays
+    /// (`launched`: the clip and the tick from play it started at), else
+    /// its arrangement.
+    pub(super) fn take_target(&self, id: &str, launched: Option<(u32, u64)>) -> TakeTarget {
         let t = self.track(id);
-        if song {
-            TakeTarget::Song {
+        match launched {
+            Some((clip, start)) => TakeTarget::Clip { clip, length: self.clip_len(id, clip), start },
+            None => TakeTarget::Song {
                 placements: t.placements.iter().map(|p| (*p, self.clip_len(id, p.clip))).collect(),
                 looping: self.song_loop(),
                 next_id: t.next_id(),
-            }
-        } else {
-            TakeTarget::Clip { clip: t.selected, length: self.clip_len(id, t.selected) }
+            },
         }
+    }
+
+    /// Where the take in progress goes now: what its track is playing.
+    fn live_target(&self, t: &LiveTake) -> TakeTarget {
+        self.take_target(&t.instrument, self.track(&t.instrument).playing)
     }
 
     pub(super) fn record_state(&self) -> RecordState {
@@ -683,7 +689,7 @@ impl Core {
                     let from = if self.playing {
                         (self.play_tick as f64, self.song_pos.map_or(self.play_tick as f64, |p| p as f64))
                     } else {
-                        (0.0, if self.song_mode() { self.locate as f64 } else { 0.0 })
+                        (0.0, self.locate as f64)
                     };
                     if !self.playing {
                         self.start(origin, self.record.count_in * TICKS_PER_BAR);
@@ -693,7 +699,6 @@ impl Core {
                         take,
                         instrument: id,
                         slot,
-                        song: self.song_mode(),
                         user: user.to_string(),
                         client: client.to_string(),
                         origin: origin.to_string(),
@@ -713,11 +718,12 @@ impl Core {
     pub(super) fn record_note(&mut self, slot: u8, note: u8, velocity: f32, on: bool, gate: bool, tick: f64, pos: f64) {
         let offset = ms_to_ticks(self.record.offset_ms, self.global(params::TEMPO));
         let looping = self.song_loop();
+        let song = self.take.as_ref().is_some_and(|t| t.slot == slot && matches!(self.live_target(t), TakeTarget::Song { .. }));
         if let Some(t) = self.take.as_mut().filter(|t| t.slot == slot) {
             // Moved earlier past a song loop's start, it was played before
             // the wrap: at the loop's end.
             let mut p = pos - offset;
-            if let (true, Some((ls, le))) = (t.song, looping)
+            if let (true, Some((ls, le))) = (song, looping)
                 && p < ls as f64
                 && pos >= ls as f64
                 && tick - offset >= 0.0
@@ -732,7 +738,7 @@ impl Core {
     /// Tell clients the notes the take has not written yet.
     fn emit_take_notes(&mut self, now: f64) {
         let Some(t) = &self.take else { return };
-        let notes = t.take.preview(now, &self.take_target(&t.instrument, t.song));
+        let notes = t.take.preview(now, &self.live_target(t));
         let instrument = t.instrument.clone();
         self.emit(&t.origin.clone(), Event::TakeNotes { instrument, notes });
     }
@@ -740,7 +746,7 @@ impl Core {
     /// A step started at tick `tick` from play, song position `pos`: write
     /// a pass when one is due.
     pub(super) fn record_step(&mut self, tick: u64, pos: u64) {
-        let due = self.take.as_ref().is_some_and(|t| t.take.due(tick, pos, &self.take_target(&t.instrument, t.song)));
+        let due = self.take.as_ref().is_some_and(|t| t.take.due(tick, pos, &self.live_target(t)));
         if due {
             self.write_take(tick as f64, pos as f64, false);
         } else if self.take.as_ref().is_some_and(|t| t.take.holding()) {
@@ -768,9 +774,9 @@ impl Core {
         }
     }
 
-    fn write_take(&mut self, upto: f64, upto_pos: f64, end: bool) {
+    pub(super) fn write_take(&mut self, upto: f64, upto_pos: f64, end: bool) {
         let Some(mut t) = self.take.take() else { return };
-        let (target, settings) = (self.take_target(&t.instrument, t.song), self.record.clone());
+        let (target, settings) = (self.live_target(&t), self.record.clone());
         let pool: BTreeMap<u32, Vec<ClipEvent>> =
             self.track(&t.instrument).clips.iter().map(|(n, c)| (*n, c.events.clone())).collect();
         let existing = |n: u32| pool.get(&n).cloned().unwrap_or_default();
@@ -835,9 +841,11 @@ impl Core {
         }
         match req {
             Request::TransportPlay(_) => self.restart_take(),
-            // Jumping while recording in song mode: what was played is
-            // written, and the take goes on from the new position.
-            Request::TransportLocate(p) if self.playing && self.take.as_ref().is_some_and(|t| t.song) => {
+            // Jumping while recording into the arrangement: what was played
+            // is written, and the take goes on from the new position.
+            Request::TransportLocate(p)
+                if self.playing && self.take.as_ref().is_some_and(|t| matches!(self.live_target(t), TakeTarget::Song { .. })) =>
+            {
                 let (tick, pos) = self.take_upto();
                 self.write_take(tick, pos, true);
                 let from = self.play_tick as f64;
@@ -849,15 +857,15 @@ impl Core {
         }
     }
 
-    /// The transport restarts from tick 0 (in song mode, the locate
-    /// point): write the take so far, then keep recording from the start.
+    /// The transport restarts from the locate point: write the take so
+    /// far, then keep recording from the start.
     pub(super) fn restart_take(&mut self) {
         if self.take.is_some() {
             let (tick, pos) = self.take_upto();
             self.write_take(tick, pos, true);
             let locate = self.locate as f64;
             if let Some(t) = self.take.as_mut() {
-                t.take = Take::new(0.0, if t.song { locate } else { 0.0 });
+                t.take = Take::new(0.0, locate);
             }
         }
     }

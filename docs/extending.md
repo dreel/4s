@@ -245,8 +245,8 @@ is a good place to record the design:
 
 - Audio routing beyond instrument outputs to channels: effects, inserts,
   sends and returns, buses, sidechains.
-- Changes to the song model (RFC 0008: clip pools, the arrangement,
-  song mode) beyond its own phases.
+- Changes to the song model (RFC 0008, RFC 0009: clip pools, the
+  arrangement, clip launching) beyond their own phases.
 - Protocol or sync model changes, the daemon lifecycle, the multiplayer
   topology.
 - The UI's overall structure or interaction model.

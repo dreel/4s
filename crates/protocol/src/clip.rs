@@ -4,9 +4,10 @@
 //! event on the step's first tick. These conversions live here so the
 //! daemon, the offline renderer, the CLI, and migrations agree.
 //!
-//! Tracks (RFC 0008 phase B): each instrument has a pool of clips, one of
-//! them selected (what pattern mode plays and the step editors edit), and an
-//! arrangement of placements on the song timeline.
+//! Tracks (RFC 0008 phase B, RFC 0009): each instrument has a pool of
+//! clips, one of them selected (what the step editors edit), an arrangement
+//! of placements on the song timeline, and maybe a launched clip it loops
+//! instead.
 
 use crate::types::*;
 use schemars::JsonSchema;
@@ -29,6 +30,8 @@ pub const MAX_PLACEMENTS: usize = 256;
 pub const MAX_SONG_TICKS: u32 = 999 * TICKS_PER_BAR;
 /// Longest clip, in ticks (`MAX_STEPS` steps).
 pub const MAX_CLIP_TICKS: u32 = MAX_STEPS as u32 * TICKS_PER_STEP;
+/// A new clip's length: one bar.
+pub const DEFAULT_CLIP_LENGTH: u32 = TICKS_PER_BAR;
 
 /// Velocity of an "on" step (0.7, the level steps have always played at).
 pub const VEL_ON: u8 = 89;
@@ -70,14 +73,14 @@ pub struct Clip {
     /// Its id in the instrument's pool (1, 2, ...).
     pub id: u32,
     pub name: String,
-    /// Length in ticks; `None` follows `sequencer.length`.
-    pub length: Option<u32>,
+    /// Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.
+    pub length: u32,
     /// Sorted by (tick, note).
     pub events: Vec<ClipEvent>,
 }
 
-/// A note a take is recording, not written yet: where it will go (in
-/// pattern mode, the selected clip; in song mode, the clip under it), at
+/// A note a take is recording, not written yet: where it will go (the
+/// launched clip it is playing, else the placement's clip under it), at
 /// the tick it was played (before quantize), held so far if still held.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct TakeNote {
@@ -95,7 +98,7 @@ pub struct TakeNote {
 pub struct ClipHeader {
     pub id: u32,
     pub name: String,
-    pub length: Option<u32>,
+    pub length: u32,
 }
 
 /// A clip placed on the song timeline. It plays from `offset` ticks into
@@ -116,14 +119,29 @@ impl Placement {
     }
 }
 
-/// An instrument's track: its clip pool, the selected clip, and its
-/// arrangement (placements sorted by start, not overlapping).
+/// An instrument's track: its clip pool, the selected clip (what editors
+/// edit), its arrangement (placements sorted by start, not overlapping),
+/// and the clip it loops instead of its arrangement, if launched (RFC
+/// 0009).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct TrackInfo {
     pub instrument: String,
     pub selected: u32,
     pub clips: Vec<ClipHeader>,
     pub arrangement: Vec<Placement>,
+    /// The launched clip the track plays instead of its arrangement; null
+    /// follows the arrangement.
+    pub launched: Option<u32>,
+    /// A launch or a return to the arrangement is waiting for its quantize
+    /// boundary (while playing).
+    pub pending: bool,
+}
+
+/// Where a track is playing: the clip and the tick in it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClipPlayhead {
+    pub clip: u32,
+    pub tick: u32,
 }
 
 /// Lay `p` onto an arrangement: placements it covers go, ones it overlaps

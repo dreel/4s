@@ -2,10 +2,11 @@
 import type { ProjectPattern } from "./ProjectPattern";
 
 /**
- * A clip in a project file: a step pattern when one says exactly the same
- * thing (drum step strings per voice, `{"kick": "x---x---"}`, or a note
- * string, `"C2 C2! D#2~ -"`), else events in text form (`tick:note:len:vel`,
- * see `format_events`); both absent for an empty clip.
+ * A clip in a project file: its length, and a step pattern when one says
+ * exactly the same thing (drum step strings per voice, `{"kick":
+ * "x---x---"}`, or a note string, `"C2 C2! D#2~ -"`), else events in text
+ * form (`tick:note:len:vel`, see `format_events`); both absent for an
+ * empty clip.
  */
 export type ProjectClip = { 
 /**
@@ -13,6 +14,6 @@ export type ProjectClip = {
  */
 name?: string | null, 
 /**
- * Ticks; absent follows `sequencer.length`.
+ * Ticks (where it loops).
  */
-length?: number | null, pattern?: ProjectPattern | null, events?: string | null, };
+length: number, pattern?: ProjectPattern | null, events?: string | null, };
