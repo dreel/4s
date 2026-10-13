@@ -19,7 +19,9 @@ const STEP = 24;
 const BEAT = 96;
 const BAR = 384;
 const LANE = 44;
-const RULER = 22;
+/** The loop brace's strip, at the top of the ruler. */
+const BRACE = 10;
+const RULER = 22 + BRACE;
 const HEADER = 128;
 /** Bars shown past the last thing on the timeline. */
 const TAIL = 4;
@@ -214,6 +216,113 @@ function TrackHeader({ id, name, type, armed, selected, seated, h }: { id: strin
   );
 }
 
+/** How a brace drag changes the loop: an end, the whole brace, or a new
+ * one drawn from where it started. */
+type BraceDrag = {
+  mode: "start" | "end" | "move" | "new";
+  x: number;
+  bar: number;
+  /** The loop when the drag started (another client may change it). */
+  s0: number;
+  e0: number;
+  s: number;
+  e: number;
+  moved: boolean;
+};
+
+/** The loop brace (`song.loop` = 2 over bars `song.loop_start` to
+ * `song.loop_end`, end exclusive): drag its ends to resize it, its body to
+ * move it, or empty strip to draw a new one; click its body to turn the
+ * loop on or off, or empty strip to locate. Bars only: the loop's
+ * parameters are whole bars. Each change is one `batch` (one undo step). */
+function LoopBrace({ px, bars, loop, loopStart, loopEnd, locate }: { px: number; bars: number; loop: number; loopStart: number; loopEnd: number; locate: (x: number) => void }) {
+  const [drag, setDrag] = useState<BraceDrag | null>(null);
+  const strip = useRef<HTMLDivElement>(null);
+  const barPx = BAR * px;
+  const on = loop === 2;
+  const xOf = (e: React.PointerEvent) => e.clientX - strip.current!.getBoundingClientRect().left;
+  const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
+  const follow = (d: BraceDrag, e: React.PointerEvent): BraceDrag => {
+    const x = xOf(e);
+    const moved = d.moved || Math.abs(x - d.x) >= 3;
+    if (d.mode === "new") {
+      const b = clamp(Math.floor(x / barPx), 0, 998);
+      return { ...d, moved, s: Math.min(d.bar, b), e: Math.max(d.bar, b) + 1 };
+    }
+    const dx = Math.round((x - d.x) / barPx);
+    if (d.mode === "start") return { ...d, moved, s: clamp(d.s0 + dx, 0, d.e0 - 1) };
+    if (d.mode === "end") return { ...d, moved, e: clamp(d.e0 + dx, d.s0 + 1, 999) };
+    const shift = clamp(dx, -d.s0, 999 - d.e0);
+    return { ...d, moved, s: d.s0 + shift, e: d.e0 + shift };
+  };
+
+  const down = (e: React.PointerEvent, mode: BraceDrag["mode"]) => {
+    e.stopPropagation();
+    e.preventDefault();
+    strip.current!.setPointerCapture(e.pointerId);
+    const x = xOf(e);
+    const bar = clamp(Math.floor(x / barPx), 0, 998);
+    const [s, end] = mode === "new" ? [bar, bar + 1] : [loopStart, loopEnd];
+    setDrag({ mode, x, bar, s0: loopStart, e0: loopEnd, s, e: end, moved: false });
+  };
+
+  const up = (e: React.PointerEvent) => {
+    if (!drag) return;
+    setDrag(null);
+    const d = follow(drag, e);
+    if (!d.moved) {
+      // A click: the body turns the loop on or off; empty strip locates.
+      if (d.mode === "new") locate(d.x);
+      else if (d.mode === "move") void act(client.call("param.set", { path: "song.loop", value: on ? 0 : 2 }));
+      return;
+    }
+    // A drag that ends where the brace was does nothing.
+    if (d.mode !== "new" && d.s === d.s0 && d.e === d.e0) return;
+    const set = (path: string, value: number) => ({ method: "param.set", params: { path, value } });
+    const range = [...(d.s !== d.s0 ? [set("song.loop_start", d.s)] : []), ...(d.e !== d.e0 ? [set("song.loop_end", d.e)] : [])];
+    // The two are independent parameters (any order succeeds); the end
+    // goes first when the brace moved right past its old end, so the range
+    // is never inverted between the two. The loop turns on last.
+    if (d.s >= d.e0) range.reverse();
+    const requests = [...range, ...(!on ? [set("song.loop", 2)] : [])];
+    if (requests.length) void act(client.call("batch", { requests }));
+  };
+
+  const s = drag?.moved ? drag.s : loopStart;
+  const e = drag?.moved ? drag.e : loopEnd;
+  return (
+    <div
+      ref={strip}
+      className="absolute top-0 left-0 cursor-crosshair touch-none"
+      style={{ height: BRACE, width: bars * barPx }}
+      title="drag: draw a loop - click: play from there"
+      data-testid="arr-loop-strip"
+      onClick={(ev) => ev.stopPropagation()}
+      onPointerDown={(ev) => down(ev, "new")}
+      onPointerMove={(ev) => drag && setDrag(follow(drag, ev))}
+      onPointerUp={up}
+      onPointerCancel={() => setDrag(null)}
+    >
+      {e > s && (
+        <div
+          className={`absolute top-0.5 rounded-sm cursor-grab ${on || drag?.moved ? "bg-amber-500/70" : "bg-zinc-600/50"}`}
+          style={{ left: s * barPx, width: (e - s) * barPx, height: BRACE - 2 }}
+          title={`loop ${on ? "on" : "off"}: bars ${s + 1} to ${e} - drag to move, its ends to resize, click to turn ${on ? "off" : "on"}`}
+          data-testid="arr-loop"
+          data-on={on}
+          data-start={s}
+          data-end={e}
+          onPointerDown={(ev) => down(ev, "move")}
+        >
+          <div className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize" data-testid="arr-loop-start" onPointerDown={(ev) => down(ev, "start")} />
+          <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize" data-testid="arr-loop-end" onPointerDown={(ev) => down(ev, "end")} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Arrangement() {
   const instruments = useApp((s) => s.snapshot?.graph.instruments ?? []);
   const tracks = useApp((s) => s.snapshot?.tracks);
@@ -224,7 +333,7 @@ export function Arrangement() {
   const song = useApp((s) => (s.snapshot?.params["song.mode"] ?? 0) >= 0.5);
   const loop = useApp((s) => s.snapshot?.params["song.loop"] ?? 0);
   const loopStart = useApp((s) => s.snapshot?.params["song.loop_start"] ?? 0);
-  const loopEnd = useApp((s) => s.snapshot?.params["song.loop_end"] ?? 0);
+  const loopEnd = useApp((s) => s.snapshot?.params["song.loop_end"] ?? 4);
   const start = useApp((s) => s.snapshot?.transport.start ?? 0);
   const playing = useApp((s) => s.snapshot?.transport.playing ?? false);
   const tick = useApp((s) => s.snapshot?.transport.tick ?? null);
@@ -239,16 +348,14 @@ export function Arrangement() {
 
   // The end of the last placement (`song.get`'s `length`).
   const end = useMemo(() => Math.max(0, ...(tracks ?? []).flatMap((t) => t.arrangement.map((p) => p.start + p.length))), [tracks]);
-  const bars = Math.max(MIN_BARS, Math.ceil(Math.max(end, start, loop === 2 ? loopEnd * BAR : 0) / BAR) + TAIL);
+  const bars = Math.max(MIN_BARS, Math.ceil(Math.max(end, start, loopEnd * BAR) / BAR) + TAIL);
   const width = bars * BAR * px;
   const focus = seat ? (seat.config.focus ?? instruments[0]?.id ?? null) : null;
   const head = playing && song && tick !== null ? tick : null;
 
-  const locate = (e: React.MouseEvent<HTMLDivElement>) => {
-    const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
-    const t = Math.max(0, Math.round(x / px / snap) * snap);
-    void act(client.call("transport.locate", { tick: t }));
-  };
+  /** Play from `x` pixels into the timeline, snapped. */
+  const locateAt = (x: number) => void act(client.call("transport.locate", { tick: Math.max(0, Math.round(x / px / snap) * snap) }));
+  const locate = (e: React.MouseEvent<HTMLDivElement>) => locateAt(e.clientX - e.currentTarget.getBoundingClientRect().left);
   const snapTo = (t: number) => Math.round(t / snap) * snap;
   const placementAt = (id: string, start: number) => tracks?.find((t) => t.instrument === id)?.arrangement.find((p) => p.start === start);
   const place = (id: string, p: { clip: number; start: number; length: number | null; offset: number | null }) => ({
@@ -372,7 +479,7 @@ export function Arrangement() {
             ))}
           </select>
         </label>
-        <span className="ml-auto text-zinc-500">ruler: play from there - drag: move - edge: length - alt-drag: copy - Delete: remove - drag a clip from the pool into its lane</span>
+        <span className="ml-auto text-zinc-500">ruler: play from there - top strip: drag a loop, click it on/off - drag: move - edge: length - alt-drag: copy - Delete: remove - drag a clip from the pool into its lane</span>
       </div>
       <div className="flex overflow-x-auto rounded border border-zinc-800 bg-zinc-950" data-testid="arr-scroll">
         {/* Track headers, sticky on the left. */}
@@ -400,16 +507,9 @@ export function Arrangement() {
             data-testid="arr-ruler"
             onClick={locate}
           >
-            {loop === 2 && loopEnd > loopStart && (
-              <div
-                className="absolute top-0 h-1.5 bg-amber-500/70 rounded-sm"
-                style={{ left: loopStart * BAR * px, width: (loopEnd - loopStart) * BAR * px }}
-                title={`loop: bars ${loopStart + 1} to ${loopEnd}`}
-                data-testid="arr-loop"
-              />
-            )}
+            <LoopBrace px={px} bars={bars} loop={loop} loopStart={loopStart} loopEnd={loopEnd} locate={locateAt} />
             {Array.from({ length: bars }, (_, b) => (
-              <span key={b} className="absolute top-1.5 pl-1 border-l border-zinc-700 h-full" style={{ left: b * BAR * px }}>
+              <span key={b} className="absolute pl-1 border-l border-zinc-700 bottom-0" style={{ left: b * BAR * px, top: BRACE + 2 }}>
                 {b + 1}
               </span>
             ))}
