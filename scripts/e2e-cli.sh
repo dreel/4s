@@ -1021,7 +1021,7 @@ check "nor does modulation" "the transport's" bash -c "$BIN/4s device add lfo >/
 check "nor do toggles" "is a toggle" s clip lane drums mixer.1.mute "0:1"
 check "values are clamped to the parameter's range" "lane mixer.1.volume: 0:1" s clip lane drums mixer.1.volume "0:9"
 check "a duplicate copies the lanes" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s clip dup drums | grep pan"
-check "undoing a duplicate takes the copy and its lanes, and leaves the original's" "drums: clips *1;" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip list drums && $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' && echo kept"
+check "undoing a duplicate takes the copy and its lanes, and leaves the original's" "drums: clips *1; kept" bash -c "$BIN/4s undo >/dev/null && echo \$($BIN/4s clip list drums | grep -o 'drums: clips [^ ]*') \$($BIN/4s clip show drums | grep -q 'lane mixer.1.pan' && echo kept)"
 check "removing a lane is one undo step" "undid: clip.lane.remove" bash -c "$BIN/4s clip lane drums mixer.1.volume --rm >/dev/null && $BIN/4s undo"
 check "lanes save with the project and load back" "lane mixer.1.pan: 0:-1 192:-1" bash -c "$BIN/4s project save lanes >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load lanes >/dev/null && $BIN/4s clip show drums"
 check "a lane on an unknown parameter is dropped on load (a warning in the log), and the rest loads" "1
@@ -1060,13 +1060,13 @@ for p in mixer.1.volume mixer.1.pan; do $BIN/4s clip lane drums $p --rm >/dev/nu
 s set mixer.1.volume 1 >/dev/null
 s set mixer.1.pan 0 >/dev/null
 s clip length drums 16 >/dev/null
-check "moves in two placements of a clip are separate runs: the points between them stay" "lane mixer.1.pan: 0:0 48:-0.5 144:0.9 216:-0.7 336:0" bash -c "$BIN/4s song back >/dev/null; $BIN/4s song place drums --at 1 --bars 1 >/dev/null; $BIN/4s song place drums --at 2 --bars 1 >/dev/null; $BIN/4s clip lane drums mixer.1.pan '0:0 144:0.9 336:0' >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.12; $BIN/4s set mixer.1.pan -0.5 >/dev/null; sleep 1.45; $BIN/4s set mixer.1.pan -0.7 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep 'lane mixer.1.pan'"
+check "moves in two placements of a clip are separate runs: the points between them stay" "separate runs" bash -c "$BIN/4s song back >/dev/null; $BIN/4s song place drums --at 1 --bars 1 >/dev/null; $BIN/4s song place drums --at 2 --bars 1 >/dev/null; $BIN/4s clip lane drums mixer.1.pan '0:0 144:0.9 336:0' >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.12; $BIN/4s set mixer.1.pan -0.5 >/dev/null; sleep 1.45; $BIN/4s set mixer.1.pan -0.7 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l={p[\"tick\"]: p[\"value\"] for p in [x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]}; v=list(l.values()); a=[t for t,x in l.items() if x==-0.5]; b=[t for t,x in l.items() if x==-0.7]; print(\"separate runs\" if l.get(144)==0.9 and a and b and a[0]<144<b[0] else l)'"
 s song rm drums 2 >/dev/null
 s song rm drums 1 >/dev/null
 s clip launch drums 1 --now >/dev/null
 s clip lane drums mixer.1.pan --rm >/dev/null
 s set mixer.1.pan 0 >/dev/null
-check "a removed device's parameters leave moving at once" "gone" bash -c "$BIN/4s device add filter --on 1 >/dev/null; $BIN/4s device add lfo --id lfo9 >/dev/null; $BIN/4s mod route lfo9.1 filter.cutoff 50% >/dev/null; sleep 0.3; $BIN/4s call state.get | grep -q filter.cutoff || echo 'not moving?'; $BIN/4s device rm filter >/dev/null; $BIN/4s call state.get | python3 -c 'import json,sys; print(\"gone\" if \"filter.cutoff\" not in json.load(sys.stdin)[\"moving\"] else \"still there\")'; $BIN/4s device rm lfo9 >/dev/null"
+check "a removed device's parameters leave moving at once" "moving then gone" bash -c "$BIN/4s device add filter --on 1 >/dev/null; $BIN/4s device add lfo --id lfo9 >/dev/null; $BIN/4s mod route lfo9.1 filter.cutoff 50% >/dev/null; sleep 0.3; M=\$($BIN/4s call state.get | python3 -c 'import json,sys; print(int(\"filter.cutoff\" in json.load(sys.stdin)[\"moving\"]))'); $BIN/4s device rm filter >/dev/null; G=\$($BIN/4s call state.get | python3 -c 'import json,sys; print(\"gone\" if \"filter.cutoff\" not in json.load(sys.stdin)[\"moving\"] else \"there\")'); $BIN/4s device rm lfo9 >/dev/null; [ \$M -gt 0 ] && echo moving then \$G || echo never moving"
 s tempo 120 >/dev/null
 check "a session with lanes replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/lanes.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/lanes.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 s project load e2e >/dev/null

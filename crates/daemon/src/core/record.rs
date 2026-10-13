@@ -816,10 +816,10 @@ impl Core {
 
     /// The `clip.lane.set` requests that write a take's knob moves. Moves
     /// run forward through the clip until it loops (a pass can cross the
-    /// loop point) or another placement of it plays; each run replaces the lane's points in the span it
-    /// covers, others stay (a lane full of other points gives up those
-    /// farthest from the runs);
-    /// a clip with no room for another lane is skipped.
+    /// loop point) or another placement of it plays; each run replaces the
+    /// lane's points from its first move to its last, others stay (a lane
+    /// full of other points gives up those farthest from the runs); a clip
+    /// with no room for another lane is skipped.
     fn move_requests(&self, t: &LiveTake) -> Vec<Request> {
         let mut out = Vec::new();
         // New lanes this pass adds to each clip, so it never asks for more

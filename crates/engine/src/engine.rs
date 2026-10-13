@@ -1090,7 +1090,9 @@ impl Engine {
                         let v = if whole { v.round() } else { v };
                         self.write_param(target, v.clamp(min, max));
                         self.note_moved(target, v.clamp(min, max));
-                        if self.snap_lanes == SnapLanes::First && !self.automated.iter().flatten().any(|a| a.0 == target) {
+                        // Every lane starts on play's first tick, even one
+                        // automating its target when play came.
+                        if self.snap_lanes == SnapLanes::First {
                             self.snap_target(target);
                         }
                     }
