@@ -362,6 +362,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   on recording the next pass (no "touch" mode that lets go while a knob is
   held). Moves on a track with nothing under the playhead are not
   recorded (no clip is made for them, unlike notes).
+- (2026-10-13, e2e playhead waits) the knob-recording checks wait for the
+  playhead (`at.py`) to place their moves, but still space moves and wait
+  for a last move with short sleeps; if one gets flaky, wait for the
+  playhead there too.
 - (2026-10-12, knob recording review) unwritten knob moves have no
   preview (notes have `take_notes`), so a take's automation
   shows up only when its pass is written.

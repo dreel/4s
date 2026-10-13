@@ -1035,7 +1035,8 @@ check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip 
 # Wait for the playhead (instead of sleeping, so slow machines land the
 # same): `at.py song <tick>` for a song tick, `at.py clip <tick> [--wrap]`
 # for the drums clip's tick (after it next loops, with --wrap). A song tick
-# only grows, so it returns once the playhead is at or past it; a clip loops,
+# grows within a pass of the song, so it returns once the playhead is at or
+# past it (a song that loops brings a missed one round again); a clip loops,
 # so it waits for the beat from the tick (a miss comes round again).
 cat > "$TMP/at.py" <<PY
 import json, subprocess, sys, time
