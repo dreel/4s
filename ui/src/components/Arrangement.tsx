@@ -6,13 +6,16 @@
 // clip's name and a note preview, with looped repeats marked. Drag a
 // placement to move it, its right edge to resize it (longer loops the clip),
 // alt-drag to copy; click selects and Delete removes; drag a clip from a
-// header's pool into its lane to place it. Drags show where they go and send
-// on release, one undo step each; the daemon decides, the view only draws.
+// header's pool into its lane to place it; double-click a placement to open
+// its clip in the piano roll below (which selects it). The ruler's top strip
+// holds the loop brace. Drags show where they go and send on release, one
+// undo step each; the daemon decides, the view only draws.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Clip } from "../generated/Clip";
 import type { Placement } from "../generated/Placement";
 import { act, client, mySeat, select, useApp, useSelected } from "../store";
+import { PianoRoll } from "./PianoRoll";
 
 /** Ticks per step, beat, and bar, as in the protocol. */
 const STEP = 24;
@@ -53,6 +56,8 @@ type Handlers = {
   up: (e: React.PointerEvent) => void;
   /** The pointer was taken away (a system gesture, the window lost focus). */
   cancel: () => void;
+  /** Open a placement's clip in the piano roll below. */
+  open: (id: string, clip: number) => void;
 };
 
 /** A placement's clip drawn as notes, repeated where the placement loops it,
@@ -136,6 +141,7 @@ function Lane({ id, px, bars, drag, picked, h }: { id: string; px: number; bars:
         onPointerMove={h.move}
         onPointerUp={h.up}
         onPointerCancel={h.cancel}
+        onDoubleClick={at === null ? undefined : () => h.open(id, p.clip)}
       >
         <div className="px-1 text-[10px] leading-4 truncate">{clip?.name ?? p.clip}</div>
         <NotePreview placement={p} clip={clip} clipLength={lengthOf(p.clip)} px={px} />
@@ -342,6 +348,13 @@ export function Arrangement() {
   const [drag, setDrag] = useState<Drag | null>(null);
   // The selected placement: its track and start.
   const [picked, setPicked] = useState<{ id: string; start: number } | null>(null);
+  // The instrument whose selected clip the piano roll panel shows.
+  const [roll, setRoll] = useState<string | null>(null);
+  const rolled = instruments.find((i) => i.id === roll);
+  // A removed instrument closes it (one added later with its id stays shut).
+  useEffect(() => {
+    if (roll && !rolled) setRoll(null);
+  }, [roll, rolled]);
   const root = useRef<HTMLElement>(null);
   const lanes = useRef<HTMLDivElement>(null);
   const px = zoom / BAR;
@@ -395,6 +408,11 @@ export function Arrangement() {
       if (d) setDrag(d);
     },
     cancel: () => setDrag(null),
+    open: (id, clip) => {
+      select(id);
+      setRoll(id);
+      if (tracks?.find((t) => t.instrument === id)?.selected !== clip) void act(client.call("clip.select", { instrument: id, clip }));
+    },
     up: (e) => {
       if (!drag) return;
       setDrag(null);
@@ -479,7 +497,7 @@ export function Arrangement() {
             ))}
           </select>
         </label>
-        <span className="ml-auto text-zinc-500">ruler: play from there - top strip: drag a loop, click it on/off - drag: move - edge: length - alt-drag: copy - Delete: remove - drag a clip from the pool into its lane</span>
+        <span className="ml-auto text-zinc-500">ruler: play from there - top strip: drag a loop, click it on/off - drag: move - edge: length - alt-drag: copy - Delete: remove - double-click: piano roll - drag a clip from the pool into its lane</span>
       </div>
       <div className="flex overflow-x-auto rounded border border-zinc-800 bg-zinc-950" data-testid="arr-scroll">
         {/* Track headers, sticky on the left. */}
@@ -540,6 +558,26 @@ export function Arrangement() {
           )}
         </div>
       </div>
+      {rolled && (
+        // A click in the roll leaves the placement selection (its Delete
+        // is for notes there).
+        <div className="flex flex-col gap-1" data-testid="arr-roll" data-instrument={rolled.id} onPointerDownCapture={() => setPicked(null)}>
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <span>
+              piano roll: <span className="text-zinc-200">{rolled.name}</span>
+            </span>
+            <button
+              className="ml-auto px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500"
+              title="close the piano roll"
+              data-testid="arr-roll-close"
+              onClick={() => setRoll(null)}
+            >
+              close
+            </button>
+          </div>
+          <PianoRoll id={rolled.id} drums={rolled.type === "tr808"} />
+        </div>
+      )}
     </section>
   );
 }

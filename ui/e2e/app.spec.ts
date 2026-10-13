@@ -723,6 +723,72 @@ test("arrangement loop brace: draw, move, resize, and toggle by dragging the rul
   await page.getByTestId("arrangement").screenshot({ path: "test-results/arrangement-loop.png" });
 });
 
+test("arrangement piano roll: double-click a placement opens its clip below; edits land in that clip; close", async () => {
+  const { page, rpc } = h;
+  await rpc("clip.rename", { instrument: "drums", clip: 1, name: "Verse" });
+  await rpc("clip.new", { instrument: "drums", name: "Fill", length: 384, select: false });
+  await rpc("song.place", { instrument: "drums", clip: 1, start: 0, length: 384, offset: null });
+  await rpc("song.place", { instrument: "drums", clip: 2, start: 768, length: 384, offset: null });
+  const events = async (clip: number) => (await rpc("clip.get", { instrument: "drums", clip })).events;
+  const selected = async () => (await rpc("song.get", {})).tracks.find((t: { instrument: string }) => t.instrument === "drums")!.selected;
+  const arrangement = async () => (await rpc("song.get", {})).tracks.find((t: { instrument: string }) => t.instrument === "drums")!.arrangement;
+  const before = await arrangement();
+  await expect(page.getByTestId("placement-drums-768")).toBeVisible();
+  await page.getByTestId("arrangement").scrollIntoViewIfNeeded();
+
+  // Double-click the Fill placement: its clip is selected and opens below.
+  await page.getByTestId("placement-drums-768").dblclick();
+  const panel = page.getByTestId("arr-roll");
+  await expect(panel).toHaveAttribute("data-instrument", "drums");
+  await expect.poll(selected).toBe(2);
+  await expect(panel.getByTestId("pianoroll-drums")).toContainText("Fill");
+  // A click in its grid adds a note to Fill, not to clip 1.
+  await panel.getByTestId("roll-zoom").selectOption("1");
+  await panel.scrollIntoViewIfNeeded();
+  const grid = panel.getByTestId("roll-grid");
+  const box = (await grid.boundingBox())!;
+  await page.mouse.click(box.x + 50, box.y + 16 + 8); // the snare row, step 3
+  await expect.poll(() => events(2)).toEqual([{ tick: 48, len: 24, note: 38, velocity: 100 }]);
+  expect(await events(1)).toEqual([]);
+  // Delete there removes the note, not the placement selected by the
+  // double-click.
+  await expect(panel.getByTestId("note-48-38")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Delete");
+  await expect.poll(() => events(2)).toEqual([]);
+  expect(await arrangement()).toEqual(before);
+
+  // With the editor's roll open on the same clip too, Delete goes only to
+  // the roll last clicked.
+  await rpc("clip.add", {
+    instrument: "drums",
+    clip: 2,
+    events: [{ tick: 0, len: 24, note: 36, velocity: 100 }, { tick: 192, len: 24, note: 36, velocity: 100 }],
+  });
+  await page.getByTestId("view-roll").click();
+  const editorRoll = page.getByTestId("editor").getByTestId("pianoroll-drums");
+  await editorRoll.getByTestId("note-0-36").click();
+  await expect(editorRoll.getByTestId("note-0-36")).toHaveAttribute("data-selected", "true");
+  await panel.getByTestId("note-192-36").click();
+  await expect(panel.getByTestId("note-192-36")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Delete");
+  await expect.poll(() => events(2)).toEqual([{ tick: 0, len: 24, note: 36, velocity: 100 }]);
+  // Closed, the panel hands the keys back: the editor's roll deletes its
+  // selected note.
+  await page.getByTestId("arr-roll-close").click();
+  await expect(editorRoll.getByTestId("note-0-36")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Delete");
+  await expect.poll(() => events(2)).toEqual([]);
+  await page.getByTestId("view-steps").click();
+
+  // The other placement opens its own clip.
+  await page.getByTestId("arrangement").scrollIntoViewIfNeeded();
+  await page.getByTestId("placement-drums-0").dblclick();
+  await expect.poll(selected).toBe(1);
+  await expect(panel.getByTestId("pianoroll-drums")).toContainText("Verse");
+  await page.getByTestId("arr-roll-close").click();
+  await expect(panel).toHaveCount(0);
+});
+
 test("piano roll: add, move, resize, copy, select, delete, velocity, quantize, and take notes", async () => {
   const { page, rpc } = h;
   const clip = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).events;

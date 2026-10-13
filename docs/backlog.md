@@ -227,6 +227,14 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   (`song.loop_start`/`song.loop_end` are integer bar parameters), so the
   brace ignores a beat or off snap. Clicking the brace off sets
   `song.loop` to 0 even if it was 1 (the whole song) before.
+- (2026-10-11, #32 review) loop brace polish: the lanes' loop tint shows
+  the committed range, not the drag preview (and only while `song.loop` =
+  2); a brace dragged past the visible bars draws outside the grid until
+  the view grows.
+- (2026-10-11, arrangement-roll branch) the arrangement's piano roll panel
+  and the editor's piano roll view can show the same clip at once, with
+  the same `data-testid`s (e2e locators must scope to `arr-roll`), and
+  each keeps its own note selection.
 - (2026-10-11, #32 CI) the Electron e2e mouse drags use page coordinates
   and fail when the window is small: at 800x600 the arrangement editing
   test (#31) misses (the loop brace test was hardened for #32's CI). A
