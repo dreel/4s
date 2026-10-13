@@ -353,7 +353,7 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   points between steps show as the value there, editable in the roll).
 - (2026-10-13, #48 review) lanes: no e2e for a pass at `MAX_EVENTS` still
   writing its lanes; no Electron check for another client's edit during a
-  lane-point drag; the placement-runs e2e check uses wall-clock sleeps.
+  lane-point drag.
   RFC 0010's play-start note says the target's smoother snaps; it is the
   whole strip or device (`snap_target`).
 - (2026-10-12, knob recording) lanes: a knob moved before a take's first
@@ -362,9 +362,8 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   on recording the next pass (no "touch" mode that lets go while a knob is
   held). Moves on a track with nothing under the playhead are not
   recorded (no clip is made for them, unlike notes).
-- (2026-10-12, knob recording review) the loop-crossing e2e check relies
-  on wall-clock sleeps; poll the playhead if it gets flaky. Unwritten knob
-  moves have no preview (notes have `take_notes`), so a take's automation
+- (2026-10-12, knob recording review) unwritten knob moves have no
+  preview (notes have `take_notes`), so a take's automation
   shows up only when its pass is written.
 - (2026-10-12, knob recording review) only requests record knob moves
   (`acting` is unset otherwise): pitch bend, which is not a request, never

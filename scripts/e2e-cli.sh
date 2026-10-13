@@ -1032,35 +1032,55 @@ s clip lane drums filter.mode --rm >/dev/null
 check "a lane on an effect goes with the effect" "no lane" bash -c "$BIN/4s clip lane drums filter.cutoff '0:0.1' >/dev/null && $BIN/4s device rm filter >/dev/null && ($BIN/4s clip show drums | grep -q filter.cutoff || echo no lane)"
 check "...and undo brings both back" "lane filter.cutoff: 0:0.1" bash -c "$BIN/4s undo >/dev/null && $BIN/4s clip show drums"
 check "without the lane, the render is even again" "even" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null && python3 '$TMP/lr.py'"
+# Wait for the playhead (instead of sleeping, so slow machines land the
+# same): `at.py song <tick>` for a song tick, `at.py clip <tick> [--wrap]`
+# for the drums clip's tick (after it next loops, with --wrap). It returns
+# once the playhead is at or just past the tick (within a beat).
+cat > "$TMP/at.py" <<PY
+import json, subprocess, sys, time
+kind, want, wrap = sys.argv[1], int(sys.argv[2]), "--wrap" in sys.argv
+last, end = None, time.time() + 10
+while time.time() < end:
+    t = json.loads(subprocess.check_output(["$BIN/4s", "call", "state.get"]))["transport"]
+    now = t["tick"] if kind == "song" else (t["clips"].get("drums") or {}).get("tick")
+    if now is not None:
+        if wrap and last is not None and now < last:
+            wrap = False
+        if not wrap and want <= now < want + 96:
+            sys.exit(0)
+        last = now
+    time.sleep(0.005)
+sys.exit("the playhead never reached %s %d" % (kind, want))
+PY
 # Knob moves while recording become a lane in the clip under the playhead
 # (on the 1/16 grid), written with the pass: one undo step.
 cat > "$TMP/autorec.sh" <<SH
 $BIN/4s tempo 240 >/dev/null
 $BIN/4s clip length drums 64 >/dev/null
 $BIN/4s record --count-in 0 >/dev/null
-sleep 0.2
+python3 '$TMP/at.py' song 24 >/dev/null
 for v in -1 -0.5 0 0.5 1; do $BIN/4s set mixer.1.pan \$v >/dev/null; sleep 0.15; done
 $BIN/4s stop >/dev/null
 SH
 check "knob moves while recording become a lane, rising with the knob" "rising" bash -c "$BIN/4s clip lane drums mixer.1.pan --rm >/dev/null 2>&1; bash '$TMP/autorec.sh'; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; v=[p[\"value\"] for p in l]; t=[p[\"tick\"] for p in l]; print(\"rising\" if len(v)>=3 and v==sorted(v) and all(x%24==0 for x in t) else l)'"
 check "...written with the pass, one undo step" "undid: clip.lane.set" s undo
 check "...which removes the lane" "no lane" bash -c "$BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || echo no lane"
-check "a pass across the loop point keeps the earlier pass's points" "kept" bash -c "$BIN/4s clip length drums 16 >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.15; for i in 1 2 3 4 5 6 7 8 9; do $BIN/4s set mixer.1.pan 0.\$i >/dev/null; sleep 0.07; done; sleep 0.3; for i in 1 2 3; do $BIN/4s set mixer.1.pan -0.5 >/dev/null; sleep 0.07; done; $BIN/4s stop >/dev/null; $BIN/4s clip length drums 32 >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; print(\"kept\" if any(p[\"tick\"]>=192 and p[\"value\"]>0 for p in l) and any(p[\"value\"]==-0.5 for p in l) else l)'"
+check "a pass across the loop point keeps the earlier pass's points" "kept" bash -c "$BIN/4s clip length drums 16 >/dev/null; $BIN/4s record --count-in 0 >/dev/null; for v in 48:0.2 144:0.4 240:0.6 312:0.8; do python3 '$TMP/at.py' clip \${v%%:*} >/dev/null && $BIN/4s set mixer.1.pan \${v#*:} >/dev/null; done; python3 '$TMP/at.py' clip 24 --wrap >/dev/null && $BIN/4s set mixer.1.pan -0.5 >/dev/null; python3 '$TMP/at.py' clip 72 >/dev/null && $BIN/4s set mixer.1.pan -0.5 >/dev/null; $BIN/4s stop >/dev/null; $BIN/4s clip length drums 32 >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l=[x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]; print(\"kept\" if any(p[\"tick\"]>=192 and p[\"value\"]>0 for p in l) and any(p[\"value\"]==-0.5 for p in l) else l)'"
 s clip lane drums mixer.1.pan --rm >/dev/null
 s set mixer.1.pan 0 >/dev/null
-check "another player's moves meanwhile are not recorded, only the recorder's" "lane mixer.1.volume" bash -c "$BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s --user bob set mixer.1.pan 0.7 >/dev/null; $BIN/4s set mixer.1.volume 0.5 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || $BIN/4s clip show drums | grep lane"
+check "another player's moves meanwhile are not recorded, only the recorder's" "lane mixer.1.volume" bash -c "$BIN/4s record --count-in 0 >/dev/null; python3 '$TMP/at.py' song 24 >/dev/null; $BIN/4s --user bob set mixer.1.pan 0.7 >/dev/null; $BIN/4s set mixer.1.volume 0.5 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s clip show drums | grep -q 'lane mixer.1.pan' || $BIN/4s clip show drums | grep lane"
 s clip lane drums mixer.1.volume --rm >/dev/null
 s set mixer.1.volume 1 >/dev/null
-check "a mapped CC's moves are recorded too" "lane mixer.1.pan: " bash -c "$BIN/4s cc map keys 21 mixer.1.pan >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s midi send keys B0 15 40 >/dev/null; sleep 0.15; $BIN/4s midi send keys B0 15 7F >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s cc unmap keys 21 >/dev/null; $BIN/4s clip show drums | grep 'lane mixer.1.pan'"
+check "a mapped CC's moves are recorded too" "lane mixer.1.pan: " bash -c "$BIN/4s cc map keys 21 mixer.1.pan >/dev/null; $BIN/4s record --count-in 0 >/dev/null; python3 '$TMP/at.py' song 24 >/dev/null; $BIN/4s midi send keys B0 15 40 >/dev/null; sleep 0.15; $BIN/4s midi send keys B0 15 7F >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s cc unmap keys 21 >/dev/null; $BIN/4s clip show drums | grep 'lane mixer.1.pan'"
 s clip lane drums mixer.1.pan --rm >/dev/null
 s set mixer.1.pan 0 >/dev/null
-check "a clip with room for one more lane takes one, and the pass keeps its notes" "8 lanes, 1 notes" bash -c "$BIN/4s clip lane drums filter.cutoff --rm >/dev/null 2>&1; for k in kick snare clap closed_hat open_hat low_tom high_tom; do $BIN/4s clip lane drums drums.\$k.level 0:0.5 >/dev/null; done; $BIN/4s clip clear drums >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.3; $BIN/4s set mixer.1.volume 0.5 >/dev/null; $BIN/4s set mixer.1.pan 0.5 >/dev/null; $BIN/4s key C2 --for 0.05 >/dev/null; sleep 0.3; $BIN/4s stop >/dev/null; echo \$($BIN/4s clip show drums | grep -c lane) lanes, \$($BIN/4s clip show drums | head -1 | grep -o '[0-9]* notes')"
+check "a clip with room for one more lane takes one, and the pass keeps its notes" "8 lanes, 1 notes" bash -c "$BIN/4s clip lane drums filter.cutoff --rm >/dev/null 2>&1; for k in kick snare clap closed_hat open_hat low_tom high_tom; do $BIN/4s clip lane drums drums.\$k.level 0:0.5 >/dev/null; done; $BIN/4s clip clear drums >/dev/null; $BIN/4s record --count-in 0 >/dev/null; python3 '$TMP/at.py' song 24 >/dev/null; $BIN/4s set mixer.1.volume 0.5 >/dev/null; $BIN/4s set mixer.1.pan 0.5 >/dev/null; $BIN/4s key C2 --for 0.05 >/dev/null; sleep 0.3; $BIN/4s stop >/dev/null; echo \$($BIN/4s clip show drums | grep -c lane) lanes, \$($BIN/4s clip show drums | head -1 | grep -o '[0-9]* notes')"
 for k in kick snare clap closed_hat open_hat low_tom high_tom; do s clip lane drums drums.$k.level --rm >/dev/null; done
 for p in mixer.1.volume mixer.1.pan; do $BIN/4s clip lane drums $p --rm >/dev/null 2>&1 || true; done
 s set mixer.1.volume 1 >/dev/null
 s set mixer.1.pan 0 >/dev/null
 s clip length drums 16 >/dev/null
-check "moves in two placements of a clip are separate runs: the points between them stay" "separate runs" bash -c "$BIN/4s song back >/dev/null; $BIN/4s song place drums --at 1 --bars 1 >/dev/null; $BIN/4s song place drums --at 2 --bars 1 >/dev/null; $BIN/4s clip lane drums mixer.1.pan '0:0 144:0.9 336:0' >/dev/null; $BIN/4s record --count-in 0 >/dev/null; sleep 0.12; $BIN/4s set mixer.1.pan -0.5 >/dev/null; sleep 1.45; $BIN/4s set mixer.1.pan -0.7 >/dev/null; sleep 0.2; $BIN/4s stop >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l={p[\"tick\"]: p[\"value\"] for p in [x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]}; v=list(l.values()); a=[t for t,x in l.items() if x==-0.5]; b=[t for t,x in l.items() if x==-0.7]; print(\"separate runs\" if l.get(144)==0.9 and a and b and a[0]<144<b[0] else l)'"
+check "moves in two placements of a clip are separate runs: the points between them stay" "separate runs" bash -c "$BIN/4s song back >/dev/null; $BIN/4s song place drums --at 1 --bars 1 >/dev/null; $BIN/4s song place drums --at 2 --bars 1 >/dev/null; $BIN/4s clip lane drums mixer.1.pan '0:0 144:0.9 336:0' >/dev/null; $BIN/4s record --count-in 0 >/dev/null; python3 '$TMP/at.py' song 48 >/dev/null && $BIN/4s set mixer.1.pan -0.5 >/dev/null; python3 '$TMP/at.py' song 600 >/dev/null && $BIN/4s set mixer.1.pan -0.7 >/dev/null; python3 '$TMP/at.py' song 672 >/dev/null; $BIN/4s stop >/dev/null; $BIN/4s --json clip show drums | python3 -c 'import json,sys; l={p[\"tick\"]: p[\"value\"] for p in [x for x in json.load(sys.stdin)[\"lanes\"] if x[\"path\"]==\"mixer.1.pan\"][0][\"points\"]}; v=list(l.values()); a=[t for t,x in l.items() if x==-0.5]; b=[t for t,x in l.items() if x==-0.7]; print(\"separate runs\" if l.get(144)==0.9 and a and b and a[0]<144<b[0] else l)'"
 s song rm drums 2 >/dev/null
 s song rm drums 1 >/dev/null
 s clip launch drums 1 --now >/dev/null
