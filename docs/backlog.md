@@ -300,6 +300,14 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   (`refresh_controller`); cache the rows and length, or compare only what
   can change in a tick.
 
+- (2026-10-12, #41 review) un-bypassing a delay clears both 2 s buffers in
+  one callback (about 768 KB at 48 kHz): no allocation, but a CPU spike;
+  clear only what the delay time can read, or over several blocks
+  (`crates/engine/src/effect.rs`, `Delay::reset`).
+- (2026-10-12, #41 review) undo's ownership blocking covers `instrument:`
+  keys only (`crates/daemon/src/journal.rs`, `plan`): undoing a device's
+  add removes it even if another user edited its parameters since.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

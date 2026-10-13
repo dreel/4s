@@ -5,9 +5,9 @@
  */
 export type DeviceMoveParams = { id: string, 
 /**
- * 0 is the master.
+ * 0 is the master; default: the chain it is in.
  */
-channel: number, 
+channel: number | null, 
 /**
  * Default: the end.
  */

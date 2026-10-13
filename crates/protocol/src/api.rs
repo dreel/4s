@@ -239,8 +239,9 @@ pub struct DeviceRefParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct DeviceMoveParams {
     pub id: String,
-    /// 0 is the master.
-    pub channel: u32,
+    /// 0 is the master; default: the chain it is in.
+    #[serde(default)]
+    pub channel: Option<u32>,
     /// Default: the end.
     #[serde(default)]
     pub position: Option<u32>,
@@ -258,6 +259,9 @@ pub struct InstrumentRemoveParams {
 pub struct ChannelAddParams {
     #[serde(default)]
     pub name: Option<String>,
+    /// A return bus instead of a track channel (RFC 0010).
+    #[serde(default)]
+    pub kind: Option<ChannelKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]

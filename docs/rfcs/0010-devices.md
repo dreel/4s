@@ -1,6 +1,6 @@
 # RFC 0010: Devices: effects, buses, modulators, a sampler, automation
 
-- Status: accepted (phase 2 implemented; Sam asked to keep building and
+- Status: accepted (phases 2 and 3 implemented; Sam asked to keep building and
   review the stack later, so the choices marked "default" are reversible
   and open to review; see "Implementation notes")
 - Author: Sam (@dreel), drafted with Claude
@@ -305,4 +305,22 @@ instruments.
   knob per parameter from the registry, bypass, earlier/later, remove).
 - Not yet: per-channel peaks in `4s render` (the CLI e2e checks a delay by
   its onsets instead); `seat.focus` on an effect (knobs for effects).
+
+## Implementation notes (phase 3: return buses and sends)
+
+- `ChannelInfo.kind` (`track` or `return`), `channel.add { kind }`; a
+  return takes no instrument (`route.set`, `instrument.add --channel`, and
+  project routes to it are refused or ignored), and new instruments skip
+  returns when they look for an empty channel.
+- Sends are parameters, `mixer.<n>.send.<m>` (0..1), one per track
+  channel and return, added and removed with the graph; post-fader (a
+  muted track sends nothing), ramped across each block, into the return's
+  balance. Returns are mixed after every track channel and are not
+  silenced by another channel's solo.
+- Undo: a return is `channel:<n>` plus `return:<n>`; its sends are
+  parameters, so removing a return and undoing it brings them back.
+- CLI: `4s channel add --return`, `4s send <from> <to> <level>`; `4s
+  mixer` shows each return's sends.
+- UI: "+ return" on the console; a return strip shows `return` instead of
+  an input; every track strip has a send knob per return.
 

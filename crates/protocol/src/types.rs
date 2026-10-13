@@ -239,6 +239,27 @@ pub struct ChannelInfo {
     /// Stable channel number (1..=MAX_CHANNELS); paths are `mixer.<n>.*`.
     pub n: u32,
     pub name: String,
+    /// A track channel (instrument outputs feed it) or a return bus (fed by
+    /// the track channels' sends, RFC 0010).
+    #[serde(default, skip_serializing_if = "ChannelKind::is_track")]
+    pub kind: ChannelKind,
+}
+
+/// What feeds a mixer channel.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    /// Instrument outputs routed to it.
+    #[default]
+    Track,
+    /// The track channels' sends (`mixer.<n>.send.<m>`); mixed after them.
+    Return,
+}
+
+impl ChannelKind {
+    pub fn is_track(&self) -> bool {
+        *self == ChannelKind::Track
+    }
 }
 
 /// Instruments, mixer channels, and the routes between them.

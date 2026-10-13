@@ -232,21 +232,22 @@ impl Core {
 
     fn device_move(&mut self, p: DeviceMoveParams, origin: &str) -> Result<Graph, RpcError> {
         self.find_device(&p.id)?;
-        self.check_chain(p.channel)?;
         let (from, _) = self.device_place(&p.id).ok_or_else(|| RpcError::failed(format!("'{}' is in no chain", p.id)))?;
-        let mut target = self.chains.get(&p.channel).cloned().unwrap_or_default();
+        let channel = p.channel.unwrap_or(from);
+        self.check_chain(channel)?;
+        let mut target = self.chains.get(&channel).cloned().unwrap_or_default();
         target.retain(|d| d != &p.id);
         if target.len() >= MAX_INSERTS {
             return Err(RpcError::invalid(format!("at most {MAX_INSERTS} inserts on a channel")));
         }
         self.ensure_room(2)?;
-        if from != p.channel {
+        if from != channel {
             let rest: Vec<String> = self.chains[&from].iter().filter(|d| **d != p.id).cloned().collect();
             self.set_chain_unchecked(from, rest);
         }
         let at = p.position.map_or(target.len(), |q| (q as usize).min(target.len()));
         target.insert(at, p.id.clone());
-        self.set_chain_unchecked(p.channel, target);
+        self.set_chain_unchecked(channel, target);
         self.graph_changed(origin);
         Ok(self.graph())
     }

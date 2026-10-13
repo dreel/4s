@@ -48,7 +48,9 @@ request, -32601 unknown method, -32602 invalid params, -32000 failed,
 Explicit methods for things that are not a single parameter: transport
 (`transport.play/stop/locate`), recording (`transport.record`, RFC 0008),
 devices (`device.*`, RFC 0010: the registry of every device type, and
-audio effects added to, moved in, and removed from insert chains), the
+audio effects added to, moved in, and removed from insert chains; return
+buses are channels added with `kind: "return"`, fed by the
+`mixer.<n>.send.<m>` parameters), the
 song (`song.*`: each track's arrangement, RFC 0008, and `song.back`
 from launched clips, RFC 0009), the
 instrument graph (`instrument.*`, `channel.*`,

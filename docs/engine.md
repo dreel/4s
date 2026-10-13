@@ -59,7 +59,12 @@ Per block of up to 256 frames (blocks also split at step boundaries):
 3. Each channel runs its **insert chain** of audio effects (RFC 0010; up to
    `MAX_INSERTS` = 8, in order), then applies its fader (squared taper) and
    mute/solo, and is metered (post fader, left and right peaks).
-4. Channels sum into the master, which runs its own insert chain, then
+4. Track channels send post-fader to **return** channels
+   (`mixer.<n>.send.<m>`, ramped per block, through the return's balance);
+   returns then run their chains and faders like any channel, after every
+   track (so a send never feeds itself). Another channel's solo does not
+   silence a return.
+5. Channels sum into the master, which runs its own insert chain, then
    applies its fader and a soft clipper above 0.8.
 
 Gains and pans are smoothed (10 ms) to avoid clicks. Outputs that are not
@@ -205,6 +210,7 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 | `mixer.<n>.volume` | 0-1 (squared taper) | 1.0 (unity) |
 | `mixer.<n>.pan` | -1..1 (pan for mono sources, balance for stereo) | 0 |
 | `mixer.<n>.mute` / `.solo` | toggle | off |
+| `mixer.<n>.send.<m>` | 0-1, track channel `n` to return `m` (post-fader) | 0 |
 | `<drums>.<voice>.tune` | -12..12 semitones | 0 |
 | `<drums>.<voice>.decay` | 0-1 | per voice |
 | `<drums>.<voice>.tone` | 0-1 | 0.5 |

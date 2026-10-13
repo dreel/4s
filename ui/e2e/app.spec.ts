@@ -217,7 +217,7 @@ test("303 note editor edits the daemon's note pattern, and back", async () => {
 
 test("808 voice output: route a voice to its own channel from the UI and over RPC", async () => {
   const { page, rpc } = h;
-  const ch = await rpc("channel.add", { name: "Kick" });
+  const ch = await rpc("channel.add", { name: "Kick", kind: null });
   await page.getByTestId("out-kick").selectOption(String(ch.n));
   await expect.poll(async () => (await rpc("state.get", {})).graph.routes["drums.kick"]).toBe(ch.n);
   await expect(page.getByTestId(`strip-source-${ch.n}`)).toHaveText("drums.kick");
@@ -1180,6 +1180,21 @@ test("devices: add effects to a strip and the master, their panel's knobs and by
   await rpc("history.undo", {});
   await expect(page.getByTestId("insert-filter")).toBeVisible();
   await page.screenshot({ path: "test-results/devices.png", fullPage: true });
+});
+
+test("returns: a return bus with a reverb, fed by a send knob on a track strip", async () => {
+  const { page, rpc } = h;
+  await page.getByTestId("add-return").click();
+  await expect(page.getByTestId("return-2")).toBeVisible();
+  // Every track strip gets a send knob per return; the return has none.
+  await expect(page.getByTestId("knob-mixer.1.send.2")).toBeVisible();
+  await expect(page.getByTestId("sends-2")).toHaveCount(0);
+  await rpc("param.set", { path: "mixer.1.send.2", value: 0.5 });
+  await expect(page.getByTestId("knob-mixer.1.send.2")).toHaveAttribute("data-value", "0.5");
+  await page.getByTestId("insert-add-2").selectOption("reverb");
+  await expect.poll(async () => (await rpc("device.list", {})).devices.map((d) => `${d.id}@${d.channel}`)).toEqual(["reverb@2"]);
+  // A return takes no instrument.
+  await expect(rpc("route.set", { source: "drums", channel: 2, swap: false })).rejects.toThrow("return bus");
 });
 
 test("virtual Livid Block pads, LEDs, and knobs", async () => {

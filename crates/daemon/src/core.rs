@@ -329,6 +329,13 @@ impl Core {
                 entries.push((info, ParamTarget::Channel { ch: (c.n - 1) as u8, index: i as u8 }));
             }
         }
+        // A send from every track channel to every return (RFC 0010).
+        for c in self.channels.iter().filter(|c| c.kind == ChannelKind::Track) {
+            for r in self.channels.iter().filter(|c| c.kind == ChannelKind::Return) {
+                let info = params::cont(format!("mixer.{}.send.{}", c.n, r.n), format!("{} Send {}", c.name, r.name), 0.0, 1.0, 0.0, None);
+                entries.push((info, ParamTarget::Send { ch: (c.n - 1) as u8, ret: (r.n - 1) as u8 }));
+            }
+        }
         for inst in &self.instruments {
             for (i, info) in instrument::params(inst.kind, &inst.id).into_iter().enumerate() {
                 entries.push((info, ParamTarget::Instrument { slot: inst.slot, index: i as u16 }));
@@ -428,6 +435,9 @@ impl Core {
         } else if let Some(n) = p.channel {
             if !self.channels.iter().any(|c| c.n == n) {
                 return Err(RpcError::invalid(format!("no channel {n}")));
+            }
+            if self.is_return(n) {
+                return Err(RpcError::invalid(format!("channel {n} is a return bus: sends feed it, not instruments")));
             }
             Some(n)
         } else if let Some(n) = self.first_empty_channel() {
@@ -554,15 +564,25 @@ impl Core {
 
     /// The first channel, in display order, that nothing is routed to.
     fn first_empty_channel(&self) -> Option<u32> {
-        self.channels.iter().map(|c| c.n).find(|n| !self.routes.values().any(|r| r == n))
+        self.channels.iter().filter(|c| c.kind == ChannelKind::Track).map(|c| c.n).find(|n| !self.routes.values().any(|r| r == n))
     }
 
     /// Lowest free channel number, activated in the engine at defaults.
     fn add_channel_unchecked(&mut self, name: &str) -> u32 {
         let n = (1..=MAX_CHANNELS as u32).find(|n| !self.channels.iter().any(|c| c.n == *n)).unwrap();
-        self.send(Command::SetChannelActive { ch: (n - 1) as u8, active: true });
-        self.channels.push(ChannelInfo { n, name: name.to_string() });
+        self.activate_channel(ChannelInfo { n, name: name.to_string(), kind: ChannelKind::Track });
         n
+    }
+
+    /// Activate a channel in the engine (at its defaults, a return if it is
+    /// one) and add it to the graph.
+    fn activate_channel(&mut self, c: ChannelInfo) {
+        let ch = (c.n - 1) as u8;
+        self.send(Command::SetChannelActive { ch, active: true });
+        if c.kind == ChannelKind::Return {
+            self.send(Command::SetChannelReturn { ch, ret: true });
+        }
+        self.channels.push(c);
     }
 
     fn remove_channel_unchecked(&mut self, n: u32) {
@@ -578,16 +598,23 @@ impl Core {
         self.channels.retain(|c| c.n != n);
     }
 
-    pub fn channel_add(&mut self, name: Option<String>, origin: &str) -> Result<ChannelInfo, RpcError> {
+    pub fn channel_add(&mut self, name: Option<String>, kind: Option<ChannelKind>, origin: &str) -> Result<ChannelInfo, RpcError> {
         if self.channels.len() >= MAX_CHANNELS {
             return Err(RpcError::invalid(format!("at most {MAX_CHANNELS} channels")));
         }
-        self.ensure_room(2)?;
+        self.ensure_room(3 + MAX_CHANNELS)?;
+        let kind = kind.unwrap_or_default();
         let n = (1..=MAX_CHANNELS as u32).find(|n| !self.channels.iter().any(|c| c.n == *n)).unwrap();
-        let name = check_name(name)?.unwrap_or_else(|| format!("Ch {n}"));
-        self.add_channel_unchecked(&name);
+        let default = if kind == ChannelKind::Return { format!("Return {n}") } else { format!("Ch {n}") };
+        let name = check_name(name)?.unwrap_or(default);
+        let info = ChannelInfo { n, name, kind };
+        self.activate_channel(info.clone());
         self.graph_changed(origin);
-        Ok(ChannelInfo { n, name })
+        Ok(info)
+    }
+
+    pub(super) fn is_return(&self, n: u32) -> bool {
+        self.channels.iter().any(|c| c.n == n && c.kind == ChannelKind::Return)
     }
 
     fn check_channel(&self, n: u32) -> Result<(), RpcError> {
@@ -645,6 +672,9 @@ impl Core {
         })?;
         if let Some(n) = p.channel {
             self.check_channel(n)?;
+            if self.is_return(n) {
+                return Err(RpcError::invalid(format!("channel {n} is a return bus: sends feed it, not instruments")));
+            }
         }
         // With `swap`, whatever else feeds the target channel takes this
         // source's old place. If it had none, they stay and share the channel,
@@ -885,7 +915,16 @@ impl Core {
                 (ch, ids.iter().filter_map(|id| self.devices.iter().find(|d| &d.id == id).map(|d| d.slot)).collect())
             })
             .collect();
-        RenderSpec { globals, channels, instruments, clips, effects, chains, start: self.locate }
+        let returns = self.channels.iter().filter(|c| c.kind == ChannelKind::Return).map(|c| (c.n - 1) as u8).collect();
+        let sends = self
+            .params
+            .iter()
+            .filter_map(|p| match p.target {
+                ParamTarget::Send { ch, ret } if p.value > 0.0 => Some((ch, ret, p.value as f32)),
+                _ => None,
+            })
+            .collect();
+        RenderSpec { globals, channels, instruments, clips, effects, chains, returns, sends, start: self.locate }
     }
 
     // ---- parameters --------------------------------------------------------
@@ -1527,8 +1566,7 @@ impl Core {
 
         // Build.
         for c in &file.channels {
-            self.send(Command::SetChannelActive { ch: (c.n - 1) as u8, active: true });
-            self.channels.push(ChannelInfo { n: c.n, name: c.name.trim().to_string() });
+            self.activate_channel(ChannelInfo { n: c.n, name: c.name.trim().to_string(), kind: c.kind });
         }
         for (slot, i) in file.instruments.iter().enumerate() {
             self.add_instrument_unchecked(&i.id, i.kind, i.name.trim(), slot as u8);
@@ -1539,7 +1577,7 @@ impl Core {
             chains.entry(d.channel).or_default().push(d.id.clone());
         }
         for (source, n) in &file.routes {
-            match (self.find_source(source), self.channels.iter().any(|c| c.n == *n)) {
+            match (self.find_source(source), self.channels.iter().any(|c| c.n == *n && c.kind == ChannelKind::Track)) {
                 (Some((id, o)), true) => self.set_route_unchecked(&id, o, Some(*n)),
                 _ => warnings.push(format!("ignored route {source} -> {n}")),
             }
@@ -1689,6 +1727,9 @@ impl Core {
         self.device_doc(&mut d);
         for c in &self.channels {
             d.insert(format!("channel:{}", c.n), json!(c.name));
+            if c.kind == ChannelKind::Return {
+                d.insert(format!("return:{}", c.n), json!(true));
+            }
         }
         d.insert("channels:order".into(), json!(self.channels.iter().map(|c| c.n).collect::<Vec<_>>()));
         for (source, n) in &self.routes {
@@ -1796,6 +1837,8 @@ impl Core {
     /// has other sources is not removed).
     fn apply_sets(&mut self, sets: &[(String, Value)], origin: &str) -> Result<Vec<String>, RpcError> {
         let mut channels: Vec<(u32, Option<String>)> = Vec::new();
+        // Channels that come back as returns.
+        let mut returns: Vec<u32> = Vec::new();
         let mut instruments: Vec<(String, Option<(InstrumentType, String)>)> = Vec::new();
         let mut order: Option<Vec<u32>> = None;
         let mut routes: Vec<(String, Option<u32>)> = Vec::new();
@@ -1808,6 +1851,13 @@ impl Core {
             let Some((kind, rest)) = key.split_once(':') else { continue };
             let parsed = match kind {
                 "channel" => rest.parse().ok().map(|n| channels.push((n, v.as_str().map(String::from)))),
+                // A channel's kind cannot change, so only a channel that
+                // comes back needs it.
+                "return" => rest.parse().ok().map(|n| {
+                    if v.as_bool() == Some(true) {
+                        returns.push(n)
+                    }
+                }),
                 "instrument" => {
                     let inst = v.get("type").and_then(Value::as_str).and_then(InstrumentType::parse);
                     let name = v.get("name").and_then(Value::as_str).unwrap_or(rest).to_string();
@@ -1898,8 +1948,8 @@ impl Core {
             match self.channels.iter_mut().find(|c| c.n == *n) {
                 Some(c) => c.name = name.clone(),
                 None => {
-                    self.send(Command::SetChannelActive { ch: (*n - 1) as u8, active: true });
-                    self.channels.push(ChannelInfo { n: *n, name: name.clone() });
+                    let kind = if returns.contains(n) { ChannelKind::Return } else { ChannelKind::Track };
+                    self.activate_channel(ChannelInfo { n: *n, name: name.clone(), kind });
                 }
             }
             graph = true;
@@ -2209,7 +2259,7 @@ impl Core {
             Request::InstrumentList(_) => ok(InstrumentListResult { instruments: self.graph().instruments }),
             Request::InstrumentAdd(p) => ok(self.instrument_add(p, origin)?),
             Request::InstrumentRemove(p) => ok(self.instrument_remove(p, origin)?),
-            Request::ChannelAdd(p) => ok(self.channel_add(p.name, origin)?),
+            Request::ChannelAdd(p) => ok(self.channel_add(p.name, p.kind, origin)?),
             Request::ChannelRemove(p) => ok(self.channel_remove(p.n, origin)?),
             Request::ChannelRename(p) => ok(self.channel_rename(p.n, p.name, origin)?),
             Request::ChannelMove(p) => ok(self.channel_move(p, origin)?),
@@ -2502,7 +2552,7 @@ fn default_project() -> ProjectFile {
     ProjectFile {
         format_version: PROJECT_FORMAT_VERSION,
         instruments: vec![ProjectInstrument { id: "drums".into(), kind: InstrumentType::Tr808, name: "Drums".into() }],
-        channels: vec![ChannelInfo { n: 1, name: "Drums".into() }],
+        channels: vec![ChannelInfo { n: 1, name: "Drums".into(), kind: ChannelKind::Track }],
         routes: BTreeMap::from([("drums".to_string(), 1)]),
         devices: Vec::new(),
         params: BTreeMap::new(),

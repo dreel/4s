@@ -78,6 +78,10 @@
       },
       "ChannelInfo": {
         "properties": {
+          "kind": {
+            "$ref": "#/$defs/ChannelKind",
+            "description": "A track channel (instrument outputs feed it) or a return bus (fed by\nthe track channels' sends, RFC 0010)."
+          },
           "n": {
             "description": "Stable channel number (1..=MAX_CHANNELS); paths are `mixer.<n>.*`.",
             "format": "uint32",
@@ -93,6 +97,21 @@
           "name"
         ],
         "type": "object"
+      },
+      "ChannelKind": {
+        "description": "What feeds a mixer channel.",
+        "oneOf": [
+          {
+            "const": "track",
+            "description": "Instrument outputs routed to it.",
+            "type": "string"
+          },
+          {
+            "const": "return",
+            "description": "The track channels' sends (`mixer.<n>.send.<m>`); mixed after them.",
+            "type": "string"
+          }
+        ]
       },
       "ChannelLevel": {
         "properties": {
@@ -1965,6 +1984,10 @@
       },
       "ChannelInfo": {
         "properties": {
+          "kind": {
+            "$ref": "#/$defs/ChannelKind",
+            "description": "A track channel (instrument outputs feed it) or a return bus (fed by\nthe track channels' sends, RFC 0010)."
+          },
           "n": {
             "description": "Stable channel number (1..=MAX_CHANNELS); paths are `mixer.<n>.*`.",
             "format": "uint32",
@@ -1980,6 +2003,21 @@
           "name"
         ],
         "type": "object"
+      },
+      "ChannelKind": {
+        "description": "What feeds a mixer channel.",
+        "oneOf": [
+          {
+            "const": "track",
+            "description": "Instrument outputs routed to it.",
+            "type": "string"
+          },
+          {
+            "const": "return",
+            "description": "The track channels' sends (`mixer.<n>.send.<m>`); mixed after them.",
+            "type": "string"
+          }
+        ]
       },
       "DeviceType": {
         "description": "A device type that is not an instrument.",
@@ -2540,6 +2578,18 @@
       },
       "ChannelAddParams": {
         "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ChannelKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A return bus instead of a track channel (RFC 0010)."
+          },
           "name": {
             "default": null,
             "type": [
@@ -2552,6 +2602,10 @@
       },
       "ChannelInfo": {
         "properties": {
+          "kind": {
+            "$ref": "#/$defs/ChannelKind",
+            "description": "A track channel (instrument outputs feed it) or a return bus (fed by\nthe track channels' sends, RFC 0010)."
+          },
           "n": {
             "description": "Stable channel number (1..=MAX_CHANNELS); paths are `mixer.<n>.*`.",
             "format": "uint32",
@@ -2567,6 +2621,21 @@
           "name"
         ],
         "type": "object"
+      },
+      "ChannelKind": {
+        "description": "What feeds a mixer channel.",
+        "oneOf": [
+          {
+            "const": "track",
+            "description": "Instrument outputs routed to it.",
+            "type": "string"
+          },
+          {
+            "const": "return",
+            "description": "The track channels' sends (`mixer.<n>.send.<m>`); mixed after them.",
+            "type": "string"
+          }
+        ]
       },
       "ChannelMoveParams": {
         "properties": {
@@ -3084,10 +3153,14 @@
         "description": "Move an effect to another place, in its chain or another channel's.",
         "properties": {
           "channel": {
-            "description": "0 is the master.",
+            "default": null,
+            "description": "0 is the master; default: the chain it is in.",
             "format": "uint32",
             "minimum": 0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -3104,8 +3177,7 @@
           }
         },
         "required": [
-          "id",
-          "channel"
+          "id"
         ],
         "type": "object"
       },
@@ -6869,6 +6941,10 @@
       },
       "ChannelInfo": {
         "properties": {
+          "kind": {
+            "$ref": "#/$defs/ChannelKind",
+            "description": "A track channel (instrument outputs feed it) or a return bus (fed by\nthe track channels' sends, RFC 0010)."
+          },
           "n": {
             "description": "Stable channel number (1..=MAX_CHANNELS); paths are `mixer.<n>.*`.",
             "format": "uint32",
@@ -6884,6 +6960,21 @@
           "name"
         ],
         "type": "object"
+      },
+      "ChannelKind": {
+        "description": "What feeds a mixer channel.",
+        "oneOf": [
+          {
+            "const": "track",
+            "description": "Instrument outputs routed to it.",
+            "type": "string"
+          },
+          {
+            "const": "return",
+            "description": "The track channels' sends (`mixer.<n>.send.<m>`); mixed after them.",
+            "type": "string"
+          }
+        ]
       },
       "Clip": {
         "description": "A clip in an instrument's pool.",

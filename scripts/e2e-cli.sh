@@ -884,6 +884,8 @@ s set delay.bypass off >/dev/null
 check "a filter goes first in the chain" "<- drums  [filter, delay]" bash -c "$BIN/4s device add filter --on 1 --at 1 >/dev/null && $BIN/4s mixer"
 check "a reverb on the master" "master        vol  80%  [reverb]" bash -c "$BIN/4s device add reverb --on master >/dev/null && $BIN/4s mixer"
 check "moving one is one undo step" "undid: device.move filter" bash -c "$BIN/4s device mv filter --on master >/dev/null && $BIN/4s undo"
+check "moving within its own chain needs no --on" "<- drums  [delay, filter]" bash -c "$BIN/4s device mv filter --at 2 >/dev/null && $BIN/4s mixer"
+s device mv filter --at 1 >/dev/null
 check "ids are shared with instruments" "already an instrument or device id" s device add delay --on 1 --id drums
 check "unknown types are refused" "unknown device type" s device add flanger --on 1
 check "a chain holds at most 8" "at most 8 inserts" bash -c "for i in 1 2 3 4 5 6; do $BIN/4s device add filter --on 1 >/dev/null; done; $BIN/4s device add filter --on 1"
@@ -921,6 +923,29 @@ check "a redone instrument whose id an effect took since stays undone" "skipped:
 check "...and the effect keeps its parameters" "twin.cutoff = 0.6" s get twin.cutoff
 s device rm twin >/dev/null
 check "a session with effects replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/fx.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/fx.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+# Return buses and sends (RFC 0010): a reverb on a return, fed by channel
+# 1's send, adds a tail after the kick (the peak between 0.5 and 1.5 s).
+s project new >/dev/null
+s pattern set kick "x---------------" >/dev/null
+cat > "$TMP/tail.py" <<PY
+import array, json, struct, subprocess, sys
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--out', 'renders/tail.wav']))
+b = open(r['path'], 'rb').read(); i = b.index(b'data'); n = struct.unpack('<I', b[i + 4:i + 8])[0]
+a = array.array('f'); a.frombytes(b[i + 8:i + 8 + n]); sr = r['sample_rate']
+print('tail %.4f' % max(abs(x) for x in a[int(0.5 * sr) * 2:int(1.5 * sr) * 2]))
+PY
+check "add a return bus" "ch 2 Verb" s channel add --return --name Verb
+check "every track channel gets a send to it" "mixer.1.send.2" s params mixer.1.send
+s device add reverb --on 2 >/dev/null
+s set reverb.mix 1 >/dev/null
+check "no send, no tail" "tail 0.00" python3 "$TMP/tail.py"
+check "a send feeds the return" "<- return <- sends from 1 50%  [reverb]" bash -c "$BIN/4s send 1 2 50% >/dev/null && $BIN/4s mixer"
+check "...and the reverb adds a tail" "tail 0.01" python3 "$TMP/tail.py"
+check "post-fader: a muted track sends nothing" "tail 0.00" bash -c "$BIN/4s set mixer.1.mute on >/dev/null && python3 '$TMP/tail.py'"
+s set mixer.1.mute off >/dev/null
+check "instruments cannot feed a return" "is a return bus" s route drums 2
+check "returns save and load back" "<- return <- sends from 1 50%" bash -c "$BIN/4s project save buses >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load buses >/dev/null && $BIN/4s mixer"
+check "removing a return removes its sends, and undo brings them back" "mixer.1.send.2 = 0.5" bash -c "$BIN/4s channel rm 2 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s get mixer.1.send.2"
 s project load e2e >/dev/null
 check "json output" '"value": 0.35' s --json get drums.snare.level
 check "raw call" '"backend": "null"' s call engine.status
