@@ -348,9 +348,14 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   let-go loop is quadratic in `MAX_AUTOMATED` and routes. Bounded and
   real-time safe, but worth a per-target "automated" count or bitset
   before dense CC input or more instruments.
-- (2026-10-12, automation lanes) lanes: the step views (drum grid, 303
-  editor, sampler) show no lanes; only the piano roll edits them. Points
-  are linear only (no curves or steps).
+- (2026-10-12, automation lanes) lanes: points are linear only (no curves
+  or steps). The step views set points on their steps only (a lane's
+  points between steps show as the value there, editable in the roll).
+- (2026-10-13, #48 review) lanes: no e2e for a pass at `MAX_EVENTS` still
+  writing its lanes; no Electron check for another client's edit during a
+  lane-point drag; the placement-runs e2e check uses wall-clock sleeps.
+  RFC 0010's play-start note says the target's smoother snaps; it is the
+  whole strip or device (`snap_target`).
 - (2026-10-12, knob recording) lanes: a knob moved before a take's first
   step is not recorded (no playhead yet, `record_move`); moves are on the
   1/16 grid; a recorded lane plays back over the knob while the take goes

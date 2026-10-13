@@ -414,7 +414,11 @@ instruments.
 - UI: `AutomationLanes.tsx`: a lane strip per lane under the piano roll's
   velocity lane (click: add a point on the snap grid, drag: move,
   alt-click: remove; a dashed line is the value set by hand), and a
-  parameter field to add one.
+  parameter field to add one. The step views (`StepLanes.tsx`) show each
+  lane as a bar per step under the grid (in a monophonic instrument's
+  step columns, a bar per lane): press a step to set a point there,
+  drag across steps to paint them (one `clip.lane.set`), alt-click to
+  remove a step's point.
 
 ## Implementation notes (live values)
 

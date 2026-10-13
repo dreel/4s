@@ -393,8 +393,11 @@ impl Core {
         // A report in flight may name slots the change gave to others, and
         // parameters that went are not moving.
         self.moving_next.clear();
-        let index = &self.index;
+        let (index, before) = (&self.index, self.moving.len());
         self.moving.retain(|path, _| index.contains_key(path));
+        if self.moving.len() != before {
+            self.emit("engine", Event::Moving { params: self.moving.clone() });
+        }
     }
 
     fn find_instrument(&self, id: &str) -> Result<&InstrumentState, RpcError> {

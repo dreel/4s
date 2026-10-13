@@ -16,7 +16,7 @@ import { act, client, useApp } from "../store";
 export const LANE_H = 48;
 
 /** A parameter's range (from the registry); 0..1 if unknown. */
-function rangeOf(registry: ParamInfo[], path: string): [number, number] {
+export function rangeOf(registry: ParamInfo[], path: string): [number, number] {
   const p = registry.find((x) => x.path === path);
   return p && p.kind !== "toggle" ? [p.min, p.max] : [0, 1];
 }
@@ -142,7 +142,7 @@ export function LaneStrip({ clip, lane, px, snap, width }: { clip: Clip; lane: L
 }
 
 /** Add a lane: pick a parameter; it starts flat at the value set by hand. */
-export function AddLane({ clip }: { clip: Clip }) {
+export function AddLane({ clip, testId = "lane-add" }: { clip: Clip; testId?: string }) {
   const paths = useAutomatable();
   const params = useApp((s) => s.snapshot?.params);
   const [text, setText] = useState("");
@@ -157,15 +157,15 @@ export function AddLane({ clip }: { clip: Clip }) {
     <label className="flex items-center gap-1" title="automate a parameter over this clip">
       <input
         className="w-36 px-1 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-zinc-200"
-        list={`lane-params-${clip.instrument}`}
+        list={`lane-params-${testId}-${clip.instrument}`}
         placeholder="+ lane (parameter)"
         value={text}
         disabled={clip.lanes.length >= MAX_LANES}
-        data-testid="lane-add"
+        data-testid={testId}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && add()}
       />
-      <datalist id={`lane-params-${clip.instrument}`}>
+      <datalist id={`lane-params-${testId}-${clip.instrument}`}>
         {paths.filter((p) => !taken.has(p)).map((p) => (
           <option key={p} value={p} />
         ))}
