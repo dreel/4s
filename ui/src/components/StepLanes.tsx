@@ -10,12 +10,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { Clip } from "../generated/Clip";
 import type { Lane } from "../generated/Lane";
+import { MAX_LANE_POINTS } from "../generated/limits";
 import type { LanePoint } from "../generated/LanePoint";
 import { act, client, useApp } from "../store";
 import { rangeOf } from "./AutomationLanes";
 
 /** A lane's value at a clip tick: linear between points, the nearest
- * point's outside them (as the engine plays it). */
+ * point's outside them. Mirrors `LaneStore::value` in
+ * `crates/engine/src/engine.rs`; change them together. */
 export function laneValue(points: LanePoint[], tick: number): number | null {
   if (!points.length) return null;
   if (tick <= points[0].tick) return points[0].value;
@@ -51,8 +53,14 @@ export function useStepLanes(clip: Clip | undefined, res: number) {
       ].sort((a, b) => a.tick - b.tick);
       void act(client.call("clip.lane.set", { instrument: clip.instrument, clip: clip.id, path: p.path, points }));
     };
+    // A cancelled touch or pen drag drops the paint.
+    const cancel = () => setPaint(null);
     window.addEventListener("pointerup", up);
-    return () => window.removeEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    return () => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+    };
   }, [clip, res]);
 
   /** The bar for `lane` at step `s` (of `clip`, which is there by now). */
@@ -68,6 +76,9 @@ export function useStepLanes(clip: Clip | undefined, res: number) {
     };
     const set = (e: React.PointerEvent) => {
       const values = new Map(paint?.path === lane.path ? paint.values : []);
+      // Not past the points a lane holds: the daemon would refuse it all.
+      const others = lane.points.filter((q) => q.tick % res !== 0 || !values.has(q.tick / res)).length;
+      if (!values.has(s) && !lane.points.some((q) => q.tick === s * res) && others + values.size >= MAX_LANE_POINTS) return;
       values.set(s, valueAt(e));
       setPaint({ path: lane.path, values });
     };
