@@ -104,6 +104,9 @@ pub enum Command {
     /// Give a sampler's pad a sample (interleaved stereo at the engine's
     /// rate), or none; the old one is handed back.
     SetSample { slot: u8, pad: u8, sample: Option<std::sync::Arc<[f32]>> },
+    /// Audition a sample (interleaved stereo) once, after the master and
+    /// outside the mix, or (`None`) stop; the one before comes back.
+    Preview { sample: Option<std::sync::Arc<[f32]>> },
     /// Put a modulator in a modulator slot (replacing any there).
     AddModulator { slot: u8, modulator: Box<dyn Modulator> },
     RemoveModulator { slot: u8 },
@@ -158,6 +161,7 @@ impl std::fmt::Debug for Command {
             Command::SetChain { ch, slots, len } => write!(f, "SetChain({ch}, {:?})", &slots[..(*len as usize).min(MAX_INSERTS)]),
             Command::AddModulator { slot, .. } => write!(f, "AddModulator({slot})"),
             Command::SetSample { slot, pad, sample } => write!(f, "SetSample({slot}, {pad}, {:?})", sample.as_ref().map(|s| s.len())),
+            Command::Preview { sample } => write!(f, "Preview({:?})", sample.as_ref().map(|s| s.len())),
             Command::RemoveModulator { slot } => write!(f, "RemoveModulator({slot})"),
             Command::SetModRoute { index, route } => write!(f, "SetModRoute({index}, {route:?})"),
             Command::SetLane { clip, lane, target, .. } => write!(f, "SetLane({clip}, {lane}, {target:?})"),
@@ -386,6 +390,10 @@ impl Track {
     }
 }
 
+/// An audition's level, and its fade in and out in frames.
+const PREVIEW_GAIN: f32 = 0.8;
+const PREVIEW_FADE: f32 = 128.0;
+
 /// The metronome's click: a short decaying sine, higher on a bar's
 /// downbeat.
 struct Click {
@@ -552,6 +560,9 @@ pub struct Engine {
     /// backend).
     output_latency: f64,
     click: Click,
+    /// The sample being auditioned and the frame it is at (kept when done,
+    /// to be handed back by the next `Preview`).
+    preview: Option<(std::sync::Arc<[f32]>, usize)>,
     /// Total samples rendered.
     pos: u64,
     meter_countdown: u32,
@@ -602,6 +613,7 @@ impl Engine {
             tick_len: 1.0,
             output_latency: 0.0,
             click: Click::new(sr),
+            preview: None,
             pos: 0,
             meter_countdown: 0,
         }
@@ -714,6 +726,9 @@ impl Engine {
                     a.1 = value;
                 }
                 self.write_param(target, value);
+            }
+            Command::Preview { sample } => {
+                return std::mem::replace(&mut self.preview, sample.map(|s| (s, 0))).map(|(s, _)| Returned::Sample(s));
             }
             Command::SetSample { slot, pad, sample } => {
                 let old = match self.slots.get_mut(slot as usize) {
@@ -1469,7 +1484,18 @@ impl Engine {
             // The click is not part of the mix: after the master and its
             // meter.
             let c = self.click.next() * click_gain;
-            let (l, r) = ((l + c).clamp(-1.0, 1.0), (r + c).clamp(-1.0, 1.0));
+            // So is an audition, faded in and out over a few ms.
+            let (pl, pr) = match &mut self.preview {
+                Some((s, at)) if *at * 2 + 1 < s.len() => {
+                    let frames = s.len() / 2;
+                    let fade = ((*at).min(frames - *at) as f32 / PREVIEW_FADE).min(1.0);
+                    let v = (s[*at * 2] * fade * PREVIEW_GAIN, s[*at * 2 + 1] * fade * PREVIEW_GAIN);
+                    *at += 1;
+                    v
+                }
+                _ => (0.0, 0.0),
+            };
+            let (l, r) = ((l + c + pl).clamp(-1.0, 1.0), (r + c + pr).clamp(-1.0, 1.0));
             if channels == 1 {
                 o[0] = 0.5 * (l + r);
             } else {
@@ -1917,6 +1943,25 @@ pub(crate) mod tests {
         apply(&mut e, Command::SetParam { target: pan, value: -0.3 });
         apply(&mut e, Command::SetModRoute { index: 0, route: None });
         assert_eq!(e.channels[0].params[CH_PAN], -0.3);
+    }
+
+    /// An audition plays once after the master (not on its meter), faded
+    /// in and out, and comes back when replaced.
+    #[test]
+    fn a_preview_plays_once_outside_the_mix() {
+        let mut e = drum_engine();
+        let sample: std::sync::Arc<[f32]> = vec![0.5f32; 4800 * 2].into();
+        assert!(e.apply(Command::Preview { sample: Some(sample.clone()) }, &mut |_| {}).is_none());
+        let mut fb = vec![];
+        let out = render_secs(&mut e, 0.2, &mut fb);
+        let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((peak - 0.4).abs() < 1e-3, "at its level: {peak}");
+        assert!(out[0].abs() < 0.01, "faded in");
+        assert!(out[(4800 + 10) * 2..].iter().all(|v| v.abs() < 1e-6), "once");
+        let metered = fb.iter().any(|f| matches!(f, Feedback::Meters { master, .. } if master[0] > 0.01));
+        assert!(!metered, "not on the master's meter");
+        let back = e.apply(Command::Preview { sample: None }, &mut |_| {});
+        assert!(matches!(back, Some(Returned::Sample(s)) if std::sync::Arc::ptr_eq(&s, &sample)));
     }
 
     /// An automation lane moves its parameter while its clip plays and lets

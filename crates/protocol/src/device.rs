@@ -243,6 +243,14 @@ pub struct SamplePeaks {
     pub peaks: Vec<[f32; 2]>,
 }
 
+/// What an audition plays (`sample.play`): the region as it was cut.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplePlaying {
+    pub path: String,
+    pub start: f64,
+    pub end: f64,
+}
+
 /// Where an upload is (`sample.upload`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct SampleUploadResult {
