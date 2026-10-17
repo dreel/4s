@@ -1278,6 +1278,59 @@ test("automation lanes in the step view: a bar per step, set a point, paint acro
     .toEqual([0, 48]);
 });
 
+test("sample editor: a pad's file as a waveform; select a region by dragging or by times, play it, apply it; a saved cut reopens on its origin", async () => {
+  const { page, rpc } = h;
+  const mp3 = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "tests", "fixtures", "audio", "song.mp3");
+  await rpc("instrument.add", { type: "sampler", id: "ed", name: null, channel: null, no_channel: false });
+  await rpc("sampler.load", { instrument: "ed", pad: 1, path: mp3, upload: null, start: null, end: null });
+  await page.getByTestId("select-ed").click();
+  const wave = page.getByTestId("sample-wave-ed-1");
+  await expect(wave).toBeVisible();
+  await page.getByTestId("sample-fit-ed-1").click();
+  await expect(wave).toHaveAttribute("data-view", /^0\.0000,2\.0/);
+  // Drag from 1.5 s to 1.8 s (the whole file is in view).
+  await wave.scrollIntoViewIfNeeded();
+  const box = (await wave.boundingBox())!;
+  const seconds = Number((await wave.getAttribute("data-view"))!.split(",")[1]);
+  const x = (t: number) => box.x + (t / seconds) * box.width;
+  await page.mouse.move(x(1.5), box.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(x(1.65), box.y + 60);
+  await page.mouse.move(x(1.8), box.y + 60);
+  await page.mouse.up();
+  const [a, b] = (await wave.getAttribute("data-selection"))!.split(",").map(Number);
+  expect(Math.abs(a - 1.5) < 0.02 && Math.abs(b - 1.8) < 0.02).toBe(true);
+  // Exact times from the fields; play it; apply it to the pad.
+  await page.getByTestId("sel-start-ed-1").fill("1.5");
+  await page.getByTestId("sel-start-ed-1").press("Enter");
+  await page.getByTestId("sel-end-ed-1").fill("1.8");
+  await page.getByTestId("sel-end-ed-1").press("Enter");
+  await expect(wave).toHaveAttribute("data-selection", "1.5000,1.8000");
+  await page.getByTestId("sample-editor-ed-1").screenshot({ path: "test-results/sample-editor.png" });
+  await page.getByTestId("sample-play-ed-1").click();
+  await expect(wave).toHaveAttribute("data-played", "1.5000,1.8000");
+  await page.getByTestId("sample-stop-ed-1").click();
+  await expect(wave).toHaveAttribute("data-playing", "false");
+  // The wheel zooms around the pointer (and only the waveform moves).
+  const before = (await wave.getAttribute("data-view"))!;
+  await page.mouse.move(x(1.65), box.y + 60);
+  await page.mouse.wheel(0, -200);
+  await expect(wave).not.toHaveAttribute("data-view", before);
+  await page.getByTestId("sample-apply-ed-1").click();
+  await expect
+    .poll(async () => (await rpc("sampler.get", { instrument: "ed" })).pads.map((p) => [p.start, p.end]))
+    .toEqual([[1.5, 1.8]]);
+  await expect(page.getByTestId("pad-ed-1")).toContainText("song.mp3");
+  // Saved, the pad plays the bundle's WAV of the cut; reopened, the editor
+  // works on the MP3 it was cut from, at the same region.
+  await rpc("project.save", { path: "projects/edited.4s" });
+  await rpc("project.new", {});
+  await rpc("project.load", { path: "projects/edited.4s" });
+  await page.getByTestId("select-ed").click();
+  await expect(page.getByTestId("sample-editor-ed-1")).toContainText("the file it was cut from");
+  await expect(page.getByTestId("sample-wave-ed-1")).toHaveAttribute("data-selection", "1.5000,1.8000");
+});
+
 test("modulators: an LFO from the rack, mapped onto a knob by pressing it, depth and unroute", async () => {
   const { page, rpc } = h;
   const routes = async () => (await rpc("state.get", {})).graph.mod_routes;

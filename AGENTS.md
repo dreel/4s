@@ -97,7 +97,8 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   parameter. `4s instrument add sampler` and `4s sampler load 1 kick.wav`
   play samples on pads (notes 36-51); any common format, and a region of
   a long file: `4s sampler load 1 song.mp3 --from 1:23.40 --to 1:23.65`
-  (`4s sample info|peaks <file>`, RFC 0011). `4s clip lane drums mixer.1.pan
+  (`4s sample info|peaks|play <file>`, RFC 0011; the sampler panel has a
+  waveform editor for a pad's region). `4s clip lane drums mixer.1.pan
   "0:-1 384:1"` automates a parameter while the clip plays.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually

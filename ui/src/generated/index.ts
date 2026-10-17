@@ -142,6 +142,8 @@ export * from "./SampleInfoParams";
 export * from "./SampleOrigin";
 export * from "./SamplePeaks";
 export * from "./SamplePeaksParams";
+export * from "./SamplePlayParams";
+export * from "./SamplePlaying";
 export * from "./SampleUploadParams";
 export * from "./SampleUploadResult";
 export * from "./SamplerGetParams";

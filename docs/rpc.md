@@ -55,7 +55,8 @@ buses are channels added with `kind: "return"`, fed by the
 parameters; `sampler.load` reads an audio file on the engine host, or a
 region of one, into a pad, RFC 0011; `sample.upload` sends a file from a
 client in chunks, and a load of it is journaled as the load of the stored
-file; `sample.info` and `sample.peaks` describe a file and its waveform),
+file; `sample.info` and `sample.peaks` describe a file and its waveform, and
+`sample.play` / `sample.stop` audition a region outside the mix),
 the
 song (`song.*`: each track's arrangement, RFC 0008, and `song.back`
 from launched clips, RFC 0009), the

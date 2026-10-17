@@ -355,6 +355,19 @@ pub struct SampleInfoParams {
     pub path: String,
 }
 
+/// Audition `start..end` seconds of a file once, through the engine,
+/// outside the mix (RFC 0011). Without a region, all of a file of at most
+/// 60 s; a longer file needs `start`/`end` (at most 60 s apart).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplePlayParams {
+    /// As in `sample.info`.
+    pub path: String,
+    #[serde(default)]
+    pub start: Option<f64>,
+    #[serde(default)]
+    pub end: Option<f64>,
+}
+
 /// A waveform overview of `start..end` seconds of a file (default: all
 /// of it) in `bins` (min, max) pairs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -1313,6 +1326,11 @@ api! {
     SampleInfo = "sample.info" (SampleInfoParams) -> crate::device::SampleInfo;
     /// A waveform overview of an audio file on the engine host.
     SamplePeaks = "sample.peaks" (SamplePeaksParams) -> crate::device::SamplePeaks;
+    /// Audition a region of an audio file on the engine host (not in the
+    /// mix, not recorded, not saved).
+    SamplePlay = "sample.play" (SamplePlayParams) -> crate::device::SamplePlaying;
+    /// Stop an audition.
+    SampleStop = "sample.stop" (Empty) -> Empty;
     /// Empty a pad.
     SamplerClear = "sampler.clear" (SamplerPadParams) -> crate::device::SamplerInfo;
     /// Route a modulator output to a continuous parameter, with a depth

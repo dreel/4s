@@ -13,7 +13,6 @@
 //! bin), so the editor's waveform costs little at any zoom.
 
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -232,11 +231,12 @@ fn resample(left: Vec<f32>, right: Vec<f32>, from: u32, to: u32) -> Result<(Vec<
 pub struct SourceCache {
     budget: usize,
     rate: u32,
-    /// By the file's length and a hash of its bytes.
-    by_hash: HashMap<(u64, u64), (Arc<Source>, u64)>,
+    /// By a cryptographic hash of the file's bytes (so no file, even one
+    /// made to, is taken for another).
+    by_hash: HashMap<[u8; 32], (Arc<Source>, u64)>,
     /// A path's size and modification time when its contents were hashed,
     /// so an unchanged file is not read again to find its source.
-    by_path: HashMap<PathBuf, (u64, Option<SystemTime>, (u64, u64))>,
+    by_path: HashMap<PathBuf, (u64, Option<SystemTime>, [u8; 32])>,
     clock: u64,
 }
 
@@ -266,7 +266,7 @@ impl SourceCache {
             return Ok(entry.0.clone());
         }
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let hash = (bytes.len() as u64, content_hash(&bytes));
+        let hash = *blake3::hash(&bytes).as_bytes();
         self.by_path.insert(path.to_path_buf(), (stamp.0, stamp.1, hash));
         if let Some(entry) = self.by_hash.get_mut(&hash) {
             entry.1 = self.clock;
@@ -281,7 +281,7 @@ impl SourceCache {
 
     /// Drop the least recently used sources until under the budget (never
     /// `keep`, the one just used).
-    fn evict(&mut self, keep: (u64, u64)) {
+    fn evict(&mut self, keep: [u8; 32]) {
         while self.used() > self.budget {
             let Some(oldest) = self.by_hash.iter().filter(|(h, _)| **h != keep).min_by_key(|(_, e)| e.1).map(|(h, _)| *h) else {
                 break;
@@ -309,12 +309,6 @@ impl SourceCache {
     pub fn len(&self) -> usize {
         self.by_hash.len()
     }
-}
-
-fn content_hash(bytes: &[u8]) -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
-    h.finish()
 }
 
 #[cfg(test)]

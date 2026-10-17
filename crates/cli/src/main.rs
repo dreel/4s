@@ -534,6 +534,17 @@ enum SampleCmd {
     /// Send a file on this machine to the engine host, and print where it
     /// is stored there.
     Upload { file: String },
+    /// Audition a region of a file once through the engine (not in the mix,
+    /// not recorded; a file here is sent first, as for `info`).
+    Play {
+        file: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Stop an audition.
+    Stop,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1479,11 +1490,13 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                 vec![Request::SamplerClear(SamplerPadParams { instrument: instrument.clone(), pad: *pad })]
             }
         },
+        Cmd::Sample { cmd: SampleCmd::Stop } => vec![Request::SampleStop(e)],
         Cmd::Sample { cmd } => {
             // A file here is sent, then named by where it was stored: the
             // engine host resolves `uploads` paths to the finished upload.
             let file = match cmd {
-                SampleCmd::Info { file } | SampleCmd::Peaks { file, .. } | SampleCmd::Upload { file } => file,
+                SampleCmd::Info { file } | SampleCmd::Peaks { file, .. } | SampleCmd::Upload { file } | SampleCmd::Play { file, .. } => file,
+                SampleCmd::Stop => unreachable!("planned above"),
             };
             let (mut requests, path) = match upload_requests(file)? {
                 Some((token, requests)) => (requests, format!("upload:{token}")),
@@ -1497,8 +1510,14 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                     end: to.as_deref().map(time_arg).transpose()?,
                     bins: *bins,
                 })),
+                SampleCmd::Play { from, to, .. } => requests.push(Request::SamplePlay(SamplePlayParams {
+                    path,
+                    start: from.as_deref().map(time_arg).transpose()?,
+                    end: to.as_deref().map(time_arg).transpose()?,
+                })),
                 SampleCmd::Upload { .. } if requests.is_empty() => bail!("no file {file} here to send"),
                 SampleCmd::Upload { .. } => {}
+                SampleCmd::Stop => {}
             }
             requests
         }
@@ -2476,6 +2495,11 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
                 p.peaks.iter().map(|b| bars[((b[0].abs().max(b[1].abs()).min(1.0)) * 8.0).round() as usize]).collect();
             println!("|{line}|");
         }
+        Cmd::Sample { cmd: SampleCmd::Play { .. } } => {
+            let p: SamplePlaying = serde_json::from_value(last)?;
+            println!("playing {} - {}", fmt_time(p.start), fmt_time(p.end));
+        }
+        Cmd::Sample { cmd: SampleCmd::Stop } => println!("stopped"),
         Cmd::Sample { cmd: SampleCmd::Upload { .. } } => {
             let r: SampleUploadResult = serde_json::from_value(last)?;
             println!("{} ({} bytes)", r.path.unwrap_or_default(), r.received);
@@ -3026,7 +3050,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "send 1 2 50%", "sampler", "sampler load 1 /nope.wav", "sampler load 1 Cargo.toml", "sampler load 1 /nope.mp3 --from 1:23.4 --to 1:23.65", "sampler clear 1", "sample info /nope.mp3", "sample peaks /nope.mp3 --bins 8", "sample upload Cargo.toml", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
+            "send 1 2 50%", "sampler", "sampler load 1 /nope.wav", "sampler load 1 Cargo.toml", "sampler load 1 /nope.mp3 --from 1:23.4 --to 1:23.65", "sampler clear 1", "sample info /nope.mp3", "sample peaks /nope.mp3 --bins 8", "sample upload Cargo.toml", "sample play /nope.mp3 --from 1 --to 1.2", "sample stop", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",

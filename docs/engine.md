@@ -285,6 +285,11 @@ and builds the engine at the device's sample rate. With `--no-audio`, or if
 the device cannot be opened, a "null" backend runs the engine paced to real
 time so sequencing, events, and LEDs still work headless.
 
+After the master (and its meter) come two things that are not part of the
+mix: the metronome's click, and an audition (`Command::Preview`, RFC 0011),
+a sample played once at a fixed level with short fades, handed back to the
+control side when replaced.
+
 ## Extending
 
 New instrument types implement `Instrument` and are listed in `instrument.rs`
