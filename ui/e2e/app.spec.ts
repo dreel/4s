@@ -1197,6 +1197,26 @@ test("returns: a return bus with a reverb, fed by a send knob on a track strip",
   await expect(rpc("route.set", { source: "drums", channel: 2, swap: false })).rejects.toThrow("return bus");
 });
 
+test("synth: a chord in the step view is three notes on one step; its knob rows set its parameters", async () => {
+  const { page, rpc } = h;
+  await rpc("instrument.add", { type: "poly", id: null, name: null, channel: null, no_channel: false });
+  await page.getByTestId("select-synth").click();
+  await expect(page.getByTestId("synth-editor-synth")).toBeVisible();
+  // A row per pitch: C4, E4 and G4 on step 1 make a chord.
+  for (const n of [60, 64, 67]) await page.getByTestId(`step-${n}-0`).click();
+  await expect
+    .poll(async () => (await rpc("clip.get", { instrument: "synth", clip: null })).events.map((e) => `${e.tick}:${e.note}`).sort())
+    .toEqual(["0:60", "0:64", "0:67"]);
+  // A chord set elsewhere above the default rows still shows.
+  await rpc("clip.add", { instrument: "synth", clip: null, events: [{ tick: 24, len: 24, note: 79, velocity: 89 }] });
+  await expect(page.getByTestId("step-79-1")).toBeVisible();
+  await page.getByTestId("wave-synth.osc1_wave").selectOption("1");
+  await expect.poll(async () => (await rpc("param.get", { path: "synth.osc1_wave" })).value).toBe(1);
+  await expect(page.getByTestId("knob-synth.cutoff")).toBeVisible();
+  await expect(page.getByTestId("knob-synth.release")).toBeVisible();
+  await page.screenshot({ path: "test-results/synth.png", fullPage: true });
+});
+
 test("compressor: a sidechain picked in its panel ducks the bass on the kick, and its meter shows the reduction", async () => {
   const { page, rpc } = h;
   await rpc("instrument.add", { type: "tb303", id: null, name: null, channel: null, no_channel: false });

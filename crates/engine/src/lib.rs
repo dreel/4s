@@ -1,4 +1,5 @@
-//! 4S audio engine: instruments (TR-808-style drums, a TB-303-style bass), a
+//! 4S audio engine: instruments (TR-808-style drums, a TB-303-style bass, a
+//! polyphonic synth, a sampler), a
 //! shared step sequencer, and a multi-channel stereo mixer.
 //!
 //! The engine has no I/O of its own. The daemon drives it from an audio
@@ -11,6 +12,7 @@ pub mod instrument;
 pub mod modulator;
 pub mod offline;
 pub mod params;
+pub mod poly;
 pub mod rt;
 pub mod sampler;
 pub mod tb303;

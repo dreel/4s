@@ -11,6 +11,7 @@ import { BassEditor } from "./BassEditor";
 import { DrumEditor } from "./DrumEditor";
 import { PianoRoll } from "./PianoRoll";
 import { SamplerEditor } from "./SamplerEditor";
+import { SynthEditor } from "./SynthEditor";
 import { GM_NOTES } from "./voices";
 
 /** Ticks per step (a 16th), as in the protocol's `TICKS_PER_STEP`. */
@@ -267,6 +268,7 @@ export function Editor() {
       {current?.type === "tr808" && <DrumEditor id={current.id} />}
       {current?.type === "tb303" && <BassEditor id={current.id} />}
       {current?.type === "sampler" && <SamplerEditor id={current.id} />}
+      {current?.type === "poly" && <SynthEditor id={current.id} />}
     </section>
   );
 }

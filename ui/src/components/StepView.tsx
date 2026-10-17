@@ -3,7 +3,8 @@
 // per instrument type. A drum machine's named notes are rows (the panel can
 // put its own controls beside each row); a monophonic instrument gets one
 // column per step with a note and a toggle per declared expression (the
-// 303's accent and slide); other pitched instruments get a row per pitch.
+// 303's accent and slide); other pitched instruments (the synth) get a row
+// per pitch, covering every note in the clip.
 // Steps are a resolution (1/16 by default) over the clip's length. Every
 // edit is one `step.set` (one undo step); the daemon decides, the view only
 // draws what the clip's events say through the layout.
@@ -32,6 +33,9 @@ const RESOLUTIONS: [string, number][] = [
 /** Pitches offered by default: C1..C4, within the instrument's range. */
 const DEFAULT_LOW = 24;
 const DEFAULT_HIGH = 60;
+/** Rows a polyphonic instrument shows by default: C3 to C5. */
+const CHORD_LOW = 48;
+const CHORD_HIGH = 72;
 
 // The reading below mirrors `crates/protocol/src/layout.rs` (`NoteLayout::has`,
 // `shows`, `step_cells`); change them together.
@@ -232,12 +236,16 @@ export function StepView({ id, rowExtras }: { id: string; rowExtras?: (row: Note
     );
   }
 
-  // Other pitched instruments: a row per pitch, highest first.
+  // Other pitched instruments: a row per pitch, highest first, C3 to C5
+  // (where chords sit) widened to every note the clip has.
+  const notes = clip.events.map((e) => e.note).filter((n) => n >= layout.low && n <= layout.high);
+  const rowLow = Math.max(layout.low, Math.min(CHORD_LOW, ...notes));
+  const rowHigh = Math.min(layout.high, Math.max(CHORD_HIGH, ...notes));
   return (
     <section className="flex flex-col gap-1 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800" data-testid={`step-view-${id}`}>
       {header}
       <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 items-center">
-        {Array.from({ length: high - low + 1 }, (_, k) => high - k).map((n) => (
+        {Array.from({ length: rowHigh - rowLow + 1 }, (_, k) => rowHigh - k).map((n) => (
           <div key={n} className="contents">
             <span className="w-10 text-[10px] text-zinc-400">{noteName(n)}</span>
             <div className="flex gap-1 min-w-0">{Array.from({ length: steps }, (_, s) => cell(s, n, `step-${n}-${s}`))}</div>
