@@ -278,6 +278,9 @@ impl SourceCache {
             };
             self.by_hash.remove(&oldest);
         }
+        // Paths of sources no longer cached are found again by hashing.
+        let by_hash = &self.by_hash;
+        self.by_path.retain(|_, (_, _, hash)| by_hash.contains_key(hash));
     }
 
     /// Bytes the cached sources take.
