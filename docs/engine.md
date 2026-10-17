@@ -205,7 +205,8 @@ one stereo output.
   and for the amp (`attack`, `decay`, `sustain`, `release`). Stage times
   are 0..1, mapped exponentially to 1 ms..10 s (0.5 is 100 ms). Attack is
   linear; decay and release fall exponentially. A retriggered or stolen
-  voice's envelopes start from where they are, so nothing clicks.
+  voice keeps its oscillator phases and its envelopes start from where they
+  are, rather than jumping to silence.
 - **Velocity:** `velocity` (0..1) is how much a note's velocity scales its
   level and its filter envelope; 0 plays every note the same.
 - **LFO:** one sine shared by all voices at `lfo_rate` (0..1 = 0.1..20 Hz,
