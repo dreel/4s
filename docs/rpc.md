@@ -52,9 +52,11 @@ audio effects added to, moved in, and removed from insert chains; return
 buses are channels added with `kind: "return"`, fed by the
 `mixer.<n>.send.<m>` parameters; modulators sit in the rack and
 `mod.route` / `mod.unroute` connect their outputs to continuous
-parameters; `sampler.load` reads a WAV on the engine host into a pad,
-`sampler.upload` sends one from a client, journaled as the load of the
-stored file), the
+parameters; `sampler.load` reads an audio file on the engine host, or a
+region of one, into a pad, RFC 0011; `sample.upload` sends a file from a
+client in chunks, and a load of it is journaled as the load of the stored
+file; `sample.info` and `sample.peaks` describe a file and its waveform),
+the
 song (`song.*`: each track's arrangement, RFC 0008, and `song.back`
 from launched clips, RFC 0009), the
 instrument graph (`instrument.*`, `channel.*`,
