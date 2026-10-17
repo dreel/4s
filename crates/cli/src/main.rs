@@ -517,9 +517,11 @@ enum SamplerCmd {
 
 #[derive(Subcommand, Debug, Clone)]
 enum SampleCmd {
-    /// A file's length and format (a file here is sent first).
+    /// A file's length and format (a file here is sent first, and stored
+    /// on the engine host under its data dir's `samples/`).
     Info { file: String },
-    /// A file's waveform: `bins` columns over `--from..--to`.
+    /// A file's waveform: `bins` columns over `--from..--to` (a file here
+    /// is sent first, as for `info`).
     Peaks {
         file: String,
         #[arg(long)]

@@ -1037,8 +1037,10 @@ PY
 check "an upload in two chunks: a gap is refused, then it is stored" "gap refused
 True" python3 "$TMP/chunks.py"
 check "...and a load names it" "sampler pad 4  chunked.flac             0.50s" bash -c "$BIN/4s call sampler.load '{\"pad\": 4, \"upload\": \"two-chunks\", \"end\": 0.5}' >/dev/null && $BIN/4s sampler | grep 'pad 4 '"
+check "a load of an upload cannot go in a batch (it is journaled as its stored file)" "cannot be in a batch" s call batch '{"requests": [{"method": "sampler.load", "params": {"pad": 4, "upload": "two-chunks"}}]}'
 check "saving writes a region as a WAV in the bundle, with where it came from" "sampler.1.song.wav" bash -c "$BIN/4s project save regions >/dev/null && ls '$FOURS_DATA_DIR/projects/regions.4s/samples' && grep -o '\"start\": 1.5' '$FOURS_DATA_DIR/projects/regions.4s/project.json'"
 check "...which loads back as that region, still knowing its origin" "(cut from " bash -c "$BIN/4s project new >/dev/null && $BIN/4s project load regions >/dev/null && $BIN/4s sampler | grep 'pad 1 '"
+check "cutting the bundle's own copy and saving keeps that copy whole" "0.3 s, and the cut beside it" bash -c "R='$FOURS_DATA_DIR/projects/regions.4s/samples'; $BIN/4s call sampler.load \"{\\\"pad\\\": 1, \\\"path\\\": \\\"\$R/sampler.1.song.wav\\\", \\\"start\\\": 0.05, \\\"end\\\": 0.2}\" >/dev/null && $BIN/4s project save >/dev/null && ls \"\$R\" | grep -q 'sampler.1.song-2.wav' && $BIN/4s call sample.info \"{\\\"path\\\": \\\"\$R/sampler.1.song.wav\\\"}\" | python3 -c 'import json,sys; print(\"%.1f s, and the cut beside it\" % json.load(sys.stdin)[\"seconds\"])'"
 check "a session with samples replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/smp.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/smp.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 # Automation lanes (RFC 0010): a clip's lane moves a parameter while the
 # clip plays; the value set by hand comes back when nothing plays it.

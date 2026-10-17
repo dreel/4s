@@ -36,6 +36,9 @@ impl SampleState {
     }
 }
 
+/// Unfinished uploads at once (each holds a part file).
+const MAX_OPEN_UPLOADS: usize = 8;
+
 /// An upload in progress, or done (`path`).
 pub(super) struct Upload {
     name: String,
@@ -176,7 +179,7 @@ impl Core {
     /// Where an uploaded file is stored: `<data dir>/samples/<name>`, or
     /// that file if it holds the same bytes already (sending a file again
     /// keeps one copy), else numbered.
-    pub(super) fn upload_path(&self, name: &str, bytes: Option<&[u8]>) -> PathBuf {
+    pub(super) fn upload_path(&self, name: &str, same_as: Option<&Path>) -> PathBuf {
         let clean: String = name
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
@@ -185,7 +188,10 @@ impl Core {
         let dir = self.data_dir.join("samples");
         let mut path = dir.join(&clean);
         let mut n = 2;
-        let same = |p: &Path| bytes.is_some_and(|b| std::fs::read(p).is_ok_and(|have| have == b));
+        let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).ok();
+        let same = |p: &Path| {
+            same_as.is_some_and(|q| size(p).is_some() && size(p) == size(q) && std::fs::read(p).ok() == std::fs::read(q).ok())
+        };
         while path.exists() {
             if same(&path) {
                 return path;
@@ -220,6 +226,10 @@ impl Core {
             std::fs::create_dir_all(&dir)
                 .and_then(|_| std::fs::write(&part, []))
                 .map_err(|e| RpcError::failed(format!("store {}: {e}", part.display())))?;
+            if self.uploads.values().filter(|u| u.path.is_none()).count() >= MAX_OPEN_UPLOADS {
+                std::fs::remove_file(&part).ok();
+                return Err(RpcError::failed(format!("at most {MAX_OPEN_UPLOADS} uploads at once; finish one first")));
+            }
             self.uploads.insert(token.clone(), Upload { name: p.name.clone(), part, received: 0, path: None });
         }
         let up = self.uploads.get_mut(token).ok_or_else(|| RpcError::invalid(format!("no upload '{token}' (start one at offset 0)")))?;
@@ -257,8 +267,7 @@ impl Core {
             let why = e.strip_prefix(&format!("{}: ", part.display())).unwrap_or(&e);
             return Err(RpcError::invalid(format!("{name}: {why}")));
         }
-        let bytes = std::fs::read(&part).map_err(|e| RpcError::failed(format!("{}: {e}", part.display())))?;
-        let path = self.upload_path(&name, Some(&bytes));
+        let path = self.upload_path(&name, Some(&part));
         if path.exists() {
             std::fs::remove_file(&part).ok();
         } else {
@@ -460,10 +469,21 @@ impl Core {
         // A cut (or a whole file in another format): a WAV of what the pad
         // plays, at the engine's rate.
         let stem = Path::new(&name).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sample".into());
-        let rel = format!("samples/{id}.{pad}.{stem}.wav");
-        let dst = bundle.join(&rel);
+        // Written beside the bundle's files first, then named: the same name
+        // if that file holds the same audio (saving again), else a fresh one,
+        // so a file the pad cuts from, or an undo step loads, is never
+        // overwritten.
         std::fs::create_dir_all(dir).map_err(|e| RpcError::failed(format!("{}: {e}", dir.display())))?;
-        write_wav(&dst, &s.data, self.sample_rate).map_err(|e| RpcError::failed(format!("write {}: {e}", dst.display())))?;
+        let tmp = dir.join(format!(".{id}.{pad}.saving.wav"));
+        write_wav(&tmp, &s.data, self.sample_rate).map_err(|e| RpcError::failed(format!("write {}: {e}", tmp.display())))?;
+        let mut rel = format!("samples/{id}.{pad}.{stem}.wav");
+        let mut n = 2;
+        while bundle.join(&rel).exists() && std::fs::read(bundle.join(&rel)).ok() != std::fs::read(&tmp).ok() {
+            rel = format!("samples/{id}.{pad}.{stem}-{n}.wav");
+            n += 1;
+        }
+        let dst = bundle.join(&rel);
+        std::fs::rename(&tmp, &dst).map_err(|e| RpcError::failed(format!("write {}: {e}", dst.display())))?;
         let origin = s.origin.clone().or_else(|| {
             let path = std::path::absolute(&s.path).unwrap_or_else(|_| s.path.clone()).to_string_lossy().into_owned();
             Some(SampleOrigin { path, start: s.start, end: s.end })

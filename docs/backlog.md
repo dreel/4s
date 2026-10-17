@@ -384,9 +384,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   first time) runs on the core thread, so other requests wait for it (a
   few hundred ms for a song in a debug build). Decode on a worker and
   answer when done if it gets in the way.
-- (2026-10-17, sample sources) an upload that never finishes leaves its
-  part in `<data dir>/uploads/` until a new upload reuses its id; clean
-  old parts at startup.
+- (2026-10-17, sample sources) files sent to the engine host (uploads,
+  and `4s sample info|peaks` of a file on the CLI's machine) stay in
+  `<data dir>/samples/` whether or not a pad uses them; nothing cleans
+  them up.
 
 ## Mismatches
 

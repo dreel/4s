@@ -230,10 +230,11 @@ fn resample(left: Vec<f32>, right: Vec<f32>, from: u32, to: u32) -> Result<(Vec<
 pub struct SourceCache {
     budget: usize,
     rate: u32,
-    by_hash: HashMap<u64, (Arc<Source>, u64)>,
+    /// By the file's length and a hash of its bytes.
+    by_hash: HashMap<(u64, u64), (Arc<Source>, u64)>,
     /// A path's size and modification time when its contents were hashed,
     /// so an unchanged file is not read again to find its source.
-    by_path: HashMap<PathBuf, (u64, Option<SystemTime>, u64)>,
+    by_path: HashMap<PathBuf, (u64, Option<SystemTime>, (u64, u64))>,
     clock: u64,
 }
 
@@ -255,7 +256,7 @@ impl SourceCache {
             return Ok(entry.0.clone());
         }
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let hash = content_hash(&bytes);
+        let hash = (bytes.len() as u64, content_hash(&bytes));
         self.by_path.insert(path.to_path_buf(), (stamp.0, stamp.1, hash));
         if let Some(entry) = self.by_hash.get_mut(&hash) {
             entry.1 = self.clock;
@@ -270,7 +271,7 @@ impl SourceCache {
 
     /// Drop the least recently used sources until under the budget (never
     /// `keep`, the one just used).
-    fn evict(&mut self, keep: u64) {
+    fn evict(&mut self, keep: (u64, u64)) {
         while self.used() > self.budget {
             let Some(oldest) = self.by_hash.iter().filter(|(h, _)| **h != keep).min_by_key(|(_, e)| e.1).map(|(h, _)| *h) else {
                 break;

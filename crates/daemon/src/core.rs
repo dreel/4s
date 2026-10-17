@@ -203,6 +203,8 @@ impl Core {
         host_user: String,
     ) -> Self {
         let block_map = BlockMap::load_or_create(&data_dir.join("livid-block.json"));
+        // Uploads left unfinished by a daemon that stopped.
+        std::fs::remove_dir_all(data_dir.join("uploads")).ok();
         let hardware = Hardware::load(&data_dir.join(hardware::FILE));
         let (events, _) = broadcast::channel(4096);
         let mut core = Self {
@@ -2718,10 +2720,12 @@ fn batchable(req: &Request) -> bool {
             // Journaled with the ports it applies, filled in by `handle`.
             | SeatApplyLayout(_)
             // Files, not project state, and not journaled (a load of the
-            // stored file is); a load of an upload is journaled as that
-            // file's load by `handle`, outside a batch.
+            // stored file is).
             | SampleUpload(_)
-    )
+    ) && !matches!(req,
+        // Journaled as the load of the stored file by `handle`, which a
+        // batch's requests do not go through.
+        SamplerLoad(p) if p.upload.is_some())
 }
 
 /// Requests that cannot change state, so are not journaled. An exhaustive
