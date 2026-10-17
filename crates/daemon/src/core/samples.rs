@@ -278,7 +278,9 @@ impl Core {
         }
         // Done: it must be audio this build can play, then it is stored
         // (decoded now, so a load of it right after finds it cached).
-        if let Err(e) = self.sources.get(&part) {
+        let checked = self.sources.get(&part);
+        self.sources.forget(&part);
+        if let Err(e) = checked {
             self.uploads.remove(token);
             std::fs::remove_file(&part).ok();
             // Named as sent (not as the temporary part).

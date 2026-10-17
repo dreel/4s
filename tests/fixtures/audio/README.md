@@ -8,3 +8,6 @@ One 2 s stereo signal at 44.1 kHz in three formats, for decoding tests
 - `song.mp3`: LAME, 128 kbit/s (about 24 ms of encoder delay).
 - `song.flac`: macOS `afconvert -f flac -d flac`.
 - `song.m4a`: AAC in MP4, `afconvert -f m4af -d aac`.
+- `song-alac.m4a`: ALAC in MP4, `afconvert -f m4af -d alac`.
+- `song.aiff`: 16-bit AIFF, `afconvert -f AIFF -d BEI16`.
+- `song.ogg`: Ogg Vorbis, libsndfile (`soundfile`).

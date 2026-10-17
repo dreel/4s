@@ -157,7 +157,7 @@ instruments.
   Saving a project copies each sample into the bundle
   (`<name>.4s/samples/<instrument>-<pad>-<file>.wav`) and stores the
   relative path, so a bundle is self-contained and moves between
-  machines. `sampler.upload { instrument, pad, name, data }` (base64 WAV,
+  machines. `sampler.upload { instrument, pad, name, data }` (replaced by `sample.upload` in chunks, RFC 0011, protocol 10) (base64 WAV,
   at most 16 MB decoded, within the server's message limit) serves remote
   clients (network transparency); the CLI uses it when the file is local
   to the CLI and the engine is remote.
@@ -358,7 +358,8 @@ instruments.
   for melodic sampling is not built yet; each pad plays its sample at
   `tune`.
 - `sampler.get|load|upload|clear`; the snapshot's `samplers` and the
-  `sampler` event. `sampler.upload` stores the file under
+  `sampler` event. `sampler.upload` (replaced by chunked `sample.upload` in
+  RFC 0011) stores the file under
   `<data dir>/samples/` and is journaled as the `sampler.load` of it, so
   the journal holds no audio and a replay needs no upload. Uploads are at
   most 11 MB (their base64 fits a 16 MiB WebSocket frame), samples 60 s,
