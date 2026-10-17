@@ -922,8 +922,14 @@ pub enum Event {
     /// audition). Drums set `voice`; note instruments set `note`.
     Trigger { instrument: String, voice: Option<Voice>, note: Option<u8>, velocity: f32, time: f64 },
     /// Peak levels since the last meter event (linear, 0..1+), per active
-    /// channel (post fader, pan, and mute/solo) and for the master.
-    Meters { channels: Vec<ChannelLevel>, master: Vec<f32> },
+    /// channel (post fader, pan, and mute/solo) and for the master; and the
+    /// most gain reduction (dB, 0 or more) of each compressor, by id.
+    Meters {
+        channels: Vec<ChannelLevel>,
+        master: Vec<f32>,
+        #[serde(default)]
+        reduction: BTreeMap<String, f32>,
+    },
     /// The parameters modulation or automation moves and where they are
     /// (all of them; absent ones are at their values set by hand), at
     /// meter rate while any move, once when they stop (RFC 0010).

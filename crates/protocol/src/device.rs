@@ -43,18 +43,22 @@ pub enum DeviceType {
     Delay,
     /// A small Freeverb-style room.
     Reverb,
+    /// A compressor, keyed by its own input or another channel's
+    /// (sidechain).
+    Compressor,
     /// Four LFOs, free or synced to the transport (a modulator).
     Lfo,
 }
 
 impl DeviceType {
-    pub const ALL: [DeviceType; 4] = [DeviceType::Filter, DeviceType::Delay, DeviceType::Reverb, DeviceType::Lfo];
+    pub const ALL: [DeviceType; 5] = [DeviceType::Filter, DeviceType::Delay, DeviceType::Reverb, DeviceType::Compressor, DeviceType::Lfo];
 
     pub fn id(self) -> &'static str {
         match self {
             DeviceType::Filter => "filter",
             DeviceType::Delay => "delay",
             DeviceType::Reverb => "reverb",
+            DeviceType::Compressor => "compressor",
             DeviceType::Lfo => "lfo",
         }
     }
@@ -64,13 +68,17 @@ impl DeviceType {
             DeviceType::Filter => "Filter",
             DeviceType::Delay => "Delay",
             DeviceType::Reverb => "Reverb",
+            DeviceType::Compressor => "Compressor",
             DeviceType::Lfo => "LFO",
         }
     }
 
     /// Id given to a new instance when none is chosen (`delay2`, ...).
     pub fn default_id(self) -> &'static str {
-        self.id()
+        match self {
+            DeviceType::Compressor => "comp",
+            _ => self.id(),
+        }
     }
 
     pub fn kind(self) -> DeviceKind {
@@ -85,6 +93,7 @@ impl DeviceType {
             "filter" | "svf" => Some(DeviceType::Filter),
             "delay" | "echo" => Some(DeviceType::Delay),
             "reverb" | "verb" => Some(DeviceType::Reverb),
+            "compressor" | "comp" => Some(DeviceType::Compressor),
             "lfo" => Some(DeviceType::Lfo),
             _ => None,
         }

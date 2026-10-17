@@ -93,6 +93,23 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 ## Follow-ups
 
+- (2026-10-17, compressor branch) dynamics: no brickwall limiter for the
+  master yet (the master only soft-clips above 0.8); a `limiter` device
+  type with lookahead would be the next Extension.
+- (2026-10-17, compressor branch) compressor: no filter on the sidechain
+  key (a high-pass so the bass's own lows do not pump it), and only a peak
+  detector (no RMS mode); `Compressor::run` in
+  `crates/engine/src/effect.rs`.
+- (2026-10-17, compressor branch) sidechain: a return bus keys silence,
+  because sends reach it after the keys are taken
+  (`Engine::process`, the key copy before the channel loop). Taking a
+  return's key after the track channels would let a reverb bus key
+  something; nobody has asked yet.
+- (2026-10-17, compressor branch) UI: the compressor's knobs move
+  linearly over ranges like 0.1..100 ms attack, so the short attacks that
+  matter most get a sliver of the knob; a log taper for time parameters in
+  `ParamKnob` would help (the delay avoids it with a 0..1 `time`).
+
 - (2026-10-09, #24 review) UI constants `TICKS_PER_STEP` and the GM drum
   notes are copied by hand into `ui/src/components/Editor.tsx` and
   `voices.ts` (and the record quantize grids into `Transport.tsx`, from

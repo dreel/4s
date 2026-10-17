@@ -1197,6 +1197,33 @@ test("returns: a return bus with a reverb, fed by a send knob on a track strip",
   await expect(rpc("route.set", { source: "drums", channel: 2, swap: false })).rejects.toThrow("return bus");
 });
 
+test("compressor: a sidechain picked in its panel ducks the bass on the kick, and its meter shows the reduction", async () => {
+  const { page, rpc } = h;
+  await rpc("instrument.add", { type: "tb303", id: null, name: null, channel: null, no_channel: false });
+  await rpc("pattern.set", { instrument: null, voice: "kick", steps: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0] });
+  const held = Array.from({ length: 16 }, () => ({ note: 36, accent: false, slide: true }));
+  await rpc("pattern.set_notes", { instrument: "bass", steps: held });
+  await rpc("clip.launch", { instrument: "bass", clip: 1, now: null });
+  await page.getByTestId("insert-add-2").selectOption("compressor");
+  await expect(page.getByTestId("device-panel-comp")).toBeVisible();
+  await expect(page.getByTestId("knob-comp.threshold")).toBeVisible();
+  // The sidechain is a channel picker, not a knob: own input, or a track.
+  const picker = page.getByTestId("sidechain-comp.sidechain");
+  await expect(picker).toHaveValue("0");
+  await picker.selectOption("1");
+  await expect.poll(async () => (await rpc("param.get", { path: "comp.sidechain" })).value).toBe(1);
+  // The kick's channel muted: it still keys the compressor.
+  await rpc("param.set", { path: "mixer.1.mute", value: 1 });
+  await rpc("param.set", { path: "comp.threshold", value: -30 });
+  await rpc("transport.play", {});
+  await expect.poll(async () => Number(await page.getByTestId("reduction-comp").getAttribute("data-db")), { timeout: 5000 }).toBeGreaterThan(3);
+  await page.screenshot({ path: "test-results/compressor.png", fullPage: true });
+  await rpc("transport.stop", {});
+  // A daemon-side change shows in the picker.
+  await rpc("param.set", { path: "comp.sidechain", value: 0 });
+  await expect(picker).toHaveValue("0");
+});
+
 test("automation lanes: add a lane in the piano roll, add, drag, and remove points, remove the lane", async () => {
   const { page, rpc } = h;
   const lanes = async () => (await rpc("clip.get", { instrument: "drums", clip: null })).lanes;

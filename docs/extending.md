@@ -253,7 +253,9 @@ chains. A new one (a compressor, a chorus, a distortion) is an Extension.
    (or its own file): render the wet signal in place, allocate buffers in
    `new` only, keep peaks at or below 1.0. Add its parameters to `params`
    (after the common `bypass` and `mix`, with a sensible default mix) and
-   it to `make`.
+   it to `make`. An effect that listens to a key (like the compressor)
+   implements `process_keyed` and `sidechain`, and `reduction` to show a
+   gain reduction meter (RFC 0012).
 3. **Daemon, CLI, UI.** Nothing: `device.add`, `4s device add <type>`, the
    console's "+ fx" select, and the generic device panel read the
    registry. Extend `DeviceType::parse` aliases if helpful.
@@ -289,8 +291,9 @@ first ([docs/rfcs/](rfcs/README.md)); during the build phase
 ([RFC 0005](rfcs/0005-build-phase.md)) an RFC is optional, but a short one
 is a good place to record the design:
 
-- Audio routing beyond what RFC 0010 defines (insert chains, sends and
-  return buses): sidechains, a free patching graph.
+- Audio routing beyond what RFC 0010 and RFC 0012 define (insert chains,
+  sends and return buses, a channel keying an effect): a free patching
+  graph.
 - Changes to the song model (RFC 0008, RFC 0009: clip pools, the
   arrangement, clip launching) beyond their own phases.
 - Protocol or sync model changes, the daemon lifecycle, the multiplayer
