@@ -17,10 +17,11 @@ and agents can drive and verify every part of it.
    by an agent: headless audio renders, a virtual controller, scripted UI tests.
 5. **Modular by design.** Instruments, mixer channels, effects, and MIDI devices
    are nodes in a graph; every parameter has a stable, addressable path.
-   Instruments (808 drums, 303 bass) are added at runtime and routed into
-   stereo mixer channels (RFC 0004); audio effects sit in insert chains on
-   channels and the master (RFC 0010); new instrument and effect types are
-   Extensions. See [extending](docs/extending.md).
+   Instruments (808 drums, 303 bass, a polyphonic synth, a sampler) are
+   added at runtime and routed into stereo mixer channels (RFC 0004); audio
+   effects sit in insert chains on channels and the master (RFC 0010); new
+   instrument and effect types are Extensions. See
+   [extending](docs/extending.md).
 6. **Network-transparent.** Never assume clients, controllers, or files share
    a machine with the engine. See [topology](docs/topology.md).
 7. **Docs evolve with the code.** These principles are a starting point; update
@@ -101,6 +102,9 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   (`4s sample info|peaks|play <file>`, RFC 0011; the sampler panel has a
   waveform editor for a pad's region). `4s clip lane drums mixer.1.pan
   "0:-1 384:1"` automates a parameter while the clip plays.
+- `4s instrument add poly` adds an eight-voice synth (`synth.*`); a chord
+  is several notes on one step: `4s clip add synth 0 C4 --len 96` for C4,
+  E4, and G4.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history.
