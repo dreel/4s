@@ -9,7 +9,7 @@
 
 use crate::dsp::{Smoother, Svf, lerp_exp};
 use crate::params::{cont, toggle};
-use fours_protocol::{DeviceType, KnobPage, ParamInfo, ParamKind};
+use fours_protocol::{DeviceType, KnobPage, MAX_CHANNELS, ParamInfo, ParamKind};
 
 /// What an effect may need to know about the transport.
 #[derive(Clone, Copy, Debug)]
@@ -23,6 +23,21 @@ pub trait AudioEffect: Send {
     /// Render the wet signal in place: `buf` is interleaved stereo,
     /// `frames` long.
     fn process(&mut self, buf: &mut [f32], frames: usize, ctx: &ProcessContext);
+    /// Render with a key signal (interleaved stereo, `frames` long): the
+    /// effect's own input, or the channel `sidechain` names. Only an effect
+    /// that listens to a key (a compressor) uses it.
+    fn process_keyed(&mut self, buf: &mut [f32], _key: &[f32], frames: usize, ctx: &ProcessContext) {
+        self.process(buf, frames, ctx);
+    }
+    /// The channel (1-based) whose signal keys it, if not its own input.
+    fn sidechain(&self) -> Option<usize> {
+        None
+    }
+    /// The most gain reduction (dB, 0 or more) since the last call, for
+    /// the meters.
+    fn reduction(&mut self) -> f32 {
+        0.0
+    }
     /// Jump smoothers to their targets (before an offline render).
     fn snap(&mut self, _ctx: &ProcessContext) {}
     /// Forget what it was holding (a delay's echoes, a reverb's tail), when
@@ -40,6 +55,7 @@ pub fn params(kind: DeviceType, id: &str) -> Vec<ParamInfo> {
         DeviceType::Filter => 1.0,
         DeviceType::Delay => 0.35,
         DeviceType::Reverb => 0.3,
+        DeviceType::Compressor => 1.0,
         DeviceType::Lfo => return Vec::new(),
     };
     let mut out = vec![toggle(format!("{id}.bypass"), "Bypass".into()), cont(format!("{id}.mix"), "Mix".into(), 0.0, 1.0, mix, None)];
@@ -69,6 +85,15 @@ pub fn params(kind: DeviceType, id: &str) -> Vec<ParamInfo> {
             cont(format!("{id}.damping"), "Damping".into(), 0.0, 1.0, 0.5, None),
             cont(format!("{id}.width"), "Width".into(), 0.0, 1.0, 1.0, None),
         ]),
+        DeviceType::Compressor => out.extend([
+            cont(format!("{id}.threshold"), "Threshold".into(), -60.0, 0.0, -18.0, Some("dB")),
+            cont(format!("{id}.ratio"), "Ratio".into(), 1.0, 20.0, 4.0, None),
+            cont(format!("{id}.attack"), "Attack".into(), 0.1, 100.0, 10.0, Some("ms")),
+            cont(format!("{id}.release"), "Release".into(), 10.0, 1000.0, 120.0, Some("ms")),
+            cont(format!("{id}.knee"), "Knee".into(), 0.0, 24.0, 6.0, Some("dB")),
+            cont(format!("{id}.makeup"), "Makeup".into(), 0.0, 24.0, 0.0, Some("dB")),
+            int("sidechain", "Sidechain", MAX_CHANNELS as i32, 0.0),
+        ]),
         DeviceType::Lfo => {}
     }
     // A delay is synced to the transport by default.
@@ -89,6 +114,7 @@ pub fn make(kind: DeviceType, sample_rate: f32) -> Box<dyn AudioEffect> {
         DeviceType::Filter => Box::new(Filter::new(sample_rate)),
         DeviceType::Delay => Box::new(Delay::new(sample_rate)),
         DeviceType::Reverb => Box::new(Reverb::new(sample_rate)),
+        DeviceType::Compressor => Box::new(Compressor::new(sample_rate)),
         DeviceType::Lfo => unreachable!("an lfo is a modulator (modulator::make)"),
     };
     for (i, p) in params(kind, "x").iter().enumerate().skip(COMMON_PARAMS) {
@@ -386,6 +412,104 @@ impl AudioEffect for Reverb {
     }
 }
 
+// ---- compressor ----------------------------------------------------------------
+
+/// A feed-forward stereo compressor. Its detector follows the louder side
+/// of its key: its own input, or (`sidechain`) a channel's signal before
+/// that channel's inserts and fader. Gain reduction comes from a soft-knee
+/// curve and is smoothed in dB, attacking and releasing at their own rates.
+pub struct Compressor {
+    sr: f32,
+    threshold: f32,
+    ratio: f32,
+    knee: f32,
+    makeup: f32,
+    attack: f32,
+    release: f32,
+    sidechain: usize,
+    /// Smoothed gain reduction, dB.
+    env: f32,
+    /// The most reduction since the meters last read it.
+    peak: f32,
+}
+
+impl Compressor {
+    fn new(sr: f32) -> Self {
+        Self { sr, threshold: -18.0, ratio: 4.0, knee: 6.0, makeup: 0.0, attack: 0.0, release: 0.0, sidechain: 0, env: 0.0, peak: 0.0 }
+    }
+
+    /// The one-pole coefficient for a time constant of `ms`.
+    fn coef(&self, ms: f32) -> f32 {
+        (-1000.0 / (ms.max(0.01) * self.sr)).exp()
+    }
+
+    /// Gain reduction (dB, 0 or more) the curve asks for at `level` dB.
+    fn curve(&self, level: f32) -> f32 {
+        let over = level - self.threshold;
+        let slope = 1.0 - 1.0 / self.ratio;
+        if 2.0 * over <= -self.knee {
+            0.0
+        } else if 2.0 * over.abs() < self.knee {
+            let x = over + self.knee / 2.0;
+            slope * x * x / (2.0 * self.knee)
+        } else {
+            slope * over
+        }
+    }
+
+    /// Compress `buf` in place, keyed by `key`, or by `buf` itself.
+    fn run(&mut self, buf: &mut [f32], key: Option<&[f32]>, frames: usize) {
+        let makeup = self.makeup;
+        for f in 0..frames {
+            let k = key.unwrap_or(buf);
+            let level = k[f * 2].abs().max(k[f * 2 + 1].abs());
+            let db = 20.0 * level.max(1e-6).log10();
+            let want = self.curve(db);
+            let a = if want > self.env { self.attack } else { self.release };
+            self.env = want + a * (self.env - want);
+            self.peak = self.peak.max(self.env);
+            let g = 10f32.powf((makeup - self.env) / 20.0);
+            buf[f * 2] *= g;
+            buf[f * 2 + 1] *= g;
+        }
+    }
+}
+
+impl AudioEffect for Compressor {
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            0 => self.threshold = value.clamp(-60.0, 0.0),
+            1 => self.ratio = value.clamp(1.0, 20.0),
+            2 => self.attack = self.coef(value.clamp(0.1, 100.0)),
+            3 => self.release = self.coef(value.clamp(10.0, 1000.0)),
+            4 => self.knee = value.clamp(0.0, 24.0),
+            5 => self.makeup = value.clamp(0.0, 24.0),
+            6 => self.sidechain = value.round().clamp(0.0, MAX_CHANNELS as f32) as usize,
+            _ => {}
+        }
+    }
+
+    fn process(&mut self, buf: &mut [f32], frames: usize, _ctx: &ProcessContext) {
+        self.run(buf, None, frames);
+    }
+
+    fn process_keyed(&mut self, buf: &mut [f32], key: &[f32], frames: usize, _ctx: &ProcessContext) {
+        self.run(buf, Some(key), frames);
+    }
+
+    fn sidechain(&self) -> Option<usize> {
+        (self.sidechain > 0).then_some(self.sidechain)
+    }
+
+    fn reduction(&mut self) -> f32 {
+        std::mem::take(&mut self.peak)
+    }
+
+    fn reset(&mut self) {
+        self.env = 0.0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,5 +575,49 @@ mod tests {
             peak(&buf[buf.len() / 2..])
         };
         assert!(level(5000.0) < 0.05 && level(50.0) > 0.3, "{} {}", level(5000.0), level(50.0));
+    }
+
+    /// A square wave (constant level) through a compressor, in blocks,
+    /// keyed by itself or by `key`; the output's peak over the last half.
+    fn compress(e: &mut dyn AudioEffect, level: f32, key: Option<f32>) -> f32 {
+        let frames = SR as usize;
+        let square = |l: f32| (0..frames).flat_map(move |i| {
+            let v = if (i / 100) % 2 == 0 { l } else { -l };
+            [v, v]
+        }).collect::<Vec<f32>>();
+        let mut buf = square(level);
+        let k = key.map(square);
+        for (i, chunk) in buf.chunks_mut(512).enumerate() {
+            let n = chunk.len() / 2;
+            match &k {
+                Some(k) => e.process_keyed(chunk, &k[i * 512..i * 512 + n * 2], n, &CTX),
+                None => e.process(chunk, n, &CTX),
+            }
+        }
+        peak(&buf[buf.len() / 2..])
+    }
+
+    /// Above the threshold (hard knee), each dB over comes out as 1/ratio
+    /// dB: -6 dBFS into -18 dB at 4:1 leaves 3 dB over, -15 dBFS.
+    #[test]
+    fn compressor_follows_its_ratio() {
+        let mut e = make(DeviceType::Compressor, SR);
+        e.set_param(4, 0.0); // hard knee
+        let out = 20.0 * compress(e.as_mut(), 0.5, None).log10();
+        assert!((out + 15.0).abs() < 0.3, "{out} dBFS");
+        assert!((e.reduction() - 9.0).abs() < 0.3);
+        // Below the threshold it leaves the signal alone.
+        let mut e = make(DeviceType::Compressor, SR);
+        e.set_param(4, 0.0);
+        assert!((compress(e.as_mut(), 0.05, None) - 0.05).abs() < 1e-4);
+    }
+
+    /// Keyed by a loud signal, a compressor turns a quiet one down (the
+    /// same quiet signal keyed by itself is left alone, above).
+    #[test]
+    fn compressor_listens_to_its_key() {
+        let mut e = make(DeviceType::Compressor, SR);
+        let ducked = compress(e.as_mut(), 0.05, Some(0.9));
+        assert!(ducked < 0.02, "{ducked}");
     }
 }

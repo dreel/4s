@@ -2286,11 +2286,12 @@ fn print_event(e: &EventEnvelope, json: bool) {
             };
             format!("{instrument} {what} vel {velocity:.2} @ {time:.3}s")
         }
-        Event::Meters { channels, master } => format!(
-            "channels [{}] master [{:.2} {:.2}]",
+        Event::Meters { channels, master, reduction } => format!(
+            "channels [{}] master [{:.2} {:.2}]{}",
             channels.iter().map(|c| format!("{}:{:.2}/{:.2}", c.channel, c.left, c.right)).collect::<Vec<_>>().join(" "),
             master.first().unwrap_or(&0.0),
-            master.get(1).unwrap_or(&0.0)
+            master.get(1).unwrap_or(&0.0),
+            reduction.iter().filter(|(_, db)| **db >= 0.05).map(|(id, db)| format!(" {id} -{db:.1} dB")).collect::<String>()
         ),
         Event::MidiIn { port, data } => {
             let hex: Vec<String> = data.iter().map(|b| format!("{b:02X}")).collect();
