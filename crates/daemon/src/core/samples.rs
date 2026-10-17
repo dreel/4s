@@ -36,8 +36,10 @@ impl SampleState {
     }
 }
 
-/// Unfinished uploads at once (each holds a part file).
+/// Unfinished uploads at once (each holds a part file), and finished ones
+/// remembered (for a `sampler.load` naming one).
 const MAX_OPEN_UPLOADS: usize = 8;
+const MAX_DONE_UPLOADS: usize = 64;
 
 /// An upload in progress, or done (`path`).
 pub(super) struct Upload {
@@ -45,6 +47,8 @@ pub(super) struct Upload {
     part: PathBuf,
     received: u64,
     path: Option<PathBuf>,
+    /// When it started (`Core::upload_clock`), so the oldest goes first.
+    started: u64,
 }
 
 /// A pad's sample as an undo value: `{path, start, end, origin?}` (a plain
@@ -226,11 +230,25 @@ impl Core {
             std::fs::create_dir_all(&dir)
                 .and_then(|_| std::fs::write(&part, []))
                 .map_err(|e| RpcError::failed(format!("store {}: {e}", part.display())))?;
-            if self.uploads.values().filter(|u| u.path.is_none()).count() >= MAX_OPEN_UPLOADS {
-                std::fs::remove_file(&part).ok();
-                return Err(RpcError::failed(format!("at most {MAX_OPEN_UPLOADS} uploads at once; finish one first")));
+            // The oldest unfinished upload goes when too many are open (one
+            // abandoned by a client that went away); the oldest finished one
+            // is forgotten past a limit (its file stays).
+            self.upload_clock += 1;
+            let open: Vec<(String, u64)> = self.uploads.iter().filter(|(_, u)| u.path.is_none()).map(|(t, u)| (t.clone(), u.started)).collect();
+            if open.len() >= MAX_OPEN_UPLOADS
+                && let Some((oldest, _)) = open.iter().min_by_key(|(_, at)| *at)
+                && let Some(old) = self.uploads.remove(oldest)
+            {
+                std::fs::remove_file(old.part).ok();
             }
-            self.uploads.insert(token.clone(), Upload { name: p.name.clone(), part, received: 0, path: None });
+            let done: Vec<(String, u64)> = self.uploads.iter().filter(|(_, u)| u.path.is_some()).map(|(t, u)| (t.clone(), u.started)).collect();
+            if done.len() >= MAX_DONE_UPLOADS
+                && let Some((oldest, _)) = done.iter().min_by_key(|(_, at)| *at)
+            {
+                self.uploads.remove(oldest);
+            }
+            let started = self.upload_clock;
+            self.uploads.insert(token.clone(), Upload { name: p.name.clone(), part, received: 0, path: None, started });
         }
         let up = self.uploads.get_mut(token).ok_or_else(|| RpcError::invalid(format!("no upload '{token}' (start one at offset 0)")))?;
         if up.path.is_some() {
@@ -260,7 +278,9 @@ impl Core {
         }
         // Done: it must be audio this build can play, then it is stored
         // (decoded now, so a load of it right after finds it cached).
-        if let Err(e) = self.sources.get(&part) {
+        let checked = self.sources.get(&part);
+        self.sources.forget(&part);
+        if let Err(e) = checked {
             self.uploads.remove(token);
             std::fs::remove_file(&part).ok();
             // Named as sent (not as the temporary part).
@@ -512,16 +532,25 @@ impl Core {
         write_wav(&tmp, &s.data, self.sample_rate).map_err(|e| RpcError::failed(format!("write {}: {e}", tmp.display())))?;
         let mut rel = format!("samples/{id}.{pad}.{stem}.wav");
         let mut n = 2;
-        while bundle.join(&rel).exists() && std::fs::read(bundle.join(&rel)).ok() != std::fs::read(&tmp).ok() {
+        let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).ok();
+        let same = |p: &Path| size(p) == size(&tmp) && std::fs::read(p).ok() == std::fs::read(&tmp).ok();
+        while bundle.join(&rel).exists() && !same(&bundle.join(&rel)) {
             rel = format!("samples/{id}.{pad}.{stem}-{n}.wav");
             n += 1;
         }
         let dst = bundle.join(&rel);
         std::fs::rename(&tmp, &dst).map_err(|e| RpcError::failed(format!("write {}: {e}", dst.display())))?;
-        let origin = s.origin.clone().or_else(|| {
-            let path = std::path::absolute(&s.path).unwrap_or_else(|_| s.path.clone()).to_string_lossy().into_owned();
-            Some(SampleOrigin { path, start: s.start, end: s.end })
-        });
+        // Where it came from: a part of a bundle copy is that part of the
+        // copy's own origin (the copy is that region, at the same pace).
+        let origin = match &s.origin {
+            Some(o) if s.whole() => o.clone(),
+            Some(o) => SampleOrigin { path: o.path.clone(), start: o.start + s.start, end: (o.start + s.end).min(o.end) },
+            None => {
+                let path = std::path::absolute(&s.path).unwrap_or_else(|_| s.path.clone()).to_string_lossy().into_owned();
+                SampleOrigin { path, start: s.start, end: s.end }
+            }
+        };
+        let origin = Some(origin);
         Ok((rel, origin))
     }
 }

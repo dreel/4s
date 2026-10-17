@@ -21,7 +21,7 @@ mysong.4s/
 snapshot; loading applies it. One set of types covers the API and the file, and
 agents can generate or edit projects directly.
 
-It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010):
+It contains (format version 8; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010, RFC 0011):
 
 - The graph: `instruments` (`{id, type, name}`, in creation order),
   `channels` (`{n, name}`, in display order; a return bus has `"kind":
@@ -116,7 +116,9 @@ a track) before anything changes.
   track's selected clip (an instrument without a track gets one, its empty
   clip launched), so it plays as it did, and a clip without a length gets
   `sequencer.length` (default 16 steps) in ticks. v6 -> v7 (RFC 0010) adds
-  `devices` (none in an older project).
+  `devices` (none in an older project). v7 -> v8 (RFC 0011) lets a sample
+  be `{path, start?, end?, origin?}`; a v7 path is read as all of the
+  file.
 - Parameters are stored by path, so added params take their defaults from the
   parameter registry. Unknown paths are warned about (whether they are kept or
   dropped is decided when building).

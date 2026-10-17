@@ -1003,6 +1003,9 @@ check "removing the sampler and undo bring its samples back" "sampler pad 1" bas
 FX=tests/fixtures/audio
 check "an MP3's length and format" "mp3, 44100 Hz, 2 ch" s sample info $FX/song.mp3
 check "an AAC (M4A) file's" "aac, 44100 Hz, 2 ch" s sample info $FX/song.m4a
+check "and AIFF, ALAC, and Ogg Vorbis files'" "pcm_s16be alac vorbis" bash -c "echo \$(for f in song.aiff song-alac.m4a song.ogg; do $BIN/4s sample info $FX/\$f | head -1 | awk '{print \$3}' | tr -d ,; done)"
+check "a device or a folder is not read as a sample" "not a file" s call sample.info '{"path": "/dev/zero"}'
+
 check "a FLAC file's waveform: the tones and the burst, quiet between" "tones" bash -c "$BIN/4s sample peaks $FX/song.flac --bins 16 | tail -1 | python3 -c 'import sys; l=sys.stdin.read().strip()[1:-1]; print(\"tones\" if l[1]!=\" \" and l[5]==\" \" and l[8] in \"*+=#@\" and l[13]!=\" \" else repr(l))'"
 check "...and zoomed in on the burst" "0:00.980 - 0:01.060" s sample peaks $FX/song.flac --from 0.98 --to 1.06 --bins 8
 check "a region of an MP3 on a pad" "sampler pad 1  song.mp3                 0.30s  0:01.500 - 0:01.800 of 0:02." s sampler load 1 $FX/song.mp3 --from 1.5 --to 1.8
@@ -1040,6 +1043,8 @@ PY
 check "an upload in two chunks: a gap is refused, then it is stored" "gap refused
 True" python3 "$TMP/chunks.py"
 check "...and a load names it" "sampler pad 4  chunked.flac             0.50s" bash -c "$BIN/4s call sampler.load '{\"pad\": 4, \"upload\": \"two-chunks\", \"end\": 0.5}' >/dev/null && $BIN/4s sampler | grep 'pad 4 '"
+check "4s sample upload sends a file and says where it is stored" "samples/song.flac" bash -c "$BIN/4s sample upload $FX/song.flac"
+check "...and sending it again keeps one copy" "1" bash -c "$BIN/4s sample upload $FX/song.flac >/dev/null && ls '$FOURS_DATA_DIR/samples' | grep -c 'song.flac$'"
 check "a load of an upload cannot go in a batch (it is journaled as its stored file)" "cannot be in a batch" s call batch '{"requests": [{"method": "sampler.load", "params": {"pad": 4, "upload": "two-chunks"}}]}'
 check "saving writes a region as a WAV in the bundle, with where it came from" "sampler.1.song.wav" bash -c "$BIN/4s project save regions >/dev/null && ls '$FOURS_DATA_DIR/projects/regions.4s/samples' && grep -o '\"start\": 1.5' '$FOURS_DATA_DIR/projects/regions.4s/project.json'"
 check "...which loads back as that region, still knowing its origin" "(cut from " bash -c "$BIN/4s project new >/dev/null && $BIN/4s project load regions >/dev/null && $BIN/4s sampler | grep 'pad 1 '"

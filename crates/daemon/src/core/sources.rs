@@ -22,6 +22,8 @@ use std::time::SystemTime;
 pub const MAX_SOURCE_SECONDS: f64 = 20.0 * 60.0;
 /// Longest region a pad plays: 60 seconds.
 pub const MAX_REGION_SECONDS: f64 = 60.0;
+/// The largest file read as a source (a 20-minute FLAC fits).
+pub const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
 /// Frames per bin of a source's waveform overview.
 const PEAK_BIN: usize = 256;
 
@@ -246,6 +248,14 @@ impl SourceCache {
     /// The decoded source of a file (decoding it if it is not cached).
     pub fn get(&mut self, path: &Path) -> Result<Arc<Source>, String> {
         let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        // A device, a pipe, or a folder would never end (or block the
+        // daemon), and a huge file would fill memory: neither is read.
+        if !meta.is_file() {
+            return Err(format!("{}: not a file", path.display()));
+        }
+        if meta.len() > MAX_SOURCE_BYTES {
+            return Err(format!("{}: larger than {} MB", path.display(), MAX_SOURCE_BYTES / 1024 / 1024));
+        }
         let stamp = (meta.len(), meta.modified().ok());
         self.clock += 1;
         if let Some((len, time, hash)) = self.by_path.get(path)
@@ -278,6 +288,15 @@ impl SourceCache {
             };
             self.by_hash.remove(&oldest);
         }
+        // Paths of sources no longer cached are found again by hashing.
+        let by_hash = &self.by_hash;
+        self.by_path.retain(|_, (_, _, hash)| by_hash.contains_key(hash));
+    }
+
+    /// Forget a path (a file renamed or removed); its source stays cached
+    /// by content.
+    pub fn forget(&mut self, path: &Path) {
+        self.by_path.remove(path);
     }
 
     /// Bytes the cached sources take.
@@ -313,12 +332,12 @@ mod tests {
         (sum / (y - x) as f32).sqrt()
     }
 
-    /// MP3, FLAC, and AAC decode to the fixture's 2 s, resampled from
+    /// MP3, FLAC, AAC, AIFF, ALAC, and Vorbis decode to the fixture's 2 s, resampled from
     /// 44.1 kHz to 48 kHz, with its tones where they are and silence
     /// between them.
     #[test]
     fn compressed_formats_decode_and_resample() {
-        for name in ["song.flac", "song.mp3", "song.m4a"] {
+        for name in ["song.flac", "song.mp3", "song.m4a", "song.aiff", "song-alac.m4a", "song.ogg"] {
             let mut cache = SourceCache::new(64 << 20, 48000);
             let s = cache.get(&fixture(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(s.rate == 48000 && s.format.contains("44100 Hz, 2 ch"), "{name}: {}", s.format);
@@ -349,6 +368,14 @@ mod tests {
         small.get(&fixture("song.mp3")).unwrap();
         assert_eq!(small.len(), 1);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Only regular files of a sane size are read.
+    #[test]
+    fn not_files_are_refused() {
+        let mut cache = SourceCache::new(64 << 20, 48000);
+        assert!(cache.get(Path::new("/dev/zero")).err().is_some_and(|e| e.contains("not a file")));
+        assert!(cache.get(&std::env::temp_dir()).err().is_some_and(|e| e.contains("not a file")));
     }
 
     /// Regions are checked and copied; peaks follow the audio at any zoom.

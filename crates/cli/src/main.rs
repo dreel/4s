@@ -571,7 +571,11 @@ fn fmt_time(secs: f64) -> String {
 fn time_arg(s: &str) -> Result<f64> {
     let t = s.trim().trim_end_matches('s');
     let secs = match t.rsplit_once(':') {
-        Some((m, sec)) => m.parse::<f64>().ok().zip(sec.parse::<f64>().ok()).map(|(m, s)| m * 60.0 + s),
+        Some((m, sec)) => m
+            .parse::<u32>()
+            .ok()
+            .zip(sec.parse::<f64>().ok().filter(|s| (0.0..60.0).contains(s)))
+            .map(|(m, s)| m as f64 * 60.0 + s),
         None => t.parse::<f64>().ok(),
     };
     secs.filter(|v| v.is_finite() && *v >= 0.0).ok_or_else(|| anyhow!("'{s}' is not a time (seconds, or m:ss.ms)"))

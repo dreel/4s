@@ -121,6 +121,8 @@ pub struct Core {
     uploads: HashMap<String, samples::Upload>,
     /// The engine holds an audition (`sample.play`), to be handed back.
     previewing: bool,
+    /// Counts uploads as they start (the oldest goes first).
+    upload_clock: u64,
     /// Modulator slots of the engine in use.
     mod_used: [bool; MAX_MODULATORS],
     /// Modulation routes, in the order they were made (the engine's route
@@ -228,6 +230,7 @@ impl Core {
             sources: sources::SourceCache::new(DEFAULT_SAMPLE_CACHE_MB << 20, audio.sample_rate),
             uploads: HashMap::new(),
             previewing: false,
+            upload_clock: 0,
             mod_used: [false; MAX_MODULATORS],
             mod_routes: Vec::new(),
             routes_sent: [None; MAX_MOD_ROUTES],
