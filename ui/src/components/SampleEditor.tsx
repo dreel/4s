@@ -76,8 +76,8 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
     if (!source) return;
     const len = source.end - source.start;
     setSel([source.start, source.end]);
-    const pad = Math.max(len, 0.05);
-    setView([Math.max(0, source.start - pad), Math.min(source.seconds, source.end + pad)]);
+    const margin = Math.max(len, 0.05);
+    setView([Math.max(0, source.start - margin), Math.min(source.seconds, source.end + margin)]);
   }, [source]);
 
   // The canvas follows its box's width (the box is there once the source
@@ -110,6 +110,20 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
       fetching.current = false;
     })();
   }, [source, view, width]);
+
+  // Wheel zoom and scroll, on a listener that can keep the page behind from
+  // scrolling too (React's wheel handlers are passive).
+  const onWheel = useRef<(e: WheelEvent) => void>(() => {});
+  useEffect(() => {
+    const c = canvas.current;
+    if (!c) return;
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      onWheel.current(e);
+    };
+    c.addEventListener("wheel", wheel, { passive: false });
+    return () => c.removeEventListener("wheel", wheel);
+  }, [ready]);
 
   // The playhead while auditioning.
   useEffect(() => {
@@ -200,6 +214,14 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
     v0 = Math.min(Math.max(0, v0), Math.max(0, source.seconds - s));
     setView([v0, v0 + s]);
   };
+  onWheel.current = (e: WheelEvent) => {
+    const t = tOf(e.clientX - canvas.current!.getBoundingClientRect().left);
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      const d = ((e.shiftKey ? e.deltaY : e.deltaX) / width) * span;
+      const v0 = Math.min(Math.max(0, view[0] + d), Math.max(0, source.seconds - span));
+      setView([v0, v0 + span]);
+    } else zoom(e.deltaY > 0 ? 1.25 : 0.8, t);
+  };
   const btn = "px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:opacity-30";
   const timeInput = (value: number, set: (v: number) => void, testId: string) => (
     <input
@@ -249,6 +271,7 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
           data-view={`${view[0].toFixed(4)},${view[1].toFixed(4)}`}
           data-selection={`${a.toFixed(4)},${b.toFixed(4)}`}
           data-played={played ?? undefined}
+          data-playing={playing !== null}
           onPointerDown={(e) => {
             (e.target as Element).setPointerCapture(e.pointerId);
             const x = at(e);
@@ -271,14 +294,6 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
           onPointerUp={() => {
             setDrag(null);
             setSel(([x, y]) => [Math.min(x, y), Math.max(x, y)]);
-          }}
-          onWheel={(e) => {
-            const t = tOf(e.clientX - canvas.current!.getBoundingClientRect().left);
-            if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-              const d = ((e.shiftKey ? e.deltaY : e.deltaX) / width) * span;
-              const v0 = Math.min(Math.max(0, view[0] + d), Math.max(0, source.seconds - span));
-              setView([v0, v0 + span]);
-            } else zoom(e.deltaY > 0 ? 1.25 : 0.8, t);
           }}
         />
       </div>

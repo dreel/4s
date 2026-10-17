@@ -1310,6 +1310,12 @@ test("sample editor: a pad's file as a waveform; select a region by dragging or 
   await page.getByTestId("sample-play-ed-1").click();
   await expect(wave).toHaveAttribute("data-played", "1.5000,1.8000");
   await page.getByTestId("sample-stop-ed-1").click();
+  await expect(wave).toHaveAttribute("data-playing", "false");
+  // The wheel zooms around the pointer (and only the waveform moves).
+  const before = (await wave.getAttribute("data-view"))!;
+  await page.mouse.move(x(1.65), box.y + 60);
+  await page.mouse.wheel(0, -200);
+  await expect(wave).not.toHaveAttribute("data-view", before);
   await page.getByTestId("sample-apply-ed-1").click();
   await expect
     .poll(async () => (await rpc("sampler.get", { instrument: "ed" })).pads.map((p) => [p.start, p.end]))
