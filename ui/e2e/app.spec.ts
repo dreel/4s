@@ -1197,7 +1197,7 @@ test("returns: a return bus with a reverb, fed by a send knob on a track strip",
   await expect(rpc("route.set", { source: "drums", channel: 2, swap: false })).rejects.toThrow("return bus");
 });
 
-test("synth: a chord in the step view is three notes on one step; its knob rows set its parameters", async () => {
+test("synth: a chord in the step view is three notes on one step; its wave picker sets the oscillator", async () => {
   const { page, rpc } = h;
   await rpc("instrument.add", { type: "poly", id: null, name: null, channel: null, no_channel: false });
   await page.getByTestId("select-synth").click();

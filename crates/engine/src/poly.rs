@@ -10,8 +10,8 @@
 //!
 //! Voices: a note already sounding is retriggered in its own voice; a new one
 //! takes a free voice, else the oldest released one, else the oldest. A
-//! retriggered or stolen voice's envelopes start from where they are, so
-//! nothing clicks.
+//! retriggered or stolen voice keeps its oscillator phases and its
+//! envelopes start from where they are, rather than jumping to silence.
 
 use crate::dsp::{Noise, Svf, TAU, lerp_exp, midi_hz, poly_blep, semitones_to_ratio, soft_clip};
 use crate::instrument::{Hit, Instrument, MAX_BLOCK};

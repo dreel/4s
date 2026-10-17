@@ -103,8 +103,8 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   waveform editor for a pad's region). `4s clip lane drums mixer.1.pan
   "0:-1 384:1"` automates a parameter while the clip plays.
 - `4s instrument add poly` adds an eight-voice synth (`synth.*`); a chord
-  is several notes on one step: `4s clip add synth 0 C4 --len 96` for C4,
-  E4, and G4.
+  is several notes on one step: `4s clip add synth 0 C4 --len 96`, then the
+  same for E4 and G4.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history.
