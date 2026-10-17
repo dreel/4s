@@ -2652,7 +2652,7 @@
             "$ref": "#/$defs/ProjectSampleRegion"
           }
         ],
-        "description": "A migration upgrades a project from version N to N+1.\nA pad's sample in a project: the file it plays (a path, as in v7, for\nall of it), or a region of it and where a bundle's copy came from."
+        "description": "A pad's sample in a project: the file it plays (a path, as in v7, for\nall of it), or a region of it and where a bundle's copy came from."
       },
       "ProjectSampleRegion": {
         "properties": {
@@ -4868,7 +4868,7 @@
             "$ref": "#/$defs/ProjectSampleRegion"
           }
         ],
-        "description": "A migration upgrades a project from version N to N+1.\nA pad's sample in a project: the file it plays (a path, as in v7, for\nall of it), or a region of it and where a bundle's copy came from."
+        "description": "A pad's sample in a project: the file it plays (a path, as in v7, for\nall of it), or a region of it and where a bundle's copy came from."
       },
       "ProjectSampleRegion": {
         "properties": {

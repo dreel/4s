@@ -2,7 +2,6 @@
 import type { ProjectSampleRegion } from "./ProjectSampleRegion";
 
 /**
- * A migration upgrades a project from version N to N+1.
  * A pad's sample in a project: the file it plays (a path, as in v7, for
  * all of it), or a region of it and where a bundle's copy came from.
  */
