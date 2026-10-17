@@ -305,7 +305,9 @@ pub struct SamplerGetParams {
     pub instrument: Option<String>,
 }
 
-/// Load a WAV file on the engine host into a pad.
+/// Load an audio file (WAV, AIFF, FLAC, MP3, AAC/M4A, ALAC, Ogg Vorbis),
+/// or a region of one, into a pad. The file is on the engine host
+/// (`path`), or was just sent with `sample.upload` (`upload`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct SamplerLoadParams {
     #[serde(default)]
@@ -313,19 +315,58 @@ pub struct SamplerLoadParams {
     /// 1..16.
     pub pad: u32,
     /// Relative paths are under the data dir; absolute paths as given.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// A finished upload's id, instead of `path` (journaled as its path).
+    #[serde(default)]
+    pub upload: Option<String>,
+    /// The region, in seconds of the file (default: all of it; at most
+    /// 60 s).
+    #[serde(default)]
+    pub start: Option<f64>,
+    #[serde(default)]
+    pub end: Option<f64>,
+}
+
+/// Send a file to the engine host in chunks (from a client on another
+/// machine): the same `upload` id for each, at increasing `offset`s, the
+/// last with `done`. The finished file is checked (it must decode) and
+/// stored under `<data dir>/samples/`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SampleUploadParams {
+    /// Chosen by the client (letters, digits, `-`, `_`; up to 64).
+    pub upload: String,
+    /// The file's name.
+    pub name: String,
+    /// Where this chunk goes in the file (the bytes received so far).
+    #[ts(type = "number")]
+    pub offset: u64,
+    /// This chunk, base64 (at most `MAX_UPLOAD_BYTES` decoded).
+    pub data: String,
+    #[serde(default)]
+    pub done: bool,
+}
+
+/// An audio file on the engine host.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SampleInfoParams {
+    /// Relative paths are under the data dir; `upload:<id>` is a finished
+    /// upload.
     pub path: String,
 }
 
-/// Send a WAV file to load into a pad (from a client on another machine).
+/// A waveform overview of `start..end` seconds of a file (default: all
+/// of it) in `bins` (min, max) pairs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
-pub struct SamplerUploadParams {
+pub struct SamplePeaksParams {
+    /// As in `sample.info`.
+    pub path: String,
     #[serde(default)]
-    pub instrument: Option<String>,
-    pub pad: u32,
-    /// The file's name.
-    pub name: String,
-    /// The WAV file, base64 (at most `MAX_UPLOAD_BYTES` decoded).
-    pub data: String,
+    pub start: Option<f64>,
+    #[serde(default)]
+    pub end: Option<f64>,
+    /// 1..4096.
+    pub bins: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -1263,11 +1304,15 @@ api! {
     DeviceMove = "device.move" (DeviceMoveParams) -> Graph;
     /// A sampler's loaded pads.
     SamplerGet = "sampler.get" (SamplerGetParams) -> crate::device::SamplerInfo;
-    /// Load a WAV on the engine host into a sampler's pad.
+    /// Load an audio file (or a region of it) on the engine host, or just
+    /// uploaded, into a sampler's pad.
     SamplerLoad = "sampler.load" (SamplerLoadParams) -> crate::device::SamplerInfo;
-    /// Send a WAV to load into a pad; journaled as the `sampler.load` of the
-    /// file it was stored as.
-    SamplerUpload = "sampler.upload" (SamplerUploadParams) -> crate::device::SamplerInfo;
+    /// Send a file to the engine host, a chunk at a time (RFC 0011).
+    SampleUpload = "sample.upload" (SampleUploadParams) -> crate::device::SampleUploadResult;
+    /// An audio file on the engine host: its length and format.
+    SampleInfo = "sample.info" (SampleInfoParams) -> crate::device::SampleInfo;
+    /// A waveform overview of an audio file on the engine host.
+    SamplePeaks = "sample.peaks" (SamplePeaksParams) -> crate::device::SamplePeaks;
     /// Empty a pad.
     SamplerClear = "sampler.clear" (SamplerPadParams) -> crate::device::SamplerInfo;
     /// Route a modulator output to a continuous parameter, with a depth

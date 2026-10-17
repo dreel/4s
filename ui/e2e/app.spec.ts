@@ -1362,6 +1362,12 @@ test("sampler: load a WAV into a pad from this computer, play it from the step v
   await expect(page.getByTestId("knob-pads.1.tune")).toBeVisible();
   await page.getByTestId("pad-clear-pads-1").click();
   await expect(page.getByTestId("pad-pads-1")).toContainText("empty");
+  // An MP3 (RFC 0011), sent in chunks and decoded by the engine.
+  const mp3 = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "tests", "fixtures", "audio", "song.mp3");
+  await page.getByTestId("pad-load-pads-2").setInputFiles(mp3);
+  await expect(page.getByTestId("pad-pads-2")).toContainText("song.mp3");
+  const pad2 = (await rpc("sampler.get", { instrument: "pads" })).pads.find((p) => p.pad === 2)!;
+  expect(pad2.seconds).toBeGreaterThan(1.9);
 });
 
 test("virtual Livid Block pads, LEDs, and knobs", async () => {

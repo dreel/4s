@@ -987,7 +987,7 @@ check "pads are rows of the step view" "P1   x--- x---" bash -c "$BIN/4s step sa
 check "the pad plays from the clip" "triggers: 2 (sampler 2)  detected onsets: 2" bash -c "$BIN/4s render | grep triggers"
 check "a pad with no sample stays silent" "triggers: 2 (sampler 2)" bash -c "$BIN/4s step sampler 9 pad2 >/dev/null; $BIN/4s render | grep triggers"
 check "tune moves its pitch" "sampler.1.tune = 12" s set sampler.1.tune 12
-check "non-WAV files are refused, and nothing is stored" "nothing stored" bash -c "$BIN/4s sampler load 2 Cargo.toml 2>&1 | grep -q sampler.upload && test ! -e '$FOURS_DATA_DIR/samples/Cargo.toml' && echo nothing stored"
+check "non-WAV files are refused, and nothing is stored" "nothing stored" bash -c "$BIN/4s sampler load 2 Cargo.toml 2>&1 | grep -q 'sample.upload: Cargo.toml: not an audio file' && test ! -e '$FOURS_DATA_DIR/samples/Cargo.toml' && echo nothing stored"
 check "a path on the engine host loads directly" "sampler pad 3  host.wav" bash -c "mkdir -p '$FOURS_DATA_DIR/samples' && cp '$TMP/tone.wav' '$FOURS_DATA_DIR/samples/host.wav' && $BIN/4s sampler load 3 samples/host.wav | grep 'pad 3'"
 check "a choke group cuts the pad it shares (a silent pad 2 shortens pad 1)" "choked" bash -c "$BIN/4s set sampler.1.tune 0 >/dev/null; $BIN/4s step sampler 5 pad1 --off >/dev/null; $BIN/4s sampler load 2 '$FOURS_DATA_DIR/samples/host.wav' >/dev/null; $BIN/4s set sampler.2.gain 0 >/dev/null; $BIN/4s step sampler 2 pad2 >/dev/null; A=\$($BIN/4s --json render | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"rms\"])'); $BIN/4s set sampler.1.choke 1 >/dev/null; $BIN/4s set sampler.2.choke 1 >/dev/null; B=\$($BIN/4s --json render | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"rms\"])'); $BIN/4s sampler clear 2 >/dev/null; $BIN/4s sampler clear 3 >/dev/null; $BIN/4s step sampler 2 pad2 --off >/dev/null; python3 -c \"print('choked' if \$B < 0.93 * \$A else (\$A, \$B))\""
 check "saving copies the sample into the bundle" "samples/sampler.1.tone.wav" bash -c "$BIN/4s project save sampled >/dev/null && ls '$FOURS_DATA_DIR/projects/sampled.4s/samples' && grep -o 'samples/sampler.1.tone.wav' '$FOURS_DATA_DIR/projects/sampled.4s/project.json'"
@@ -997,6 +997,48 @@ check "saving again keeps one copy under the same name" "1 samples/sampler.1.ton
 check "saving under a new name does not stack the name" "1 samples/sampler.1.tone.wav" bash -c "$BIN/4s project save copied >/dev/null && echo \$(ls '$FOURS_DATA_DIR/projects/copied.4s/samples' | wc -l) \$(grep -o 'samples/sampler.1.tone.wav' '$FOURS_DATA_DIR/projects/copied.4s/project.json')"
 check "clearing a pad, and undo" "sampler pad 1  tone.wav" bash -c "$BIN/4s sampler clear 1 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler"
 check "removing the sampler and undo bring its samples back" "sampler pad 1" bash -c "$BIN/4s instrument rm sampler >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler"
+# Formats and regions (RFC 0011): MP3, FLAC, and AAC files (tests/fixtures/
+# audio: 2 s, a 220 Hz tone to 0.5 s, a 1 kHz burst at 1.0 s, a 440 Hz
+# tone 1.5..1.8 s), any region of one on a pad, sent in chunks.
+FX=tests/fixtures/audio
+check "an MP3's length and format" "mp3, 44100 Hz, 2 ch" s sample info $FX/song.mp3
+check "an AAC (M4A) file's" "aac, 44100 Hz, 2 ch" s sample info $FX/song.m4a
+check "a FLAC file's waveform: the tones and the burst, quiet between" "tones" bash -c "$BIN/4s sample peaks $FX/song.flac --bins 16 | tail -1 | python3 -c 'import sys; l=sys.stdin.read().strip()[1:-1]; print(\"tones\" if l[1]!=\" \" and l[5]==\" \" and l[8] in \"*+=#@\" and l[13]!=\" \" else repr(l))'"
+check "...and zoomed in on the burst" "0:00.980 - 0:01.060" s sample peaks $FX/song.flac --from 0.98 --to 1.06 --bins 8
+check "a region of an MP3 on a pad" "sampler pad 1  song.mp3                 0.30s  0:01.500 - 0:01.800 of 0:02." s sampler load 1 $FX/song.mp3 --from 1.5 --to 1.8
+check "...plays what that region holds (one hit)" "triggers: 1 (sampler 1)" bash -c "$BIN/4s step sampler 1 pad1 >/dev/null; $BIN/4s render | grep triggers"
+check "...journaled as a load of the stored file (not the upload), with its region" "path and region" bash -c "$BIN/4s --json journal --limit 3 | python3 -c 'import json,sys; e=[x[\"params\"] for x in json.load(sys.stdin)[\"entries\"] if x[\"method\"]==\"sampler.load\"][-1]; print(\"path and region\" if e[\"path\"].endswith(\"song.mp3\") and e[\"upload\"] is None and e[\"start\"]==1.5 else e)'"
+check "a region in m:ss.ms, of a FLAC file" "0:00.000 - 0:00.500 of" s sampler load 2 $FX/song.flac --from 0:00.000 --to 0:00.5
+check "undo brings back the pad's last region" "0:01.500 - 0:01.800" bash -c "$BIN/4s sampler load 1 $FX/song.mp3 --from 1.0 --to 1.1 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler | grep 'pad 1 '"
+check "a region past the file's end is refused" "past the end of the file" s sampler load 3 $FX/song.mp3 --from 5 --to 6
+python3 - "$TMP/long.wav" <<'PY'
+import struct, sys
+sr = 8000; n = sr * 61
+data = struct.pack('<h', 1000) * n
+fmt = struct.pack('<IHHIIHH', 16, 1, 1, sr, sr * 2, 2, 16)
+open(sys.argv[1], 'wb').write(b'RIFF' + struct.pack('<I', 36 + len(data)) + b'WAVEfmt ' + fmt + b'data' + struct.pack('<I', len(data)) + data)
+PY
+check "all of a file longer than a pad plays is refused: load a region" "load a region of it" s sampler load 3 "$TMP/long.wav"
+check "...and a region of it loads" "0:30.000 - 0:30.250 of 1:01.000" s sampler load 3 "$TMP/long.wav" --from 30 --to 30.25
+# Two chunks by hand (the CLI sends 11 MB ones): the second must go where
+# the first ended; the finished file is checked and stored.
+cat > "$TMP/chunks.py" <<PY
+import base64, json, subprocess, sys
+data = open('$FX/song.flac', 'rb').read(); half = len(data) // 2
+def up(offset, chunk, done):
+    p = {'upload': 'two-chunks', 'name': 'chunked.flac', 'offset': offset, 'data': base64.b64encode(chunk).decode(), 'done': done}
+    return subprocess.run(['$BIN/4s', 'call', 'sample.upload', json.dumps(p)], capture_output=True, text=True)
+up(0, data[:half], False)
+bad = up(half + 1, data[half:], True)
+ok = up(half, data[half:], True)
+print('gap refused' if 'the next chunk goes there' in bad.stderr + bad.stdout else bad.stdout + bad.stderr)
+print(json.loads(ok.stdout)['path'].endswith('samples/chunked.flac'))
+PY
+check "an upload in two chunks: a gap is refused, then it is stored" "gap refused
+True" python3 "$TMP/chunks.py"
+check "...and a load names it" "sampler pad 4  chunked.flac             0.50s" bash -c "$BIN/4s call sampler.load '{\"pad\": 4, \"upload\": \"two-chunks\", \"end\": 0.5}' >/dev/null && $BIN/4s sampler | grep 'pad 4 '"
+check "saving writes a region as a WAV in the bundle, with where it came from" "sampler.1.song.wav" bash -c "$BIN/4s project save regions >/dev/null && ls '$FOURS_DATA_DIR/projects/regions.4s/samples' && grep -o '\"start\": 1.5' '$FOURS_DATA_DIR/projects/regions.4s/project.json'"
+check "...which loads back as that region, still knowing its origin" "(cut from " bash -c "$BIN/4s project new >/dev/null && $BIN/4s project load regions >/dev/null && $BIN/4s sampler | grep 'pad 1 '"
 check "a session with samples replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/smp.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/smp.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 # Automation lanes (RFC 0010): a clip's lane moves a parameter while the
 # clip plays; the value set by hand comes back when nothing plays it.

@@ -16,6 +16,7 @@ mod lanes;
 pub(crate) mod record;
 mod samples;
 mod seats;
+mod sources;
 mod song;
 
 use crate::controller::{BlockInput, BlockMap, Controller, decode_block};
@@ -82,6 +83,9 @@ struct ParamEntry {
     value: f64,
 }
 
+/// Default memory budget of the decoded-sample cache, in MB (RFC 0011).
+pub const DEFAULT_SAMPLE_CACHE_MB: usize = 512;
+
 pub struct Core {
     params: Vec<ParamEntry>,
     index: HashMap<String, usize>,
@@ -111,6 +115,10 @@ pub struct Core {
     effect_used: [bool; MAX_EFFECTS],
     /// Samplers' samples by instrument id and pad (1..16).
     samples: HashMap<String, BTreeMap<u32, SampleState>>,
+    /// Decoded audio files, by content, within a memory budget (RFC 0011).
+    sources: sources::SourceCache,
+    /// Uploads (`sample.upload`) in progress or done, by id.
+    uploads: HashMap<String, samples::Upload>,
     /// Modulator slots of the engine in use.
     mod_used: [bool; MAX_MODULATORS],
     /// Modulation routes, in the order they were made (the engine's route
@@ -181,6 +189,11 @@ pub struct Core {
 }
 
 impl Core {
+    /// The decoded-sample cache's memory budget (`--sample-cache-mb`).
+    pub fn set_sample_cache_mb(&mut self, mb: usize) {
+        self.sources = sources::SourceCache::new(mb << 20, self.sample_rate);
+    }
+
     pub fn new(
         commands: Producer<Command>,
         midi_tx: Sender<MidiMessage>,
@@ -208,6 +221,8 @@ impl Core {
             chains: BTreeMap::new(),
             effect_used: [false; MAX_EFFECTS],
             samples: HashMap::new(),
+            sources: sources::SourceCache::new(DEFAULT_SAMPLE_CACHE_MB << 20, audio.sample_rate),
+            uploads: HashMap::new(),
             mod_used: [false; MAX_MODULATORS],
             mod_routes: Vec::new(),
             routes_sent: [None; MAX_MOD_ROUTES],
@@ -1725,14 +1740,19 @@ impl Core {
                 warnings.push(format!("ignored the samples of '{id}' (no such sampler)"));
                 continue;
             }
-            for (pad, path) in pads {
-                let path = self.resolve_data_path(path);
-                match samples::decode(&path, self.sample_rate) {
-                    Ok((data, frames)) if (1..=SAMPLER_PADS).contains(pad) => {
-                        self.set_sample_unchecked(id, *pad, Some(SampleState { path, frames, data }))
-                    }
-                    Ok(_) => warnings.push(format!("{id}: no pad {pad}")),
-                    Err(e) => warnings.push(format!("{id} pad {pad}: {e}")),
+            for (pad, entry) in pads {
+                if !(1..=SAMPLER_PADS).contains(pad) {
+                    warnings.push(format!("{id}: no pad {pad}"));
+                    continue;
+                }
+                let path = self.resolve_data_path(entry.path());
+                let (start, end, origin) = match entry {
+                    ProjectSample::Path(_) => (None, None, None),
+                    ProjectSample::Region(r) => (r.start, r.end, r.origin.clone()),
+                };
+                match self.cut_sample(&path, start, end, origin) {
+                    Ok(s) => self.set_sample_unchecked(id, *pad, Some(s)),
+                    Err(e) => warnings.push(format!("{id} pad {pad}: {}", e.message)),
                 }
             }
         }
@@ -2006,7 +2026,7 @@ impl Core {
         let mut params: Vec<(String, Option<f64>)> = Vec::new();
         let mut clip_sets = ClipSets::default();
         let mut device_sets = DeviceSets::default();
-        let mut sample_sets: Vec<(String, u32, Option<String>)> = Vec::new();
+        let mut sample_sets: Vec<(String, u32, Value)> = Vec::new();
         let mut seats: Vec<(String, SeatConfig)> = Vec::new();
         let mut skipped = Vec::new();
         for (key, v) in sets {
@@ -2037,7 +2057,7 @@ impl Core {
                 "device" | "chain" | "mod" => device_sets.parse(kind, rest, v),
                 "sample" => rest.rsplit_once('.').and_then(|(id, pad)| {
                     let pad = pad.parse().ok()?;
-                    sample_sets.push((id.to_string(), pad, v.as_str().map(String::from)));
+                    sample_sets.push((id.to_string(), pad, v.clone()));
                     Some(())
                 }),
                 "seat" => match v {
@@ -2304,21 +2324,16 @@ impl Core {
                 }
                 Request::SeatApplyLayout(p)
             }
-            // An upload is stored first and journaled as the load of that
-            // file, so the journal holds no audio and a replay needs no
-            // upload.
-            Request::SamplerUpload(p) => match self.store_upload(&p) {
-                Ok(path) => Request::SamplerLoad(SamplerLoadParams {
-                    instrument: p.instrument,
-                    pad: p.pad,
-                    path: path.to_string_lossy().into_owned(),
-                }),
-                // Refused: journaled without the audio, with its error.
-                Err(e) => {
-                    failed = Some(e);
-                    Request::SamplerUpload(SamplerUploadParams { data: String::new(), ..p })
+            // A load of an upload is journaled as the load of the file it
+            // was stored as, so the journal holds no audio and a replay
+            // needs no upload.
+            Request::SamplerLoad(mut p) if p.upload.is_some() && p.path.is_none() => {
+                match self.uploaded(p.upload.as_deref().unwrap_or_default()) {
+                    Ok(path) => (p.path, p.upload) = (Some(path.to_string_lossy().into_owned()), None),
+                    Err(e) => failed = Some(e),
                 }
-            },
+                Request::SamplerLoad(p)
+            }
             // A launch is journaled with the clip it resolves to, so a replay
             // launches the same clip whatever its focus (RFC 0009).
             Request::ClipLaunch(mut p) => {
@@ -2646,7 +2661,12 @@ impl Core {
             | Request::DeviceMove(_)
             | Request::ModRoute(_)
             | Request::ModUnroute(_) => unreachable!("handled by handle_device"),
-            Request::SamplerGet(_) | Request::SamplerLoad(_) | Request::SamplerUpload(_) | Request::SamplerClear(_) => {
+            Request::SamplerGet(_)
+            | Request::SamplerLoad(_)
+            | Request::SampleUpload(_)
+            | Request::SampleInfo(_)
+            | Request::SamplePeaks(_)
+            | Request::SamplerClear(_) => {
                 unreachable!("handled by handle_sampler")
             }
             Request::ClipNew(_)
@@ -2697,8 +2717,10 @@ fn batchable(req: &Request) -> bool {
             | TransportLocate(_)
             // Journaled with the ports it applies, filled in by `handle`.
             | SeatApplyLayout(_)
-            // Journaled as the load of the stored file, by `handle`.
-            | SamplerUpload(_)
+            // Files, not project state, and not journaled (a load of the
+            // stored file is); a load of an upload is journaled as that
+            // file's load by `handle`, outside a batch.
+            | SampleUpload(_)
     )
 }
 
@@ -2710,7 +2732,7 @@ fn read_only(req: &Request) -> bool {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
-        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) | SamplerGet(_) => true,
+        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) | SamplerGet(_) | SampleInfo(_) | SamplePeaks(_) | SampleUpload(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
         | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | ClipLaunch(_) | SongPlace(_) | SongRemove(_)
         | SongMove(_) | SongBack(_)
@@ -2722,7 +2744,7 @@ fn read_only(req: &Request) -> bool {
         | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
         | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
         | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | ClipLaneSet(_) | ClipLaneRemove(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) | SamplerLoad(_) | SamplerUpload(_) | SamplerClear(_) => false,
+        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | ClipLaneSet(_) | ClipLaneRemove(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) | SamplerLoad(_) | SamplerClear(_) => false,
     }
 }
 

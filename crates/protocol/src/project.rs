@@ -10,7 +10,7 @@ use ts_rs::TS;
 
 /// Current project format version. Bump and add a migration when the format
 /// changes incompatibly.
-pub const PROJECT_FORMAT_VERSION: u32 = 7;
+pub const PROJECT_FORMAT_VERSION: u32 = 8;
 /// Oldest version this build can load. Version 1 (the fixed 8-track kit)
 /// was dropped with RFC 0004, without a migration.
 pub const OLDEST_PROJECT_FORMAT_VERSION: u32 = 2;
@@ -35,9 +35,9 @@ pub struct ProjectFile {
     pub mod_routes: Vec<crate::device::ModRoute>,
     /// Samplers' samples by instrument id and pad: a path inside the
     /// bundle (`samples/...`) once saved, else where it is on the engine
-    /// host.
+    /// host; with a region, or where a bundle's copy came from (RFC 0011).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub samples: BTreeMap<String, BTreeMap<u32, String>>,
+    pub samples: BTreeMap<String, BTreeMap<u32, ProjectSample>>,
     /// Parameter values by path. Unknown paths are ignored on load; missing
     /// paths take their defaults.
     pub params: BTreeMap<String, f64>,
@@ -138,10 +138,57 @@ pub struct ProjectController {
 }
 
 /// A migration upgrades a project from version N to N+1.
+/// A pad's sample in a project: the file it plays (a path, as in v7, for
+/// all of it), or a region of it and where a bundle's copy came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(untagged)]
+pub enum ProjectSample {
+    Path(String),
+    Region(ProjectSampleRegion),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ProjectSampleRegion {
+    pub path: String,
+    /// Seconds of the file (default: all of it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<f64>,
+    /// For the bundle's copy of a region: the file and region it was cut
+    /// from (on the engine host that saved it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<crate::device::SampleOrigin>,
+}
+
+impl ProjectSample {
+    pub fn path(&self) -> &str {
+        match self {
+            Self::Path(p) => p,
+            Self::Region(r) => &r.path,
+        }
+    }
+
+    pub fn path_mut(&mut self) -> &mut String {
+        match self {
+            Self::Path(p) => p,
+            Self::Region(r) => &mut r.path,
+        }
+    }
+}
+
 /// `MIGRATIONS[0]` upgrades `OLDEST_PROJECT_FORMAT_VERSION` to the next one,
 /// and so on.
 type Migration = fn(Value) -> Result<Value, String>;
-const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6, v6_to_v7];
+const MIGRATIONS: &[Migration] = &[v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6, v6_to_v7, v7_to_v8];
+
+/// v8 (RFC 0011): a pad's sample can be a region of a file, and a
+/// bundle's copy can say where it came from. A v7 sample (a path) is still
+/// read as all of that file.
+fn v7_to_v8(mut v: Value) -> Result<Value, String> {
+    v["format_version"] = 8.into();
+    Ok(v)
+}
 
 /// v7 (RFC 0010): audio effects (`devices`). A v6 project has none.
 fn v6_to_v7(mut v: Value) -> Result<Value, String> {

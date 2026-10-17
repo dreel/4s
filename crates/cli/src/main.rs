@@ -204,16 +204,25 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ModCmd>,
     },
-    /// A sampler's pads (RFC 0010): `4s sampler` lists them; `4s sampler
-    /// load 1 kick.wav [--instrument pads]` loads a WAV into pad 1 (pads
-    /// 1-16 play notes 36-51). A file on this machine is sent to the engine; a path that
-    /// is not here is read on the engine host.
+    /// A sampler's pads (RFC 0010, 0011): `4s sampler` lists them; `4s
+    /// sampler load 1 kick.wav [--instrument pads]` loads an audio file
+    /// (WAV, AIFF, FLAC, MP3, AAC/M4A, ALAC, Ogg Vorbis) into pad 1 (pads
+    /// 1-16 play notes 36-51); `--from 1:23.40 --to 1:23.65` loads just that
+    /// region of it. A file on this machine is sent to the engine; a path
+    /// that is not here is read on the engine host.
     Sampler {
         #[command(subcommand)]
         cmd: Option<SamplerCmd>,
         /// Which sampler (default: the first).
         #[arg(long, global = true)]
         instrument: Option<String>,
+    },
+    /// Audio files on the engine host (RFC 0011): `4s sample info
+    /// song.mp3` (length, format), `4s sample peaks song.mp3 --from 1:20
+    /// --to 1:30` (its waveform), `4s sample upload song.flac` (send it).
+    Sample {
+        #[command(subcommand)]
+        cmd: SampleCmd,
     },
     /// Set a track channel's send to a return bus, e.g. `4s send 1 3 40%`
     /// (shorthand for `set mixer.1.send.3`).
@@ -491,10 +500,38 @@ enum DeviceCmd {
 
 #[derive(Subcommand, Debug, Clone)]
 enum SamplerCmd {
-    /// Load a WAV into a pad (1-16).
-    Load { pad: u32, file: String },
+    /// Load an audio file, or a region of it, into a pad (1-16).
+    Load {
+        pad: u32,
+        file: String,
+        /// Where the region starts: seconds, or m:ss.ms (default: the start).
+        #[arg(long)]
+        from: Option<String>,
+        /// Where it ends (default: the file's end; a pad plays at most 60 s).
+        #[arg(long)]
+        to: Option<String>,
+    },
     /// Empty a pad.
     Clear { pad: u32 },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SampleCmd {
+    /// A file's length and format (a file here is sent first).
+    Info { file: String },
+    /// A file's waveform: `bins` columns over `--from..--to`.
+    Peaks {
+        file: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value_t = 64)]
+        bins: u32,
+    },
+    /// Send a file on this machine to the engine host, and print where it
+    /// is stored there.
+    Upload { file: String },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -509,6 +546,58 @@ enum ModCmd {
     },
     /// Remove a route.
     Unroute { source: String, target: String },
+}
+
+/// Seconds as `m:ss.mmm`.
+fn fmt_time(secs: f64) -> String {
+    let ms = (secs.max(0.0) * 1000.0).round() as u64;
+    format!("{}:{:02}.{:03}", ms / 60000, ms / 1000 % 60, ms % 1000)
+}
+
+/// A time in seconds: `83.4`, `83.4s`, or `1:23.40`.
+fn time_arg(s: &str) -> Result<f64> {
+    let t = s.trim().trim_end_matches('s');
+    let secs = match t.rsplit_once(':') {
+        Some((m, sec)) => m.parse::<f64>().ok().zip(sec.parse::<f64>().ok()).map(|(m, s)| m * 60.0 + s),
+        None => t.parse::<f64>().ok(),
+    };
+    secs.filter(|v| v.is_finite() && *v >= 0.0).ok_or_else(|| anyhow!("'{s}' is not a time (seconds, or m:ss.ms)"))
+}
+
+/// The `sample.upload` requests that send a file on this machine to the
+/// engine host in chunks, and the upload's id; `None` if there is no such
+/// file here (its path is then read on the engine host).
+fn upload_requests(file: &str) -> Result<Option<(String, Vec<Request>)>> {
+    let local = std::path::Path::new(file);
+    if !local.is_file() {
+        return Ok(None);
+    }
+    let data = std::fs::read(local).map_err(|e| anyhow!("read {file}: {e}"))?;
+    if data.len() as u64 > MAX_UPLOAD_TOTAL_BYTES {
+        bail!("{file} is over {} MB", MAX_UPLOAD_TOTAL_BYTES / 1024 / 1024);
+    }
+    let name = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sample.wav".into());
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let token = format!("cli-{}-{nanos}", std::process::id());
+    let chunks: Vec<&[u8]> = if data.is_empty() { vec![&data[..]] } else { data.chunks(MAX_UPLOAD_BYTES).collect() };
+    let last = chunks.len() - 1;
+    let mut offset = 0u64;
+    let requests = chunks
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let r = Request::SampleUpload(SampleUploadParams {
+                upload: token.clone(),
+                name: name.clone(),
+                offset,
+                data: base64_encode(c),
+                done: i == last,
+            });
+            offset += c.len() as u64;
+            r
+        })
+        .collect();
+    Ok(Some((token, requests)))
 }
 
 /// A chain: a channel number, or `master` (0).
@@ -1366,28 +1455,47 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
         },
         Cmd::Sampler { cmd, instrument } => match cmd {
             None => vec![Request::SamplerGet(SamplerGetParams { instrument: instrument.clone() })],
-            Some(SamplerCmd::Load { pad, file }) => {
-                let local = std::path::Path::new(file);
-                if local.is_file() {
-                    let data = std::fs::read(local).map_err(|e| anyhow!("read {file}: {e}"))?;
-                    if data.len() > MAX_UPLOAD_BYTES {
-                        bail!("{file} is over {} MB", MAX_UPLOAD_BYTES / 1024 / 1024);
+            Some(SamplerCmd::Load { pad, file, from, to }) => {
+                let (start, end) = (from.as_deref().map(time_arg).transpose()?, to.as_deref().map(time_arg).transpose()?);
+                let load = |path: Option<String>, upload: Option<String>| {
+                    Request::SamplerLoad(SamplerLoadParams { instrument: instrument.clone(), pad: *pad, path, upload, start, end })
+                };
+                // A file here is sent first, then loaded by its upload id.
+                match upload_requests(file)? {
+                    Some((token, mut requests)) => {
+                        requests.push(load(None, Some(token)));
+                        requests
                     }
-                    let name = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sample.wav".into());
-                    vec![Request::SamplerUpload(SamplerUploadParams {
-                        instrument: instrument.clone(),
-                        pad: *pad,
-                        name,
-                        data: base64_encode(&data),
-                    })]
-                } else {
-                    vec![Request::SamplerLoad(SamplerLoadParams { instrument: instrument.clone(), pad: *pad, path: file.clone() })]
+                    None => vec![load(Some(file.clone()), None)],
                 }
             }
             Some(SamplerCmd::Clear { pad }) => {
                 vec![Request::SamplerClear(SamplerPadParams { instrument: instrument.clone(), pad: *pad })]
             }
         },
+        Cmd::Sample { cmd } => {
+            // A file here is sent, then named by where it was stored: the
+            // engine host resolves `uploads` paths to the finished upload.
+            let file = match cmd {
+                SampleCmd::Info { file } | SampleCmd::Peaks { file, .. } | SampleCmd::Upload { file } => file,
+            };
+            let (mut requests, path) = match upload_requests(file)? {
+                Some((token, requests)) => (requests, format!("upload:{token}")),
+                None => (Vec::new(), file.clone()),
+            };
+            match cmd {
+                SampleCmd::Info { .. } => requests.push(Request::SampleInfo(SampleInfoParams { path })),
+                SampleCmd::Peaks { from, to, bins, .. } => requests.push(Request::SamplePeaks(SamplePeaksParams {
+                    path,
+                    start: from.as_deref().map(time_arg).transpose()?,
+                    end: to.as_deref().map(time_arg).transpose()?,
+                    bins: *bins,
+                })),
+                SampleCmd::Upload { .. } if requests.is_empty() => bail!("no file {file} here to send"),
+                SampleCmd::Upload { .. } => {}
+            }
+            requests
+        }
         Cmd::Mod { cmd } => match cmd {
             None => vec![Request::StateGet(e)],
             Some(ModCmd::Route { source, target, depth }) => vec![Request::ModRoute(ModRouteParams {
@@ -2339,8 +2447,32 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
                 println!("{}: no samples", info.instrument);
             }
             for p in &info.pads {
-                println!("{} pad {:<2} {:<24} {:.2}s", info.instrument, p.pad, p.name, p.seconds);
+                let region = if p.start > 0.0 || p.end < p.file_seconds - 1e-6 {
+                    format!("  {} - {} of {}", fmt_time(p.start), fmt_time(p.end), fmt_time(p.file_seconds))
+                } else {
+                    String::new()
+                };
+                let from = p.origin.as_ref().map(|o| format!("  (cut from {} {} - {})", o.path, fmt_time(o.start), fmt_time(o.end))).unwrap_or_default();
+                println!("{} pad {:<2} {:<24} {:.2}s{region}{from}", info.instrument, p.pad, p.name, p.seconds);
             }
+        }
+        Cmd::Sample { cmd: SampleCmd::Info { .. } } => {
+            let i: SampleInfo = serde_json::from_value(last)?;
+            println!("{}  {}  {}", i.name, fmt_time(i.seconds), i.format);
+            println!("  {}", i.path);
+        }
+        Cmd::Sample { cmd: SampleCmd::Peaks { .. } } => {
+            let p: SamplePeaks = serde_json::from_value(last)?;
+            println!("{} - {}", fmt_time(p.start), fmt_time(p.end));
+            // One column a bin: how far the louder side reaches (8 levels).
+            let bars = [' ', '.', ':', '-', '=', '+', '*', '#', '@'];
+            let line: String =
+                p.peaks.iter().map(|b| bars[((b[0].abs().max(b[1].abs()).min(1.0)) * 8.0).round() as usize]).collect();
+            println!("|{line}|");
+        }
+        Cmd::Sample { cmd: SampleCmd::Upload { .. } } => {
+            let r: SampleUploadResult = serde_json::from_value(last)?;
+            println!("{} ({} bytes)", r.path.unwrap_or_default(), r.received);
         }
         Cmd::Mod { cmd: None } => {
             let s: Snapshot = serde_json::from_value(last)?;
@@ -2888,7 +3020,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "send 1 2 50%", "sampler", "sampler load 1 /nope.wav", "sampler load 1 Cargo.toml", "sampler clear 1", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
+            "send 1 2 50%", "sampler", "sampler load 1 /nope.wav", "sampler load 1 Cargo.toml", "sampler load 1 /nope.mp3 --from 1:23.4 --to 1:23.65", "sampler clear 1", "sample info /nope.mp3", "sample peaks /nope.mp3 --bins 8", "sample upload Cargo.toml", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",

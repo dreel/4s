@@ -4,6 +4,7 @@ import type { ModRoute } from "./ModRoute";
 import type { ProjectController } from "./ProjectController";
 import type { ProjectDevice } from "./ProjectDevice";
 import type { ProjectInstrument } from "./ProjectInstrument";
+import type { ProjectSample } from "./ProjectSample";
 import type { ProjectTrack } from "./ProjectTrack";
 import type { SeatConfig } from "./SeatConfig";
 
@@ -32,9 +33,9 @@ mod_routes?: Array<ModRoute>,
 /**
  * Samplers' samples by instrument id and pad: a path inside the
  * bundle (`samples/...`) once saved, else where it is on the engine
- * host.
+ * host; with a region, or where a bundle's copy came from (RFC 0011).
  */
-samples?: { [key in string]: { [key in number]: string } }, 
+samples?: { [key in string]: { [key in number]: ProjectSample } }, 
 /**
  * Parameter values by path. Unknown paths are ignored on load; missing
  * paths take their defaults.

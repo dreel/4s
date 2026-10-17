@@ -380,6 +380,14 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   land on the slot's new occupant for one meter period (tag reports with
   a graph generation).
 
+- (2026-10-17, sample sources) decoding a long file (and hashing it the
+  first time) runs on the core thread, so other requests wait for it (a
+  few hundred ms for a song in a debug build). Decode on a worker and
+  answer when done if it gets in the way.
+- (2026-10-17, sample sources) an upload that never finishes leaves its
+  part in `<data dir>/uploads/` until a new upload reuses its id; clean
+  old parts at startup.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

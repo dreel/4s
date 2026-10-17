@@ -13,7 +13,8 @@ import type { Seat } from "./generated/Seat";
 import type { Snapshot } from "./generated/Snapshot";
 import { RpcClient, type ConnectionState } from "./rpc";
 
-export const PROTOCOL_VERSION = 9;
+import { PROTOCOL_VERSION } from "./generated/limits";
+export { PROTOCOL_VERSION };
 
 export type AppState = {
   connection: ConnectionState;

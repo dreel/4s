@@ -32,11 +32,14 @@ It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010)
   has none). Their parameters are in `params` under their ids. Modulation
   routes under `mod_routes`: `{source, target, depth}`. Both absent when
   empty.
-- Samplers' samples under `samples`: instrument id -> pad -> path. Saving
-  copies each sample into the bundle's `samples/` folder and stores the
-  path inside the bundle (`samples/<id>.<pad>.<file>`), so a bundle
-  moves between machines whole; a missing file leaves its pad empty with
-  a warning.
+- Samplers' samples under `samples`: instrument id -> pad -> a path (all
+  of the file) or `{path, start?, end?, origin?}` (a region in seconds,
+  RFC 0011). Saving puts each sample in the bundle's `samples/` folder and
+  stores the path inside the bundle: all of a WAV file is copied
+  (`samples/<id>.<pad>.<file>`); a region, or another format, is written
+  as a WAV of the region (`samples/<id>.<pad>.<name>.wav`) with `origin`,
+  the file and region it was cut from. A bundle moves between machines
+  whole; a missing file leaves its pad empty with a warning.
 - Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,
   `"bass.cutoff": 0.3`).
 - Each instrument's track (RFC 0008, RFC 0009) under `tracks`: its clip

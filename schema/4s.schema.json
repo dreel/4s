@@ -1809,6 +1809,28 @@
         ],
         "type": "object"
       },
+      "SampleOrigin": {
+        "description": "Where a region came from: a file on the engine host and the seconds\nof it.",
+        "properties": {
+          "end": {
+            "format": "double",
+            "type": "number"
+          },
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "path",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
       "SamplerInfo": {
         "description": "A sampler's loaded pads.",
         "properties": {
@@ -1829,11 +1851,31 @@
         "type": "object"
       },
       "SamplerPad": {
-        "description": "A loaded pad of a sampler.",
+        "description": "A loaded pad of a sampler (RFC 0010, regions RFC 0011).",
         "properties": {
+          "end": {
+            "format": "double",
+            "type": "number"
+          },
+          "file_seconds": {
+            "description": "The whole file's length.",
+            "format": "double",
+            "type": "number"
+          },
           "name": {
             "description": "The file's name, without its folders.",
             "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SampleOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a project's own copy of a region: the file and region it was\ncut from, to edit again if that file is still there."
           },
           "pad": {
             "description": "1..16.",
@@ -1846,6 +1888,12 @@
             "type": "string"
           },
           "seconds": {
+            "description": "The region's length (`end - start`).",
+            "format": "double",
+            "type": "number"
+          },
+          "start": {
+            "description": "The region of the file the pad plays, in seconds.",
             "format": "double",
             "type": "number"
           }
@@ -1854,7 +1902,10 @@
           "pad",
           "name",
           "path",
-          "seconds"
+          "start",
+          "end",
+          "seconds",
+          "file_seconds"
         ],
         "type": "object"
       },
@@ -2592,6 +2643,54 @@
           }
         ]
       },
+      "ProjectSample": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/ProjectSampleRegion"
+          }
+        ],
+        "description": "A migration upgrades a project from version N to N+1.\nA pad's sample in a project: the file it plays (a path, as in v7, for\nall of it), or a region of it and where a bundle's copy came from."
+      },
+      "ProjectSampleRegion": {
+        "properties": {
+          "end": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SampleOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For the bundle's copy of a region: the file and region it was cut\nfrom (on the engine host that saved it)."
+          },
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "description": "Seconds of the file (default: all of it).",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
       "ProjectTrack": {
         "description": "An instrument's track in a project file.",
         "properties": {
@@ -2631,6 +2730,28 @@
         "required": [
           "selected",
           "clips"
+        ],
+        "type": "object"
+      },
+      "SampleOrigin": {
+        "description": "Where a region came from: a file on the engine host and the seconds\nof it.",
+        "properties": {
+          "end": {
+            "format": "double",
+            "type": "number"
+          },
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "path",
+          "start",
+          "end"
         ],
         "type": "object"
       },
@@ -2746,12 +2867,12 @@
           "additionalProperties": false,
           "patternProperties": {
             "^\\d+$": {
-              "type": "string"
+              "$ref": "#/$defs/ProjectSample"
             }
           },
           "type": "object"
         },
-        "description": "Samplers' samples by instrument id and pad: a path inside the\nbundle (`samples/...`) once saved, else where it is on the engine\nhost.",
+        "description": "Samplers' samples by instrument id and pad: a path inside the\nbundle (`samples/...`) once saved, else where it is on the engine\nhost; with a region, or where a bundle's copy came from (RFC 0011).",
         "type": "object"
       },
       "seats": {
@@ -2782,8 +2903,8 @@
     "title": "ProjectFile",
     "type": "object"
   },
-  "project_format_version": 7,
-  "protocol_version": 9,
+  "project_format_version": 8,
+  "protocol_version": 10,
   "request": {
     "$defs": {
       "BatchParams": {
@@ -4624,12 +4745,12 @@
               "additionalProperties": false,
               "patternProperties": {
                 "^\\d+$": {
-                  "type": "string"
+                  "$ref": "#/$defs/ProjectSample"
                 }
               },
               "type": "object"
             },
-            "description": "Samplers' samples by instrument id and pad: a path inside the\nbundle (`samples/...`) once saved, else where it is on the engine\nhost.",
+            "description": "Samplers' samples by instrument id and pad: a path inside the\nbundle (`samples/...`) once saved, else where it is on the engine\nhost; with a region, or where a bundle's copy came from (RFC 0011).",
             "type": "object"
           },
           "seats": {
@@ -4737,6 +4858,54 @@
             "type": "object"
           }
         ]
+      },
+      "ProjectSample": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/ProjectSampleRegion"
+          }
+        ],
+        "description": "A migration upgrades a project from version N to N+1.\nA pad's sample in a project: the file it plays (a path, as in v7, for\nall of it), or a region of it and where a bundle's copy came from."
+      },
+      "ProjectSampleRegion": {
+        "properties": {
+          "end": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SampleOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For the bundle's copy of a region: the file and region it was cut\nfrom (on the engine host that saved it)."
+          },
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "description": "Seconds of the file (default: all of it).",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
       },
       "ProjectSaveParams": {
         "properties": {
@@ -5028,6 +5197,111 @@
         ],
         "type": "object"
       },
+      "SampleInfoParams": {
+        "description": "An audio file on the engine host.",
+        "properties": {
+          "path": {
+            "description": "Relative paths are under the data dir; `upload:<id>` is a finished\nupload.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "SampleOrigin": {
+        "description": "Where a region came from: a file on the engine host and the seconds\nof it.",
+        "properties": {
+          "end": {
+            "format": "double",
+            "type": "number"
+          },
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "path",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "SamplePeaksParams": {
+        "description": "A waveform overview of `start..end` seconds of a file (default: all\nof it) in `bins` (min, max) pairs.",
+        "properties": {
+          "bins": {
+            "description": "1..4096.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "end": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "As in `sample.info`.",
+            "type": "string"
+          },
+          "start": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "bins"
+        ],
+        "type": "object"
+      },
+      "SampleUploadParams": {
+        "description": "Send a file to the engine host in chunks (from a client on another\nmachine): the same `upload` id for each, at increasing `offset`s, the\nlast with `done`. The finished file is checked (it must decode) and\nstored under `<data dir>/samples/`.",
+        "properties": {
+          "data": {
+            "description": "This chunk, base64 (at most `MAX_UPLOAD_BYTES` decoded).",
+            "type": "string"
+          },
+          "done": {
+            "default": false,
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The file's name.",
+            "type": "string"
+          },
+          "offset": {
+            "description": "Where this chunk goes in the file (the bytes received so far).",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "upload": {
+            "description": "Chosen by the client (letters, digits, `-`, `_`; up to 64).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload",
+          "name",
+          "offset",
+          "data"
+        ],
+        "type": "object"
+      },
       "SamplerGetParams": {
         "properties": {
           "instrument": {
@@ -5042,8 +5316,16 @@
         "type": "object"
       },
       "SamplerLoadParams": {
-        "description": "Load a WAV file on the engine host into a pad.",
+        "description": "Load an audio file (WAV, AIFF, FLAC, MP3, AAC/M4A, ALAC, Ogg Vorbis),\nor a region of one, into a pad. The file is on the engine host\n(`path`), or was just sent with `sample.upload` (`upload`).",
         "properties": {
+          "end": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "instrument": {
             "default": null,
             "type": [
@@ -5058,13 +5340,33 @@
             "type": "integer"
           },
           "path": {
+            "default": null,
             "description": "Relative paths are under the data dir; absolute paths as given.",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start": {
+            "default": null,
+            "description": "The region, in seconds of the file (default: all of it; at most\n60 s).",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "upload": {
+            "default": null,
+            "description": "A finished upload's id, instead of `path` (journaled as its path).",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "pad",
-          "path"
+          "pad"
         ],
         "type": "object"
       },
@@ -5085,37 +5387,6 @@
         },
         "required": [
           "pad"
-        ],
-        "type": "object"
-      },
-      "SamplerUploadParams": {
-        "description": "Send a WAV file to load into a pad (from a client on another machine).",
-        "properties": {
-          "data": {
-            "description": "The WAV file, base64 (at most `MAX_UPLOAD_BYTES` decoded).",
-            "type": "string"
-          },
-          "instrument": {
-            "default": null,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "name": {
-            "description": "The file's name.",
-            "type": "string"
-          },
-          "pad": {
-            "format": "uint32",
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "pad",
-          "name",
-          "data"
         ],
         "type": "object"
       },
@@ -6126,7 +6397,7 @@
         "type": "object"
       },
       {
-        "description": "Load a WAV on the engine host into a sampler's pad.",
+        "description": "Load an audio file (or a region of it) on the engine host, or just\nuploaded, into a sampler's pad.",
         "properties": {
           "method": {
             "const": "sampler.load",
@@ -6143,14 +6414,48 @@
         "type": "object"
       },
       {
-        "description": "Send a WAV to load into a pad; journaled as the `sampler.load` of the\nfile it was stored as.",
+        "description": "Send a file to the engine host, a chunk at a time (RFC 0011).",
         "properties": {
           "method": {
-            "const": "sampler.upload",
+            "const": "sample.upload",
             "type": "string"
           },
           "params": {
-            "$ref": "#/$defs/SamplerUploadParams"
+            "$ref": "#/$defs/SampleUploadParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "An audio file on the engine host: its length and format.",
+        "properties": {
+          "method": {
+            "const": "sample.info",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SampleInfoParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "A waveform overview of an audio file on the engine host.",
+        "properties": {
+          "method": {
+            "const": "sample.peaks",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplePeaksParams"
           }
         },
         "required": [
@@ -8730,6 +9035,28 @@
         ],
         "type": "object"
       },
+      "SampleOrigin": {
+        "description": "Where a region came from: a file on the engine host and the seconds\nof it.",
+        "properties": {
+          "end": {
+            "format": "double",
+            "type": "number"
+          },
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "path",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
       "SamplerInfo": {
         "description": "A sampler's loaded pads.",
         "properties": {
@@ -8750,11 +9077,31 @@
         "type": "object"
       },
       "SamplerPad": {
-        "description": "A loaded pad of a sampler.",
+        "description": "A loaded pad of a sampler (RFC 0010, regions RFC 0011).",
         "properties": {
+          "end": {
+            "format": "double",
+            "type": "number"
+          },
+          "file_seconds": {
+            "description": "The whole file's length.",
+            "format": "double",
+            "type": "number"
+          },
           "name": {
             "description": "The file's name, without its folders.",
             "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SampleOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a project's own copy of a region: the file and region it was\ncut from, to edit again if that file is still there."
           },
           "pad": {
             "description": "1..16.",
@@ -8767,6 +9114,12 @@
             "type": "string"
           },
           "seconds": {
+            "description": "The region's length (`end - start`).",
+            "format": "double",
+            "type": "number"
+          },
+          "start": {
+            "description": "The region of the file the pad plays, in seconds.",
             "format": "double",
             "type": "number"
           }
@@ -8775,7 +9128,10 @@
           "pad",
           "name",
           "path",
-          "seconds"
+          "start",
+          "end",
+          "seconds",
+          "file_seconds"
         ],
         "type": "object"
       },
