@@ -186,6 +186,44 @@ Pattern: per step either a rest or `{note, accent, slide}` (MIDI note,
 (C4 = MIDI 60), `!` accent, `~` slide, `-` rest, e.g.
 `"C2! - C2 D#2~ G2 - C2 -"`.
 
+### `poly` (default id `synth`)
+
+An eight-voice analog-style polyphonic synth (`crates/engine/src/poly.rs`),
+one stereo output.
+
+- **Voice:** two oscillators (`osc1_wave`, `osc2_wave`: 0 saw, 1 square,
+  2 triangle, 3 sine; saw and square band-limited with PolyBLEP), oscillator
+  2 at `osc2_tune` (-24..24 st) and `osc2_fine` (-50..50 ct, default +7)
+  mixed in at `osc2_level`, plus white `noise`; then a resonant 12 dB
+  state-variable low-pass per side (`cutoff` 0..1 = 20 Hz..18 kHz,
+  `resonance`), and an amp.
+- **Unison:** every oscillator is a pair detuned apart by `detune` (up to
+  25 cents each way); `width` pans the pair's sides apart, so a single note
+  is already stereo.
+- **Envelopes:** ADSR for the filter (`f_attack`, `f_decay`, `f_sustain`,
+  `f_release`; it opens the cutoff by up to 6 octaves times `env_amount`)
+  and for the amp (`attack`, `decay`, `sustain`, `release`). Stage times
+  are 0..1, mapped exponentially to 1 ms..10 s (0.5 is 100 ms). Attack is
+  linear; decay and release fall exponentially. A retriggered or stolen
+  voice keeps its oscillator phases and its envelopes start from where they
+  are, rather than jumping to silence.
+- **Velocity:** `velocity` (0..1) is how much a note's velocity scales its
+  level and its filter envelope; 0 plays every note the same.
+- **LFO:** one sine shared by all voices at `lfo_rate` (0..1 = 0.1..20 Hz,
+  free running): `vibrato` (up to a semitone) and `lfo_cutoff` (up to 2
+  octaves). Bigger modulation goes through an `lfo` device (RFC 0010).
+- **Voices:** 8. A note already sounding retriggers its own voice; a new one
+  takes a free voice, else the oldest released one, else the oldest. A
+  note sounds until its note-off (a clip note's length, a key) and then
+  releases. Pitch bend moves every voice. Pitches, the LFO, and filter
+  coefficients update every 16 frames.
+- Overall `level`, then a soft clip. Knob pages: Oscillators, Filter, Amp.
+
+Its note layout is pitched and not mono: the step view shows a row per
+pitch (C3..C5, widened to the clip's notes), so a chord is several notes on
+one step; the piano roll and a keyboard play it the same way. Its clips are
+saved as events.
+
 ### `sampler` (default id `sampler`, RFC 0010)
 
 - 16 pads; pad k plays on note `35 + k` (GM drum notes from 36, as its note

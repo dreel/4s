@@ -7,7 +7,7 @@
 //! another is held glides into it (~60 ms) without retriggering (legato), as
 //! a 303 slide does; the sequencer plays a slide as overlapping notes.
 
-use crate::dsp::{lerp_exp, semitones_to_ratio, soft_clip};
+use crate::dsp::{lerp_exp, midi_hz, poly_blep, semitones_to_ratio, soft_clip};
 use crate::instrument::{Hit, Instrument, MAX_BLOCK};
 use crate::params::{cont, toggle};
 use fours_protocol::{KnobPage, OutputWidth, ParamInfo};
@@ -26,23 +26,6 @@ const VELOCITY_ACCENT: f32 = 1.0;
 const GLIDE_SECS: f32 = 0.06;
 /// Most keys held at once; pressing more forgets the oldest.
 const MAX_KEYS: usize = 16;
-
-fn midi_hz(note: f32) -> f32 {
-    440.0 * ((note - 69.0) / 12.0).exp2()
-}
-
-/// PolyBLEP residual for a discontinuity at phase 0 (phase and dt in cycles).
-fn poly_blep(t: f32, dt: f32) -> f32 {
-    if t < dt {
-        let x = t / dt;
-        x + x - x * x - 1.0
-    } else if t > 1.0 - dt {
-        let x = (t - 1.0) / dt;
-        x * x + x + x + 1.0
-    } else {
-        0.0
-    }
-}
 
 pub struct Tb303 {
     sr: f32,

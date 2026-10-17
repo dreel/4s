@@ -93,6 +93,14 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 ## Follow-ups
 
+- (2026-10-17, polysynth branch) synth: no presets, no glide or mono
+  mode, no per-voice LFO or second filter mode (high/band pass), and no
+  keyboard tracking of the cutoff; `crates/engine/src/poly.rs`.
+- (2026-10-17, polysynth branch) step view: a polyphonic instrument's
+  pitch rows are as tall as drum rows, so C3..C5 (25 rows) takes a full
+  screen; compact rows or an octave scroller would fit it
+  (`StepView.tsx`, the pitched branch).
+
 - (2026-10-17, compressor branch) dynamics: no brickwall limiter for the
   master yet (the master only soft-clips above 0.8); a `limiter` device
   type with lookahead would be the next Extension.

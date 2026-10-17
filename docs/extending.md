@@ -212,8 +212,9 @@ a second drum machine) is an Extension.
    Regenerate bindings.
 2. **Engine.** Write a type implementing `Instrument`
    (`crates/engine/src/instrument.rs`) in its own file, following
-   `tb303.rs` (one mono voice with a note stack) or `tr808.rs` (several
-   voices on GM notes, a main mix plus direct outs):
+   `tb303.rs` (one mono voice with a note stack), `poly.rs` (eight
+   voices with allocation and stealing), or `tr808.rs` (several voices on
+   GM notes, a main mix plus direct outs):
    - play what `note_on`/`note_off` say: the sequencer, MIDI, and auditions
      all use them;
    - allocate everything in `new` (output buffers of `MAX_BLOCK * 2`); never

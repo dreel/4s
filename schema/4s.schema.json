@@ -1175,6 +1175,11 @@
             "const": "sampler",
             "description": "16 pads, each a sample on its own note (RFC 0010).",
             "type": "string"
+          },
+          {
+            "const": "poly",
+            "description": "An eight-voice analog-style polyphonic synth.",
+            "type": "string"
           }
         ]
       },
@@ -2308,6 +2313,11 @@
           {
             "const": "sampler",
             "description": "16 pads, each a sample on its own note (RFC 0010).",
+            "type": "string"
+          },
+          {
+            "const": "poly",
+            "description": "An eight-voice analog-style polyphonic synth.",
             "type": "string"
           }
         ]
@@ -3824,6 +3834,11 @@
           {
             "const": "sampler",
             "description": "16 pads, each a sample on its own note (RFC 0010).",
+            "type": "string"
+          },
+          {
+            "const": "poly",
+            "description": "An eight-voice analog-style polyphonic synth.",
             "type": "string"
           }
         ]
@@ -8532,6 +8547,11 @@
           {
             "const": "sampler",
             "description": "16 pads, each a sample on its own note (RFC 0010).",
+            "type": "string"
+          },
+          {
+            "const": "poly",
+            "description": "An eight-voice analog-style polyphonic synth.",
             "type": "string"
           }
         ]

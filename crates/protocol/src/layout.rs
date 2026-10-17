@@ -105,6 +105,16 @@ impl InstrumentType {
                 velocity: VEL_ON,
                 expressions: vec![accent],
             },
+            // A row per pitch; chords are several notes on a step.
+            InstrumentType::Poly => NoteLayout {
+                rows: Vec::new(),
+                low: NOTE_MIN,
+                high: NOTE_MAX,
+                mono: false,
+                gate: 1.0,
+                velocity: VEL_ON,
+                expressions: vec![accent],
+            },
             InstrumentType::Tb303 => NoteLayout {
                 rows: Vec::new(),
                 low: NOTE_MIN,

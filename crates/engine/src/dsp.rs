@@ -14,6 +14,25 @@ pub fn semitones_to_ratio(st: f32) -> f32 {
     (st / 12.0).exp2()
 }
 
+/// The frequency of a (fractional) MIDI note.
+pub fn midi_hz(note: f32) -> f32 {
+    440.0 * ((note - 69.0) / 12.0).exp2()
+}
+
+/// PolyBLEP residual for a discontinuity at phase 0 (phase and dt in cycles).
+#[inline]
+pub fn poly_blep(t: f32, dt: f32) -> f32 {
+    if t < dt {
+        let x = t / dt;
+        x + x - x * x - 1.0
+    } else if t > 1.0 - dt {
+        let x = (t - 1.0) / dt;
+        x * x + x + x + 1.0
+    } else {
+        0.0
+    }
+}
+
 /// Fast deterministic white noise (xorshift32), output in -1..1.
 #[derive(Clone)]
 pub struct Noise {
