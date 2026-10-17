@@ -5269,7 +5269,7 @@
         "type": "object"
       },
       "SamplePlayParams": {
-        "description": "Audition `start..end` seconds of a file (default: all of it, up to\n60 s) once, through the engine, outside the mix (RFC 0011).",
+        "description": "Audition `start..end` seconds of a file once, through the engine,\noutside the mix (RFC 0011). Without a region, all of a file of at most\n60 s; a longer file needs `start`/`end` (at most 60 s apart).",
         "properties": {
           "end": {
             "default": null,

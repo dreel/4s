@@ -355,8 +355,9 @@ pub struct SampleInfoParams {
     pub path: String,
 }
 
-/// Audition `start..end` seconds of a file (default: all of it, up to
-/// 60 s) once, through the engine, outside the mix (RFC 0011).
+/// Audition `start..end` seconds of a file once, through the engine,
+/// outside the mix (RFC 0011). Without a region, all of a file of at most
+/// 60 s; a longer file needs `start`/`end` (at most 60 s apart).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct SamplePlayParams {
     /// As in `sample.info`.

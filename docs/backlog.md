@@ -385,6 +385,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   waits for it, live MIDI and controllers included (a few hundred ms for a
   song, more for the 20-minute limit). Decode on a worker and answer when
   done.
+- (2026-10-17, sample editor) a finished audition stays in the engine
+  until the next `sample.play`/`sample.stop` (up to ~23 MB for a 60 s
+  region); stop it once its length has passed. There is no event for the
+  audition, so another client's playhead runs on after it is cut off.
 - (2026-10-17, #53 review) uploads: ids are chosen by clients and shared,
   so a client sending offset 0 with another's id restarts that upload.
   Scope them to the connection.

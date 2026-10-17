@@ -213,8 +213,10 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
       data-testid={testId}
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       onBlur={(e) => {
-        const v = Number(e.target.value);
+        // A cleared field keeps the time it had.
+        const v = e.target.value.trim() === "" ? NaN : Number(e.target.value);
         if (Number.isFinite(v)) set(Math.min(source.seconds, Math.max(0, v)));
+        else e.target.value = value.toFixed(3);
       }}
     />
   );
