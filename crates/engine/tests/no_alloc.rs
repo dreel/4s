@@ -91,6 +91,10 @@ fn process_never_allocates() {
             Command::SetParam { target: ParamTarget::Effect { slot: 0, index: 3 }, value: 0.3 },
             Command::SetChain { ch: 0, slots: [0, 1, 0, 0, 0, 0, 0, 0], len: 2 },
             Command::SetChain { ch: fours_engine::MASTER_CHAIN, slots: [2, 0, 0, 0, 0, 0, 0, 0], len: 1 },
+            // A compressor on channel 2 keyed by channel 1 (its sidechain).
+            Command::AddEffect { slot: 3, effect: effect::make(DeviceType::Compressor, sr as f32) },
+            Command::SetParam { target: ParamTarget::Effect { slot: 3, index: 8 }, value: 1.0 },
+            Command::SetChain { ch: 1, slots: [3, 0, 0, 0, 0, 0, 0, 0], len: 1 },
             // A sampler (RFC 0010) with a sample on pad 1, played below.
             Command::AddInstrument { slot: 2, instrument: instrument::make(InstrumentType::Sampler, sr as f32) },
             Command::SetRoute { slot: 2, output: 0, channel: Some(1) },
@@ -202,6 +206,7 @@ fn process_never_allocates() {
             Command::RemoveEffect { slot: 0 },
             Command::RemoveEffect { slot: 1 },
             Command::RemoveEffect { slot: 2 },
+            Command::RemoveEffect { slot: 3 },
             Command::SetChannelActive { ch: 1, active: false },
             Command::Preview { sample: None },
         ] {
@@ -211,7 +216,7 @@ fn process_never_allocates() {
         assert_eq!(n, 0, "round {round}: {n} heap operations while removing");
         // The removed instruments and effects, and the stopped audition's
         // sample, came back to be dropped here, off the audio thread.
-        assert_eq!(link.returns.slots(), 8);
+        assert_eq!(link.returns.slots(), 9);
         while let Ok(b) = link.returns.pop() {
             drop(b);
         }

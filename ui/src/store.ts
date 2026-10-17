@@ -58,6 +58,8 @@ export type LiveState = {
   /** Where modulation or automation has parameters now (RFC 0010); the
    * snapshot's `params` keep the values set by hand. */
   moving: Record<string, number>;
+  /** Each compressor's most gain reduction (dB) in the last meter period. */
+  reduction: Record<string, number>;
 };
 
 class Store<T> {
@@ -101,7 +103,7 @@ export const app = new Store<AppState>({
   device: null,
   mapping: null,
 });
-export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {}, moving: {} });
+export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {}, moving: {}, reduction: {} });
 
 /** Select an instrument for the editor. */
 export function select(id: string) {
@@ -217,7 +219,7 @@ function apply(env: EventEnvelope) {
     case "meters": {
       const channels: Record<number, [number, number]> = {};
       for (const c of ev.channels) channels[c.channel] = [c.left, c.right];
-      live.set({ channels, master: ev.master });
+      live.set({ channels, master: ev.master, reduction: ev.reduction ?? {} });
       return;
     }
     case "moving":

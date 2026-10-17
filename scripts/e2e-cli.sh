@@ -950,6 +950,43 @@ check "an undo does not turn a channel number reused as a return back into a tra
 check "...which stays a return" "ch 3  R3           vol 100%  pan C          <- return" s mixer
 s channel rm 3 >/dev/null
 check "removing a return removes its sends, and undo brings them back" "mixer.1.send.2 = 0.5" bash -c "$BIN/4s channel rm 2 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s get mixer.1.send.2"
+# A compressor keyed by another channel (sidechain): the kick on channel 1
+# ducks a held bass note on channel 2, even with the kick's channel muted
+# (the key is taken before its fader). duck.py prints the bass's level just
+# after each beat over its level late in the beat, in dB.
+s project new >/dev/null
+s pattern set kick "x---x---x---x---" >/dev/null
+s instrument add tb303 >/dev/null
+s notes bass "C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~ C2~" >/dev/null
+s clip launch bass 1 >/dev/null
+s set mixer.1.mute on >/dev/null
+cat > "$TMP/duck.py" <<PY
+import array, json, math, struct, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--out', 'renders/duck.wav']))
+b = open(r['path'], 'rb').read(); i = b.index(b'data'); n = struct.unpack('<I', b[i + 4:i + 8])[0]
+a = array.array('f'); a.frombytes(b[i + 8:i + 8 + n]); sr = r['sample_rate']
+def rms(t0, t1):
+    x = a[int(t0 * sr) * 2:int(t1 * sr) * 2:2]
+    return math.sqrt(sum(v * v for v in x) / len(x))
+early = sum(rms(k * 0.5 + 0.02, k * 0.5 + 0.08) for k in range(4))
+late = sum(rms(k * 0.5 + 0.35, k * 0.5 + 0.48) for k in range(4))
+print('%.1f' % (20 * math.log10(early / late)))
+PY
+DUCK() { python3 "$TMP/duck.py"; }
+export -f DUCK
+check "add a compressor to the bass" "comp       compressor Compressor   on ch 2 at 1" s device add compressor --on 2
+check "its parameters" "comp.sidechain           0.0        [0..32 (int)]" s params comp.sidechain
+s set comp.threshold -30 >/dev/null
+s set comp.ratio 10 >/dev/null
+check "keyed by its own input, a held note is not ducked" "steady" bash -c "D=\$(DUCK); python3 -c \"print('steady' if abs(\$D) < 2 else \$D)\""
+check "keyed by the kick's channel, the bass ducks on every kick" "ducked" bash -c "$BIN/4s set comp.sidechain 1 >/dev/null; D=\$(DUCK); python3 -c \"print('ducked' if \$D < -8 else \$D)\""
+check "bypassed, it does not" "steady" bash -c "$BIN/4s set comp.bypass on >/dev/null; D=\$(DUCK); $BIN/4s set comp.bypass off >/dev/null; python3 -c \"print('steady' if abs(\$D) < 2 else \$D)\""
+check "removing the key's channel puts the sidechain back on its own input" "comp.sidechain = 0" bash -c "$BIN/4s channel add >/dev/null; $BIN/4s set comp.sidechain 3 >/dev/null; $BIN/4s channel rm 3 >/dev/null; $BIN/4s get comp.sidechain"
+check "...and undo keys it again" "comp.sidechain = 3" bash -c "$BIN/4s undo >/dev/null && $BIN/4s get comp.sidechain"
+s channel rm 3 >/dev/null
+s set comp.sidechain 1 >/dev/null
+check "the sidechain saves and loads back" "comp.sidechain = 1" bash -c "$BIN/4s project save comp >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load comp >/dev/null && $BIN/4s get comp.sidechain"
+check "a session with a sidechain replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/comp.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/comp.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 # Modulators (RFC 0010): an LFO moving a filter's cutoff around its value.
 s project new >/dev/null
 s pattern set closed_hat "xxxxxxxxxxxxxxxx" >/dev/null

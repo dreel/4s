@@ -94,6 +94,20 @@ smoothed).
 | `filter` | `mode` (0 low, 1 band, 2 high pass), `cutoff` (0..1, 20 Hz..20 kHz), `resonance` | 1.0 |
 | `delay` | `sync` (on), `division` (1/32, 1/16, 1/8t, 1/8, 1/8d (default), 1/4, 1/4d, 1/2, 1 bar), `time` (free: 1 ms..2 s), `feedback` (0..0.95), `pingpong`, `damping` (a low-pass in the feedback path) | 0.35 |
 | `reverb` | `size`, `damping`, `width` (Freeverb's eight combs and four all-passes per side) | 0.3 |
+| `compressor` (default id `comp`) | `threshold` (-60..0 dB), `ratio` (1..20), `attack` (0.1..100 ms), `release` (10..1000 ms), `knee` (0..24 dB, soft), `makeup` (0..24 dB), `sidechain` (0: its own input; `n`: channel `n`) | 1.0 |
+
+**Sidechains** (RFC 0012). After the instruments are summed into channels
+and before any chain runs, the engine copies each active track channel's
+bus (its instruments, panned, before its inserts and fader) into a
+preallocated key buffer. An effect whose `sidechain()` names a channel is
+rendered with `process_keyed` and that channel's key; any other effect's
+key is its own input. So a muted kick channel still ducks a compressor
+keyed by it, and mixer order does not matter. A return (fed by sends while
+the chains run) or a missing channel keys silence; removing a channel sets
+the sidechains that named it back to 0. A compressor's detector follows
+the louder side of its key; its gain reduction (dB, smoothed by attack and
+release) is reported per effect slot with the meters (`reduction` in the
+`meters` event).
 
 ## Modulators
 

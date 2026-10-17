@@ -206,8 +206,9 @@ pub enum Feedback {
     /// `Play` took effect: feedback after this counts from the new start.
     Started { time: f64 },
     Stopped { time: f64 },
-    /// Peak (left, right) per channel index since the last meter message.
-    Meters { channels: [[f32; 2]; MAX_CHANNELS], master: [f32; 2] },
+    /// Peak (left, right) per channel index since the last meter message,
+    /// and the most gain reduction (dB) per effect slot.
+    Meters { channels: [[f32; 2]; MAX_CHANNELS], master: [f32; 2], effects: [f32; MAX_EFFECTS] },
     /// A parameter modulation or automation moved, and where it is now
     /// (at meter rate, one per moved parameter, then `MovedDone`).
     Moved { target: ParamTarget, value: f32 },
@@ -232,9 +233,14 @@ struct EffectSlot {
     idle: bool,
 }
 
+/// Stride of each channel's key in `Engine::keys`.
+const KEY_STRIDE: usize = MAX_BLOCK * 2;
+
 /// Run an insert chain over `bus` (interleaved stereo, `n` frames), keeping
-/// each effect's dry signal in `dry` to blend by its mix.
-fn run_chain(effects: &mut [Option<EffectSlot>], chain: &[u8], bus: &mut [f32], dry: &mut [f32], n: usize, ctx: &ProcessContext) {
+/// each effect's dry signal in `dry` to blend by its mix. An effect keyed
+/// by a channel (a compressor's sidechain) hears that channel's signal in
+/// `keys`; any other hears its own input.
+fn run_chain(effects: &mut [Option<EffectSlot>], chain: &[u8], bus: &mut [f32], dry: &mut [f32], keys: &[f32], n: usize, ctx: &ProcessContext) {
     for &slot in chain {
         let Some(Some(e)) = effects.get_mut(slot as usize) else { continue };
         let target = if e.bypass { 0.0 } else { e.mix };
@@ -249,7 +255,11 @@ fn run_chain(effects: &mut [Option<EffectSlot>], chain: &[u8], bus: &mut [f32], 
             e.idle = false;
         }
         dry[..n * 2].copy_from_slice(&bus[..n * 2]);
-        e.effect.process(&mut bus[..n * 2], n, ctx);
+        let key = match e.effect.sidechain() {
+            Some(c) if (1..=MAX_CHANNELS).contains(&c) => &keys[(c - 1) * KEY_STRIDE..][..n * 2],
+            _ => &dry[..n * 2],
+        };
+        e.effect.process_keyed(&mut bus[..n * 2], key, n, ctx);
         for f in 0..n {
             let w = e.wet.next(target);
             for c in 0..2 {
@@ -506,6 +516,8 @@ pub struct Engine {
     chain_len: [u8; MAX_CHANNELS + 1],
     /// Scratch for the dry signal of the effect running.
     dry: Vec<f32>,
+    /// Each channel's sidechain key for this block (`KEY_STRIDE` apart).
+    keys: Vec<f32>,
     /// Send levels, track channel -> return channel, and the levels the last
     /// block ended at (each block ramps between them).
     sends: [[f32; MAX_CHANNELS]; MAX_CHANNELS],
@@ -586,6 +598,7 @@ impl Engine {
             chains: [[0; MAX_INSERTS]; MAX_CHANNELS + 1],
             chain_len: [0; MAX_CHANNELS + 1],
             dry: vec![0.0; MAX_BLOCK * 2],
+            keys: vec![0.0; KEY_STRIDE * MAX_CHANNELS],
             sends: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
             sends_at: [[0.0; MAX_CHANNELS]; MAX_CHANNELS],
             post: vec![0.0; MAX_BLOCK * 2],
@@ -1412,6 +1425,17 @@ impl Engine {
             }
         }
 
+        // Sidechain keys: every channel's signal before its inserts and
+        // fader, taken before any chain runs (so a return, fed by sends
+        // later, keys nothing).
+        for (ch, key) in self.channels.iter().zip(self.keys.chunks_exact_mut(KEY_STRIDE)) {
+            if ch.active && !ch.ret {
+                key[..n * 2].copy_from_slice(&ch.bus[..n * 2]);
+            } else {
+                key[..n * 2].fill(0.0);
+            }
+        }
+
         let ctx = ProcessContext { tempo: self.globals[TEMPO].clamp(20.0, 300.0) };
         let master = &mut self.master_bus[..n * 2];
         master.fill(0.0);
@@ -1432,7 +1456,7 @@ impl Engine {
                 }
                 let len = self.chain_len[i] as usize;
                 if len > 0 {
-                    run_chain(&mut self.effects, &self.chains[i][..len], &mut ch.bus, &mut self.dry, n, &ctx);
+                    run_chain(&mut self.effects, &self.chains[i][..len], &mut ch.bus, &mut self.dry, &self.keys, n, &ctx);
                 }
                 for f in 0..n {
                     let g = ch.coef[f][0];
@@ -1470,7 +1494,7 @@ impl Engine {
 
         let len = self.chain_len[MASTER_CHAIN as usize] as usize;
         if len > 0 {
-            run_chain(&mut self.effects, &self.chains[MASTER_CHAIN as usize][..len], &mut self.master_bus, &mut self.dry, n, &ctx);
+            run_chain(&mut self.effects, &self.chains[MASTER_CHAIN as usize][..len], &mut self.master_bus, &mut self.dry, &self.keys, n, &ctx);
         }
 
         let master_target = volume_to_gain(self.globals[MASTER_VOLUME]);
@@ -1519,7 +1543,13 @@ impl Engine {
             channels[i] = ch.peak;
             ch.peak = [0.0; 2];
         }
-        emit(Feedback::Meters { channels, master: self.master_peak });
+        let mut effects = [0.0; MAX_EFFECTS];
+        for (r, e) in effects.iter_mut().zip(&mut self.effects) {
+            if let Some(e) = e {
+                *r = e.effect.reduction();
+            }
+        }
+        emit(Feedback::Meters { channels, master: self.master_peak, effects });
         self.master_peak = [0.0; 2];
         self.moved_quiet += 1;
         if self.moved_len > 0 || self.moved_reported || self.moved_quiet >= METER_HZ as u32 {

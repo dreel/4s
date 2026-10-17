@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import type { DeviceType } from "../generated/DeviceType";
-import { act, app, client, setParam, useApp } from "../store";
+import { act, app, client, setParam, useApp, useLive } from "../store";
 import { Toggle } from "./controls";
 import { ParamKnob } from "./ParamKnob";
 
@@ -230,10 +230,13 @@ export function DevicePanel() {
         </button>
       </div>
       <div className="flex flex-wrap gap-3">
+        {device.type === "compressor" && <Reduction id={id} />}
         {params
           .filter((p) => p.kind !== "toggle" || p.path !== `${id}.bypass`)
           .map((p) =>
-            p.kind === "toggle" ? (
+            p.path === `${id}.sidechain` ? (
+              <Sidechain key={p.path} path={p.path} />
+            ) : p.kind === "toggle" ? (
               <ToggleParam key={p.path} path={p.path} label={p.label} />
             ) : (
               <ParamKnob key={p.path} path={p.path} label={p.label.toLowerCase()} format={p.kind === "integer" ? (v) => `${Math.round(v)}` : undefined} />
@@ -241,6 +244,48 @@ export function DevicePanel() {
           )}
       </div>
     </section>
+  );
+}
+
+/** A compressor's gain reduction meter: 0 at the top, down to -24 dB. */
+function Reduction({ id }: { id: string }) {
+  const db = useLive((s) => s.reduction[id] ?? 0);
+  return (
+    <div className="flex flex-col items-center gap-1 text-[10px] text-zinc-500" title="gain reduction" data-testid={`reduction-${id}`} data-db={db.toFixed(1)}>
+      <div className="relative w-2 h-12 rounded-sm bg-zinc-800 overflow-hidden">
+        <div className="absolute top-0 inset-x-0 bg-amber-400" style={{ height: `${Math.min(100, (db / 24) * 100)}%` }} />
+      </div>
+      <span className="tabular-nums w-10 text-center">-{db.toFixed(1)}</span>
+      <span>gr dB</span>
+    </div>
+  );
+}
+
+/** Which channel keys a compressor: its own input, or a track channel's
+ * signal before that channel's inserts and fader. */
+function Sidechain({ path }: { path: string }) {
+  const value = useApp((s) => Math.round(s.snapshot?.params[path] ?? 0));
+  const channels = useApp((s) => s.snapshot?.graph.channels ?? []);
+  return (
+    <label className="flex flex-col items-center gap-1 text-[10px] text-zinc-500">
+      <select
+        className="px-1 py-0.5 rounded-sm bg-zinc-950 border border-zinc-700 text-xs text-zinc-300"
+        value={value}
+        title="sidechain: what the compressor listens to"
+        data-testid={`sidechain-${path}`}
+        onChange={(e) => void setParam(path, Number(e.target.value))}
+      >
+        <option value={0}>own input</option>
+        {channels
+          .filter((c) => c.kind !== "return")
+          .map((c) => (
+            <option key={c.n} value={c.n}>
+              ch {c.n} {c.name}
+            </option>
+          ))}
+      </select>
+      <span>sidechain</span>
+    </label>
   );
 }
 

@@ -590,7 +590,7 @@ impl Core {
         if !p.keep_channels {
             for n in fed {
                 if !self.routes.values().any(|c| *c == n) && self.channels.iter().any(|c| c.n == n) {
-                    self.remove_channel_unchecked(n);
+                    self.remove_channel_unchecked(n, origin);
                 }
             }
         }
@@ -655,9 +655,21 @@ impl Core {
         self.channels.push(c);
     }
 
-    fn remove_channel_unchecked(&mut self, n: u32) {
-        // Its inserts go with it.
+    fn remove_channel_unchecked(&mut self, n: u32, origin: &str) {
+        // Its inserts go with it, and sidechains it keyed go back to their
+        // compressors' own inputs (a later channel taking its number does
+        // not key them).
         self.teardown_chain(n);
+        let keyed: Vec<String> = self
+            .devices
+            .iter()
+            .filter(|d| d.kind == DeviceType::Compressor)
+            .map(|d| format!("{}.sidechain", d.id))
+            .filter(|p| self.index.get(p).is_some_and(|i| self.params[*i].value == n as f64))
+            .collect();
+        for p in keyed {
+            let _ = self.set_param(&p, 0.0, origin);
+        }
         let sources: Vec<String> = self.routes.iter().filter(|(_, c)| **c == n).map(|(s, _)| s.clone()).collect();
         for s in sources {
             if let Some((id, o)) = self.find_source(&s) {
@@ -698,7 +710,7 @@ impl Core {
     pub fn channel_remove(&mut self, n: u32, origin: &str) -> Result<Graph, RpcError> {
         self.check_channel(n)?;
         self.check_teardown(&[n], MAX_OUTPUTS * MAX_INSTRUMENTS + 2)?;
-        self.remove_channel_unchecked(n);
+        self.remove_channel_unchecked(n, origin);
         self.graph_changed(origin);
         Ok(self.graph())
     }
@@ -1466,7 +1478,7 @@ impl Core {
                     self.emit("engine", Event::Moving { params: self.moving.clone() });
                 }
             }
-            Feedback::Meters { channels, master } => {
+            Feedback::Meters { channels, master, effects } => {
                 let levels: Vec<ChannelLevel> = self
                     .channels
                     .iter()
@@ -1475,12 +1487,20 @@ impl Core {
                         ChannelLevel { channel: c.n, left, right }
                     })
                     .collect();
-                let silent = levels.iter().all(|l| l.left < 1e-5 && l.right < 1e-5) && master.iter().all(|x| *x < 1e-5);
+                let reduction: BTreeMap<String, f32> = self
+                    .devices
+                    .iter()
+                    .filter(|d| d.kind == DeviceType::Compressor)
+                    .map(|d| (d.id.clone(), effects[d.slot as usize]))
+                    .collect();
+                let silent = levels.iter().all(|l| l.left < 1e-5 && l.right < 1e-5)
+                    && master.iter().all(|x| *x < 1e-5)
+                    && reduction.values().all(|r| *r < 0.01);
                 if silent && self.meters_silent {
                     return;
                 }
                 self.meters_silent = silent;
-                self.emit("engine", Event::Meters { channels: levels, master: master.to_vec() });
+                self.emit("engine", Event::Meters { channels: levels, master: master.to_vec(), reduction });
             }
         }
     }
@@ -2277,7 +2297,7 @@ impl Core {
             if self.routes.values().any(|c| c == n) || self.inserts_on(*n) > 0 {
                 skipped.push(format!("channel:{n}"));
             } else {
-                self.remove_channel_unchecked(*n);
+                self.remove_channel_unchecked(*n, origin);
                 graph = true;
             }
         }
