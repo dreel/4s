@@ -64,6 +64,8 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
   const [width, setWidth] = useState(800);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [playing, setPlaying] = useState<{ at: number; start: number; end: number } | null>(null);
+  /** The last region the engine took to audition. */
+  const [played, setPlayed] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -89,20 +91,24 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
     return () => ro.disconnect();
   }, [ready]);
 
-  // The waveform of the view, a bin a pixel (refetched as it moves).
+  // The waveform of the view, a bin a pixel, refetched as it moves: one
+  // request at a time, the newest view next when it is done.
+  const wanted = useRef<{ path: string; start: number; end: number; bins: number } | null>(null);
+  const fetching = useRef(false);
   useEffect(() => {
     if (!source || view[1] <= view[0]) return;
-    let live = true;
-    const t = setTimeout(async () => {
-      const r = await client
-        .call("sample.peaks", { path: source.path, start: view[0], end: view[1], bins: Math.min(4096, width) })
-        .catch(() => null);
-      if (r && live) setPeaks(r.peaks as [number, number][]);
-    }, 30);
-    return () => {
-      live = false;
-      clearTimeout(t);
-    };
+    wanted.current = { path: source.path, start: view[0], end: view[1], bins: Math.min(4096, width) };
+    if (fetching.current) return;
+    fetching.current = true;
+    void (async () => {
+      while (wanted.current) {
+        const q = wanted.current;
+        wanted.current = null;
+        const r = await client.call("sample.peaks", q).catch(() => null);
+        if (r && !wanted.current) setPeaks(r.peaks as [number, number][]);
+      }
+      fetching.current = false;
+    })();
   }, [source, view, width]);
 
   // The playhead while auditioning.
@@ -240,6 +246,7 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
           data-testid={`sample-wave-${id}-${padNumber}`}
           data-view={`${view[0].toFixed(4)},${view[1].toFixed(4)}`}
           data-selection={`${a.toFixed(4)},${b.toFixed(4)}`}
+          data-played={played ?? undefined}
           onPointerDown={(e) => {
             (e.target as Element).setPointerCapture(e.pointerId);
             const x = at(e);
@@ -307,7 +314,10 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
           data-testid={`sample-play-${id}-${padNumber}`}
           onClick={async () => {
             const r = await act(client.call("sample.play", { path: source.path, start: a, end: b }));
-            if (r) setPlaying({ at: performance.now(), start: r.start, end: r.end });
+            if (r) {
+              setPlaying({ at: performance.now(), start: r.start, end: r.end });
+              setPlayed(`${r.start.toFixed(4)},${r.end.toFixed(4)}`);
+            }
           }}
         >
           play

@@ -301,14 +301,19 @@ impl Core {
         Ok(SampleUploadResult { upload: token.clone(), received, path: Some(path.to_string_lossy().into_owned()) })
     }
 
-    /// Start (or stop) an audition; the engine hands the last one back.
-    /// The caller checked queue room and returns in flight.
-    fn preview(&mut self, sample: Option<Arc<[f32]>>) {
+    /// Start (or stop) the audition (one, shared by every client); the
+    /// engine hands the last one back.
+    fn preview(&mut self, sample: Option<Arc<[f32]>>) -> Result<(), RpcError> {
+        if self.in_flight >= RETURN_CAPACITY {
+            return Err(RpcError::failed("the audio engine is still returning removed samples; try again"));
+        }
+        self.ensure_room(1)?;
         if self.previewing {
             self.in_flight += 1;
         }
         self.previewing = sample.is_some();
         self.send(Command::Preview { sample });
+        Ok(())
     }
 
     /// A file a request names: a path on the engine host (relative: under
@@ -366,28 +371,13 @@ impl Core {
             .and_then(ok),
             Request::SamplePlay(p) => (|| {
                 let path = self.sample_path(&p.path)?;
-                if self.in_flight >= RETURN_CAPACITY {
-                    return Err(RpcError::failed("the audio engine is still returning removed samples; try again"));
-                }
-                self.ensure_room(1)?;
                 let cut = self.cut_sample(&path, p.start, p.end, None)?;
                 let playing = SamplePlaying { path: path.to_string_lossy().into_owned(), start: cut.start, end: cut.end };
-                self.preview(Some(cut.data));
+                self.preview(Some(cut.data))?;
                 Ok(playing)
             })()
             .and_then(ok),
-            Request::SampleStop(_) => {
-                if self.previewing {
-                    if self.in_flight >= RETURN_CAPACITY {
-                        return Ok(Err(RpcError::failed("the audio engine is still returning removed samples; try again")));
-                    }
-                    if let Err(e) = self.ensure_room(1) {
-                        return Ok(Err(e));
-                    }
-                    self.preview(None);
-                }
-                ok(Empty {})
-            }
+            Request::SampleStop(_) => (|| if self.previewing { self.preview(None) } else { Ok(()) })().and_then(|_| ok(Empty {})),
             Request::SamplerClear(p) => (|| {
                 let id = sampler(self, &p.instrument)?;
                 Self::check_pad(p.pad)?;

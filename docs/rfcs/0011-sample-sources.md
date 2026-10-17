@@ -95,7 +95,9 @@ Format 8 reads v7 sample paths as all of the file. Protocol 10 removes
   engine and `sample.stop` stops it: the engine plays it after the master
   (like the metronome's click: not in the mix, not on the meters, not in a
   render), faded in and out over 128 frames, and hands the buffer back when
-  replaced (`Command::Preview`). Neither is journaled or saved. CLI:
+  replaced (`Command::Preview`). There is one audition for the engine,
+  shared by every client: one client's play or stop ends another's (no
+  event says so). Neither is journaled or saved. CLI:
   `4s sample play <file> --from --to`, `4s sample stop`.
 - UI (`SampleEditor.tsx`, under the selected pad's knobs in the sampler):
   the pad's file as a waveform from `sample.peaks` (a bin a pixel,

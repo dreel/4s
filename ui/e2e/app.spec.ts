@@ -1308,6 +1308,7 @@ test("sample editor: a pad's file as a waveform; select a region by dragging or 
   await expect(wave).toHaveAttribute("data-selection", "1.5000,1.8000");
   await page.getByTestId("sample-editor-ed-1").screenshot({ path: "test-results/sample-editor.png" });
   await page.getByTestId("sample-play-ed-1").click();
+  await expect(wave).toHaveAttribute("data-played", "1.5000,1.8000");
   await page.getByTestId("sample-stop-ed-1").click();
   await page.getByTestId("sample-apply-ed-1").click();
   await expect

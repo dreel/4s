@@ -311,7 +311,6 @@ impl SourceCache {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
