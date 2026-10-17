@@ -266,6 +266,10 @@ function Reduction({ id }: { id: string }) {
 function Sidechain({ path }: { path: string }) {
   const value = useApp((s) => Math.round(s.snapshot?.params[path] ?? 0));
   const channels = useApp((s) => s.snapshot?.graph.channels ?? []);
+  const tracks = channels.filter((c) => c.kind !== "return");
+  // Set over RPC to a return or a missing channel: shown as it is (it keys
+  // silence) rather than as "own input".
+  const unlisted = value > 0 && !tracks.some((c) => c.n === value);
   return (
     <label className="flex flex-col items-center gap-1 text-[10px] text-zinc-500">
       <select
@@ -276,9 +280,8 @@ function Sidechain({ path }: { path: string }) {
         onChange={(e) => void setParam(path, Number(e.target.value))}
       >
         <option value={0}>own input</option>
-        {channels
-          .filter((c) => c.kind !== "return")
-          .map((c) => (
+        {unlisted && <option value={value}>ch {value} (silent)</option>}
+        {tracks.map((c) => (
             <option key={c.n} value={c.n}>
               ch {c.n} {c.name}
             </option>

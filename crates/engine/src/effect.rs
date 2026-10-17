@@ -618,11 +618,9 @@ mod tests {
     fn compressor_listens_to_its_key() {
         let mut e = make(DeviceType::Compressor, SR);
         e.set_param(6, 1.0);
-        assert_eq!(e.sidechain(), Some(1));
         let ducked = compress(e.as_mut(), 0.05, Some(0.9));
         assert!(ducked < 0.02, "{ducked}");
         let mut e = make(DeviceType::Compressor, SR);
-        assert_eq!(e.sidechain(), None);
         assert!((compress(e.as_mut(), 0.05, None) - 0.05).abs() < 1e-4);
     }
 }

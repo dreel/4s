@@ -105,6 +105,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   (`Engine::process`, the key copy before the channel loop). Taking a
   return's key after the track channels would let a reverb bus key
   something; nobody has asked yet.
+- (2026-10-17, compressor review) sidechain: `param.set` takes any
+  channel number 0..32 for `<id>.sidechain`, including a return or a
+  missing channel, which key silence with no warning over the CLI (the UI
+  shows "ch N (silent)"). Refuse them in a device-aware check, minding
+  project loads and undo, which set it before or with its channel. Also
+  the key copy runs for every channel each block even with no sidechain
+  in use (`Engine::process`); cheap, but skippable.
 - (2026-10-17, compressor branch) UI: the compressor's knobs move
   linearly over ranges like 0.1..100 ms attack, so the short attacks that
   matter most get a sliver of the knob; a log taper for time parameters in
