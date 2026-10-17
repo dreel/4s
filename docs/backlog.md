@@ -385,6 +385,15 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   waits for it, live MIDI and controllers included (a few hundred ms for a
   song, more for the 20-minute limit). Decode on a worker and answer when
   done.
+- (2026-10-17, #53 review) uploads: ids are chosen by clients and shared,
+  so a client sending offset 0 with another's id restarts that upload.
+  Scope them to the connection.
+- (2026-10-17, #53 review) sources: decoding a 20-minute source holds the
+  decoded channels, their resampled copies, and the interleaved buffer at
+  once (about 3x its 460 MB), and the cache keeps the newest source even
+  past its budget. Free as it goes, or refuse what cannot fit. A file
+  rewritten in place with the same size within the filesystem's mtime
+  resolution is taken for the old one (`by_path`).
 - (2026-10-17, sample sources) `4s sampler load` / `4s sample upload`
   encode every chunk of a file before sending the first (about 1.3x the
   file in memory); stream them one at a time.

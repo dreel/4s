@@ -31,7 +31,7 @@ be slow, and keeping a decoded song per pad wasteful.
   The pad's `start`/`end` parameters stay as trims within the region (and
   can still be modulated and automated).
 - **Cache** (`crates/daemon/src/core/sources.rs`): decoded sources by a
-  hash of the file's bytes (a path's size and modification time remember
+  blake3 hash of the file's bytes (a path's size and modification time remember
   its hash, so an unchanged file is not read again), least recently used
   dropped past a budget (`4sd --sample-cache-mb`, default 512), decoded
   again when needed. A pad gets a copy of its region, so a song is not
@@ -62,8 +62,8 @@ be slow, and keeping a decoded song per pad wasteful.
   waveform is computed there and sent as a few thousand numbers.
 - **Real-time safety**: decoding, resampling, and region copies happen on
   the control side; the audio thread still gets one buffer per pad.
-- **Validation**: unit tests decode MP3, FLAC, and AAC fixtures
-  (`tests/fixtures/audio`) and check the cache; the CLI e2e loads regions,
+- **Validation**: unit tests decode MP3, FLAC, AAC, AIFF, ALAC, and
+  Vorbis fixtures (`tests/fixtures/audio`) and check the cache; the CLI e2e loads regions,
   renders them, uploads in chunks, saves and reloads bundles.
 - **Modularity**: no new node types; the sampler's parameters are as before.
 
