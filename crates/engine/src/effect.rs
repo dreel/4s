@@ -612,15 +612,12 @@ mod tests {
         assert!((compress(e.as_mut(), 0.05, None) - 0.05).abs() < 1e-4);
     }
 
-    /// Keyed by a loud signal, a compressor turns a quiet one down; keyed
-    /// by itself, it does not.
+    /// Keyed by a loud signal, a compressor turns a quiet one down (the
+    /// same quiet signal keyed by itself is left alone, above).
     #[test]
     fn compressor_listens_to_its_key() {
         let mut e = make(DeviceType::Compressor, SR);
-        e.set_param(6, 1.0);
         let ducked = compress(e.as_mut(), 0.05, Some(0.9));
         assert!(ducked < 0.02, "{ducked}");
-        let mut e = make(DeviceType::Compressor, SR);
-        assert!((compress(e.as_mut(), 0.05, None) - 0.05).abs() < 1e-4);
     }
 }

@@ -2291,7 +2291,7 @@ fn print_event(e: &EventEnvelope, json: bool) {
             channels.iter().map(|c| format!("{}:{:.2}/{:.2}", c.channel, c.left, c.right)).collect::<Vec<_>>().join(" "),
             master.first().unwrap_or(&0.0),
             master.get(1).unwrap_or(&0.0),
-            reduction.iter().map(|(id, db)| format!(" {id} -{db:.1} dB")).collect::<String>()
+            reduction.iter().filter(|(_, db)| **db >= 0.05).map(|(id, db)| format!(" {id} -{db:.1} dB")).collect::<String>()
         ),
         Event::MidiIn { port, data } => {
             let hex: Vec<String> = data.iter().map(|b| format!("{b:02X}")).collect();
