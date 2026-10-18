@@ -106,14 +106,26 @@ export const app = new Store<AppState>({
 export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {}, moving: {}, reduction: {} });
 
 /** Select an instrument for the editor. */
-/** Show an instrument in the editor and focus it for this UI's seat, so
- * your keyboard, knobs, and mod wheel play what you are looking at (RFC
- * 0007 focus; a keyboard whose layout targets `@pitched` skips a drum
- * machine and plays the first synth or bass instead). */
 export function select(id: string) {
   app.set({ selected: id });
-  const seat = mySeat(app.get());
-  if (seat && seat.config.focus !== id) void act(client.call("seat.focus", { seat: seat.name, instrument: id }));
+}
+
+/** Focus an instrument for this UI's seat, so your keyboard, knobs, and
+ * mod wheel play it (RFC 0007; a keyboard whose layout targets `@pitched`
+ * skips a drum machine and plays the first synth or bass instead). Not an
+ * undo step. */
+export function focusMine(id: string) {
+  const s = app.get();
+  const seat = mySeat(s);
+  if (seat && myFocus(s) !== id) void act(client.call("seat.focus", { seat: seat.name, instrument: id }));
+}
+
+/** This UI's seat's focus as the daemon resolves it: its choice if that
+ * instrument exists, else the first instrument. */
+export function myFocus(s: AppState): string | null {
+  const ids = s.snapshot?.graph.instruments.map((i) => i.id) ?? [];
+  const f = mySeat(s)?.config.focus;
+  return f && ids.includes(f) ? f : (ids[0] ?? null);
 }
 
 /** The selected instrument, falling back to the first one. */

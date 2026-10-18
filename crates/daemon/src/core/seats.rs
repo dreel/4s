@@ -825,9 +825,9 @@ impl Core {
             return self.seat_focus(seat);
         }
         if target == PITCHED {
-            // A keyboard plays the focus when it takes pitches (not a drum
-            // machine's or a sampler's named rows), else the first that does.
-            let pitched = |id: &str| self.find_instrument(id).is_ok_and(|i| i.kind.layout().rows.is_empty());
+            // A keyboard plays the focus when it takes pitches, else the
+            // first instrument that does.
+            let pitched = |id: &str| self.find_instrument(id).is_ok_and(|i| i.kind.is_pitched());
             return self
                 .seat_focus(seat)
                 .filter(|f| pitched(f))

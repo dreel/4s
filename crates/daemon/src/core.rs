@@ -1942,10 +1942,14 @@ impl Core {
         for (source, n) in &self.routes {
             d.insert(format!("route:{source}"), json!(n));
         }
-        // What a project saves of a seat (RFC 0007): focus, page, bindings.
+        // What undo restores of a seat (RFC 0007): its bindings, CC maps,
+        // and knobs. Its focus and knob page are where the performer is
+        // (selecting a tab moves them), saved with the project but not
+        // undo steps.
         for (name, seat) in &self.seats {
-            if seat.saved && seat.config != SeatConfig::default() {
-                d.insert(format!("seat:{name}"), json!(seat.config));
+            let config = SeatConfig { focus: None, knob_page: None, ..seat.config.clone() };
+            if seat.saved && config != SeatConfig::default() {
+                d.insert(format!("seat:{name}"), json!(config));
             }
         }
         d
@@ -2279,7 +2283,8 @@ impl Core {
                     saved: true,
                     learning: None,
                 });
-                seat.config = config;
+                let (focus, knob_page) = (seat.config.focus.take(), seat.config.knob_page.take());
+                seat.config = SeatConfig { focus, knob_page, ..config };
             }
             self.seats_changed(origin, true);
         }

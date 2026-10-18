@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import type { InstrumentInfo } from "../generated/InstrumentInfo";
-import { act, client, mySeat, select, useApp, useSelected } from "../store";
+import { act, client, focusMine, mySeat, myFocus, select, useApp, useSelected } from "../store";
 import { BassEditor } from "./BassEditor";
 import { DrumEditor } from "./DrumEditor";
 import { PianoRoll } from "./PianoRoll";
@@ -166,7 +166,7 @@ function ClipBar({ id }: { id: string }) {
 }
 
 function Tab({ instrument, selected }: { instrument: InstrumentInfo; selected: boolean }) {
-  const focused = useApp((s) => mySeat(s)?.config.focus === instrument.id);
+  const focused = useApp((s) => mySeat(s) !== null && myFocus(s) === instrument.id);
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -184,7 +184,15 @@ function Tab({ instrument, selected }: { instrument: InstrumentInfo; selected: b
         selected ? "bg-zinc-200 text-zinc-950 border-zinc-100" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
       }`}
     >
-      <button className="pl-2 pr-1 py-1" data-testid={`select-${instrument.id}`} data-selected={selected} onClick={() => select(instrument.id)}>
+      <button
+        className="pl-2 pr-1 py-1"
+        data-testid={`select-${instrument.id}`}
+        data-selected={selected}
+        onClick={() => {
+          select(instrument.id);
+          focusMine(instrument.id);
+        }}
+      >
         {instrument.name} <span className="opacity-60">{instrument.type}</span>
         {focused && (
           <span className="ml-1 text-amber-500" title="your seat's focus: your keyboard and knobs play it" data-testid={`focused-${instrument.id}`}>

@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import type { ChannelInfo } from "../generated/ChannelInfo";
 import type { InstrumentType } from "../generated/InstrumentType";
 import type { InstrumentTypeInfo } from "../generated/InstrumentTypeInfo";
-import { act, client, select, setParam, useApp, useLive, useSelected } from "../store";
+import { act, client, focusMine, select, setParam, useApp, useLive, useSelected } from "../store";
 import { Fader, Meter, Toggle } from "./controls";
 import { Inserts } from "./Devices";
 import { ParamKnob, pan, pct } from "./ParamKnob";
@@ -237,7 +237,10 @@ function AddControls() {
     const info = await act(
       client.call("instrument.add", { type: kind, id: null, name: null, channel: null, no_channel: false }),
     );
-    if (info) select(info.id);
+    if (info) {
+      select(info.id);
+      focusMine(info.id);
+    }
   };
   const btn = "px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 bg-zinc-900 text-xs";
   return (
