@@ -145,7 +145,8 @@ control side, in `crates/daemon/src/core/seats.rs`, in three layers:
 - **Seats** (in the project): one performer's focus instrument, knob page,
   note bindings (`{device, channel, low, high, transpose, target}`), CC
   maps, and knobs that follow the focus. A device with no bindings plays
-  the seat's focus.
+  the seat's focus. Selecting an instrument's tab in the app focuses it
+  for the app's seat.
 - **Runtime**: which client sits in which seat. A client joins the one seat
   matching its user name; otherwise the UI asks (join, create, or ignore =
   a session-only seat). The engine host's devices use the host seat: a
@@ -160,7 +161,9 @@ control side, in `crates/daemon/src/core/seats.rs`, in three layers:
 controllers: which ports to use and what to call them, and a default layout
 that seats use until they bind the device themselves (`4s midi models`,
 `4s midi layout <device> [--apply]`). Bindings can `remap` notes and target
-`@<type>` (the first instrument of a type); CC maps can target
+`@<type>` (the first instrument of a type) or `@pitched` (the focus if it
+plays pitches, else the first instrument that does: a keyboard's target, so
+focusing a drum machine does not silence the keys); CC maps can target
 `focus.<param>` and read endless encoders (`relative`). Pitch bend plays the
 seat's `pitch_bend` target (default: the focus) and is not journaled. A
 device with CC maps or knobs but no bindings of its own still plays its

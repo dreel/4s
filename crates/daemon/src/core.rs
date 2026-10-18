@@ -619,13 +619,10 @@ impl Core {
         }
         let fed: Vec<u32> = inst.outputs.iter().filter_map(|o| self.routes.remove(&o.source)).collect();
         self.held.retain(|h| h.slot != inst.slot);
-        let mut refocused = false;
-        for s in self.seats.values_mut() {
-            if s.config.focus.as_deref() == Some(inst.id.as_str()) {
-                s.config.focus = None;
-                refocused = true;
-            }
-        }
+        // A seat focused on it keeps the id: while it is gone the focus is
+        // the first instrument, and an undo that brings it back (focus is
+        // not undoable state) focuses it again.
+        let refocused = self.seats.values().any(|s| s.config.focus.as_deref() == Some(inst.id.as_str()));
         if refocused {
             self.seats_changed(origin, true);
         }
@@ -1942,10 +1939,14 @@ impl Core {
         for (source, n) in &self.routes {
             d.insert(format!("route:{source}"), json!(n));
         }
-        // What a project saves of a seat (RFC 0007): focus, page, bindings.
+        // What undo restores of a seat (RFC 0007): its bindings, CC maps,
+        // and knobs. Its focus and knob page are where the performer is
+        // (selecting a tab moves them), saved with the project but not
+        // undo steps.
         for (name, seat) in &self.seats {
-            if seat.saved && seat.config != SeatConfig::default() {
-                d.insert(format!("seat:{name}"), json!(seat.config));
+            let config = SeatConfig { focus: None, knob_page: None, ..seat.config.clone() };
+            if seat.saved && config != SeatConfig::default() {
+                d.insert(format!("seat:{name}"), json!(config));
             }
         }
         d
@@ -2279,7 +2280,8 @@ impl Core {
                     saved: true,
                     learning: None,
                 });
-                seat.config = config;
+                let (focus, knob_page) = (seat.config.focus.take(), seat.config.knob_page.take());
+                seat.config = SeatConfig { focus, knob_page, ..config };
             }
             self.seats_changed(origin, true);
         }

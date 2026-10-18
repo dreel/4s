@@ -85,7 +85,7 @@
   "entries": [
     {
       "seq": 2,
-      "time": 1791783156.366998,
+      "time": 1792350194.43877,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -111,7 +111,7 @@
     },
     {
       "seq": 3,
-      "time": 1791783156.367485,
+      "time": 1792350194.439106,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
@@ -190,7 +190,7 @@
     },
     {
       "seq": 4,
-      "time": 1791783156.367875,
+      "time": 1792350194.439423,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set",
@@ -261,7 +261,7 @@
     },
     {
       "seq": 5,
-      "time": 1791783156.368329,
+      "time": 1792350194.439718,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_step",
@@ -292,7 +292,7 @@
     },
     {
       "seq": 6,
-      "time": 1791783156.36884,
+      "time": 1792350194.440097,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
@@ -362,7 +362,7 @@
     },
     {
       "seq": 7,
-      "time": 1791783156.369852,
+      "time": 1792350194.440833,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
@@ -744,7 +744,7 @@
     },
     {
       "seq": 8,
-      "time": 1791783156.370718,
+      "time": 1792350194.441533,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_note",
@@ -778,7 +778,7 @@
     },
     {
       "seq": 9,
-      "time": 1791783156.371211,
+      "time": 1792350194.441958,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -804,7 +804,7 @@
     },
     {
       "seq": 10,
-      "time": 1791783156.371446,
+      "time": 1792350194.442195,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -830,7 +830,7 @@
     },
     {
       "seq": 11,
-      "time": 1791783156.372071,
+      "time": 1792350194.442715,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
@@ -860,7 +860,7 @@
     },
     {
       "seq": 12,
-      "time": 1791783156.372591,
+      "time": 1792350194.443159,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.press",
@@ -881,7 +881,7 @@
     },
     {
       "seq": 13,
-      "time": 1791783156.372946,
+      "time": 1792350194.443436,
       "user": "e2e",
       "origin": "cli",
       "method": "seat.page",
@@ -895,26 +895,13 @@
         "page": 0,
         "seat": "e2e"
       },
-      "changes": [
-        {
-          "key": "seat:e2e",
-          "before": null,
-          "after": {
-            "bindings": [],
-            "cc": [],
-            "focus": null,
-            "knob_page": "decay",
-            "knobs": [],
-            "pitch_bend": null
-          }
-        }
-      ],
+      "changes": [],
       "reverts": null,
       "error": null
     },
     {
       "seq": 14,
-      "time": 1791783156.37344,
+      "time": 1792350194.44387,
       "user": "e2e",
       "origin": "cli",
       "method": "controller.knob",
@@ -940,7 +927,7 @@
     },
     {
       "seq": 15,
-      "time": 1791783156.373982,
+      "time": 1792350194.444251,
       "user": "e2e",
       "origin": "cli",
       "method": "channel.add",
@@ -983,7 +970,7 @@
     },
     {
       "seq": 16,
-      "time": 1791783156.374431,
+      "time": 1792350194.444586,
       "user": "e2e",
       "origin": "cli",
       "method": "route.set",
@@ -1010,7 +997,7 @@
     },
     {
       "seq": 17,
-      "time": 1791783156.375049,
+      "time": 1792350194.445055,
       "user": "e2e",
       "origin": "cli",
       "method": "route.set",
@@ -1042,7 +1029,7 @@
     },
     {
       "seq": 18,
-      "time": 1791783156.37562,
+      "time": 1792350194.445525,
       "user": "e2e",
       "origin": "cli",
       "method": "channel.move",
@@ -1076,7 +1063,7 @@
     },
     {
       "seq": 19,
-      "time": 1791783156.37656,
+      "time": 1792350194.446263,
       "user": "alice",
       "origin": "cli",
       "method": "param.set",
@@ -1102,7 +1089,7 @@
     },
     {
       "seq": 20,
-      "time": 1791783156.37726,
+      "time": 1792350194.44685,
       "user": "bob",
       "origin": "cli",
       "method": "param.set",
@@ -1128,7 +1115,7 @@
     },
     {
       "seq": 21,
-      "time": 1791783156.377512,
+      "time": 1792350194.44707,
       "user": "alice",
       "origin": "cli",
       "method": "history.undo",
@@ -1145,7 +1132,7 @@
     },
     {
       "seq": 22,
-      "time": 1791783156.377755,
+      "time": 1792350194.447312,
       "user": "bob",
       "origin": "cli",
       "method": "history.undo",
@@ -1168,7 +1155,7 @@
     },
     {
       "seq": 23,
-      "time": 1791783156.377998,
+      "time": 1792350194.447543,
       "user": "bob",
       "origin": "cli",
       "method": "history.redo",
@@ -1191,7 +1178,7 @@
     },
     {
       "seq": 24,
-      "time": 1791783156.378433,
+      "time": 1792350194.447936,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.add",
@@ -1236,7 +1223,7 @@
     },
     {
       "seq": 25,
-      "time": 1791783156.379265,
+      "time": 1792350194.448613,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.set_notes",
@@ -1602,7 +1589,7 @@
     },
     {
       "seq": 26,
-      "time": 1791783156.380053,
+      "time": 1792350194.449287,
       "user": "e2e",
       "origin": "cli",
       "method": "instrument.remove",
@@ -1668,7 +1655,7 @@
     },
     {
       "seq": 27,
-      "time": 1791783156.380762,
+      "time": 1792350194.449904,
       "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
@@ -1731,7 +1718,7 @@
     },
     {
       "seq": 28,
-      "time": 1791783156.38104,
+      "time": 1792350194.450143,
       "user": "e2e",
       "origin": "cli",
       "method": "param.set",
@@ -1751,7 +1738,7 @@
     },
     {
       "seq": 29,
-      "time": 1791783156.381423,
+      "time": 1792350194.450427,
       "user": "e2e",
       "origin": "cli",
       "method": "pattern.clear",
@@ -1788,7 +1775,7 @@
     },
     {
       "seq": 30,
-      "time": 1791783156.38176,
+      "time": 1792350194.45069,
       "user": "e2e",
       "origin": "cli",
       "method": "history.undo",
@@ -1821,5 +1808,5 @@
       "error": null
     }
   ],
-  "digest": "8d789865dd92a4da"
+  "digest": "3cf64ad6ef892032"
 }

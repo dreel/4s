@@ -39,13 +39,19 @@ Captured with `4s midi monitor` on a unit with the factory settings:
 While your seat has no bindings for `mpk` / `mpk_daw`, they play with the
 model's layout (`4s midi layout mpk` shows it):
 
-- keys -> the first `tb303` (the bass), or your seat's focus in a project
-  without one (`@tb303|focus`);
+- keys -> your seat's focus if it plays pitches (a synth or a bass), else
+  the first instrument that does, else the focus (`@pitched|focus`). So
+  with the drums focused the keys still play the bass or synth, and
+  selecting an instrument's tab in the app (which focuses it) moves them;
 - pads (both banks) -> the first `tr808`: pad 1-8 = kick, snare, clap,
   closed hat, open hat, low tom, high tom, cowbell (`remap` + `@tr808`);
 - knobs -> the focus's knob page (relative, so they never jump);
 - mod -> `focus.cutoff` (the 303's cutoff; nothing for a drum machine);
 - pitch -> pitch bend of what the keys play (+/- 2 semitones; not journaled).
+
+In the app: plug it in, then click the tab of the instrument you want to
+play (the dot on a tab marks your focus). The seat panel's "edit" copies
+the layout into your seat to change it.
 
 To change it, copy it into your seat and edit it like any bindings:
 
