@@ -68,6 +68,12 @@ pub struct NoteLayout {
 }
 
 impl InstrumentType {
+    /// Whether it plays pitches (a synth, a bass), not named rows (a drum
+    /// machine's voices, a sampler's pads): what a keyboard plays.
+    pub fn is_pitched(self) -> bool {
+        matches!(self, InstrumentType::Tb303 | InstrumentType::Poly)
+    }
+
     /// How this instrument's notes show in a step view.
     pub fn layout(self) -> NoteLayout {
         let accent = NoteExpression {

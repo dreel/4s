@@ -306,6 +306,18 @@ echo "raw 90 3C 64" >&5; echo "raw 80 3C 00" >&5
 wait $WATCH
 check "keys play a focused synth" '"instrument":"synth","voice":null,"note":60' cat "$TMP/mpk-synth.json"
 s instrument rm synth >/dev/null
+# With nothing pitched, the keys fall back to the focus (the drums).
+s instrument rm bass >/dev/null
+s focus drums >/dev/null
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/mpk-drums.json" &
+WATCH=$!; sleep 0.5
+echo "raw 90 24 64" >&5; echo "raw 80 24 00" >&5
+wait $WATCH
+check "with nothing pitched, the keys play the focus" '"instrument":"drums","voice":"kick"' cat "$TMP/mpk-drums.json"
+s undo >/dev/null
+s undo >/dev/null
+check "focus is not an undo step: two undos bring back the bass, then the synth" "synth" s instrument list
+s instrument rm synth >/dev/null
 s focus drums >/dev/null
 echo "raw B0 01 00" >&5; sleep 0.3
 check "focus.cutoff does nothing when the focus has none" "bass.cutoff = 1" s get bass.cutoff
