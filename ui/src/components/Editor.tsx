@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import type { InstrumentInfo } from "../generated/InstrumentInfo";
-import { act, client, select, useApp, useSelected } from "../store";
+import { act, client, mySeat, select, useApp, useSelected } from "../store";
 import { BassEditor } from "./BassEditor";
 import { DrumEditor } from "./DrumEditor";
 import { PianoRoll } from "./PianoRoll";
@@ -166,6 +166,7 @@ function ClipBar({ id }: { id: string }) {
 }
 
 function Tab({ instrument, selected }: { instrument: InstrumentInfo; selected: boolean }) {
+  const focused = useApp((s) => mySeat(s)?.config.focus === instrument.id);
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -185,6 +186,11 @@ function Tab({ instrument, selected }: { instrument: InstrumentInfo; selected: b
     >
       <button className="pl-2 pr-1 py-1" data-testid={`select-${instrument.id}`} data-selected={selected} onClick={() => select(instrument.id)}>
         {instrument.name} <span className="opacity-60">{instrument.type}</span>
+        {focused && (
+          <span className="ml-1 text-amber-500" title="your seat's focus: your keyboard and knobs play it" data-testid={`focused-${instrument.id}`}>
+            ●
+          </span>
+        )}
       </button>
       <button
         className={`pr-2 pl-1 py-1 ${armed ? "text-red-500 font-semibold" : "opacity-40 hover:opacity-100 hover:text-red-500"}`}

@@ -106,8 +106,14 @@ export const app = new Store<AppState>({
 export const live = new Store<LiveState>({ channels: {}, master: [0, 0], triggers: {}, lastNote: {}, takeNotes: {}, moving: {}, reduction: {} });
 
 /** Select an instrument for the editor. */
+/** Show an instrument in the editor and focus it for this UI's seat, so
+ * your keyboard, knobs, and mod wheel play what you are looking at (RFC
+ * 0007 focus; a keyboard whose layout targets `@pitched` skips a drum
+ * machine and plays the first synth or bass instead). */
 export function select(id: string) {
   app.set({ selected: id });
+  const seat = mySeat(app.get());
+  if (seat && seat.config.focus !== id) void act(client.call("seat.focus", { seat: seat.name, instrument: id }));
 }
 
 /** The selected instrument, falling back to the first one. */

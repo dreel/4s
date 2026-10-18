@@ -262,14 +262,14 @@ check "known models" "akai_mpk_mini_iv   Akai MPK mini IV" s midi models
 check "a model's port gets its name" "$MPK as mpk (Generic) model akai_mpk_mini_iv" s midi connect "$MPK"
 check "and its other port its own" "$MPKD as mpk_daw (Generic) model akai_mpk_mini_iv" s midi connect "$MPKD"
 check "with no bindings, the seat uses the model's default layout" "default layout: mpk (Akai MPK mini IV)" s seat
-s focus drums >/dev/null   # the keys play the bass anyway (@tb303|focus)
+s focus drums >/dev/null   # a drum machine: the keys play the first pitched instrument (@pitched)
 "$BIN/4s" watch --type trigger --count 2 --json > "$TMP/mpk.json" &
 WATCH=$!; sleep 0.5
 echo "raw 90 30 64" >&5; echo "raw 80 30 00" >&5   # a key, channel 1
 echo "raw 99 25 64" >&5; echo "raw 89 25 00" >&5   # pad 2, channel 10
 echo "raw 99 25 64" >&6; echo "raw 89 25 00" >&6   # the DAW Port's copy of it
 wait $WATCH; sleep 0.3
-check "keys play the first 303 whatever the focus" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
+check "with the drums focused, keys play the first pitched instrument" '"instrument":"bass","voice":null,"note":48' cat "$TMP/mpk.json"
 check "pads play the 808's voices in order" '"instrument":"drums","voice":"snare"' cat "$TMP/mpk.json"
 s focus bass >/dev/null
 "$BIN/4s" watch --type trigger --json > "$TMP/mpk-daw.json" &
@@ -297,6 +297,15 @@ echo "raw B0 18 7B" >&6; sleep 0.3   # 5 steps down
 check "and back down" "bass.cutoff = 0.525" s get bass.cutoff
 echo "raw B0 01 00" >&5; echo "raw B0 01 7F" >&5; sleep 0.3
 check "the mod control moves focus.cutoff" "bass.cutoff = 1" s get bass.cutoff
+# A pitched focus wins: with a synth focused, the keys play it, not the bass.
+s instrument add poly >/dev/null
+s focus synth >/dev/null
+"$BIN/4s" watch --type trigger --count 1 --json > "$TMP/mpk-synth.json" &
+WATCH=$!; sleep 0.5
+echo "raw 90 3C 64" >&5; echo "raw 80 3C 00" >&5
+wait $WATCH
+check "keys play a focused synth" '"instrument":"synth","voice":null,"note":60' cat "$TMP/mpk-synth.json"
+s instrument rm synth >/dev/null
 s focus drums >/dev/null
 echo "raw B0 01 00" >&5; sleep 0.3
 check "focus.cutoff does nothing when the focus has none" "bass.cutoff = 1" s get bass.cutoff
