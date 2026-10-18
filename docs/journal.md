@@ -94,9 +94,12 @@ It refuses a daemon with unsaved changes unless you pass `--force`.
 
 Some things are **not** in the changes, because they aren't undoable state:
 transport play/stop, the playhead, audio, MIDI connections, and the
-controller's target, page, and knob mode (a seat's focus and knob page are
-saved with the project, but selecting an instrument's tab in the app is
-not an undo step; its bindings and CC maps are). Requests that touch them are
+controller's target, page, and knob mode. A seat's focus and knob page
+(`seat.focus`, `seat.page`, from any client: `4s focus`, an instrument tab
+in the app, the Block) are saved with the project but take no undo step,
+and undo leaves them where they are; a seat's bindings, CC maps, and knobs
+are undoable (undoing a `seat.remove` brings it back with no focus or
+page). Requests that touch them are
 still journaled (with empty `changes`).
 
 ## Where it lives

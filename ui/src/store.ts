@@ -117,7 +117,9 @@ export function select(id: string) {
 export function focusMine(id: string) {
   const s = app.get();
   const seat = mySeat(s);
-  if (seat && myFocus(s) !== id) void act(client.call("seat.focus", { seat: seat.name, instrument: id }));
+  // An explicit choice even when the default (the first instrument) is
+  // already it, so it stays when instruments change.
+  if (seat && seat.config.focus !== id) void act(client.call("seat.focus", { seat: seat.name, instrument: id }));
 }
 
 /** This UI's seat's focus as the daemon resolves it: its choice if that

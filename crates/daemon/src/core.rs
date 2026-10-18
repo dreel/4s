@@ -619,13 +619,10 @@ impl Core {
         }
         let fed: Vec<u32> = inst.outputs.iter().filter_map(|o| self.routes.remove(&o.source)).collect();
         self.held.retain(|h| h.slot != inst.slot);
-        let mut refocused = false;
-        for s in self.seats.values_mut() {
-            if s.config.focus.as_deref() == Some(inst.id.as_str()) {
-                s.config.focus = None;
-                refocused = true;
-            }
-        }
+        // A seat focused on it keeps the id: while it is gone the focus is
+        // the first instrument, and an undo that brings it back (focus is
+        // not undoable state) focuses it again.
+        let refocused = self.seats.values().any(|s| s.config.focus.as_deref() == Some(inst.id.as_str()));
         if refocused {
             self.seats_changed(origin, true);
         }
