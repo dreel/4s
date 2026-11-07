@@ -97,8 +97,17 @@ async fn handle_connection(
     if let Some(h) = conn.subscription.take() {
         h.abort();
     }
-    // Notes this connection was holding end with it, and it leaves its seat.
-    core.lock().unwrap().client_gone(&format!("conn:{}", conn.id));
+    // An undo group left open ends with the connection (journaled as its
+    // `history.group_end`). Notes this connection was holding end with it,
+    // and it leaves its seat.
+    {
+        let client = format!("conn:{}", conn.id);
+        let mut c = core.lock().unwrap();
+        if c.has_group(&client) {
+            let _ = c.handle(Request::HistoryGroupEnd(Empty {}), &conn.name, &client, conn.user.as_deref());
+        }
+        c.client_gone(&client);
+    }
     drop(tx);
     let _ = writer.await;
     tracing::debug!("connection {id} closed");

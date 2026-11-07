@@ -31,6 +31,8 @@ import type { Empty } from "./Empty";
 import type { Graph } from "./Graph";
 import type { HelloParams } from "./HelloParams";
 import type { HelloResult } from "./HelloResult";
+import type { HistoryGroupBeginParams } from "./HistoryGroupBeginParams";
+import type { HistoryGroupResult } from "./HistoryGroupResult";
 import type { HistoryInfo } from "./HistoryInfo";
 import type { HistoryStepResult } from "./HistoryStepResult";
 import type { InstrumentAddParams } from "./InstrumentAddParams";
@@ -163,6 +165,8 @@ export interface Methods {
   "history.undo": { params: Empty; result: HistoryStepResult };
   "history.redo": { params: Empty; result: HistoryStepResult };
   "history.get": { params: Empty; result: HistoryInfo };
+  "history.group_begin": { params: HistoryGroupBeginParams; result: HistoryGroupResult };
+  "history.group_end": { params: Empty; result: HistoryGroupResult };
   "journal.get": { params: JournalGetParams; result: JournalGetResult };
   "journal.export": { params: Empty; result: Recording };
   "pattern.get": { params: PatternGetParams; result: PatternResult };
@@ -277,6 +281,8 @@ export const METHODS: MethodName[] = [
   "history.undo",
   "history.redo",
   "history.get",
+  "history.group_begin",
+  "history.group_end",
   "journal.get",
   "journal.export",
   "pattern.get",

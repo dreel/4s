@@ -48,6 +48,8 @@ export * from "./Graph";
 export * from "./GridMode";
 export * from "./HelloParams";
 export * from "./HelloResult";
+export * from "./HistoryGroupBeginParams";
+export * from "./HistoryGroupResult";
 export * from "./HistoryInfo";
 export * from "./HistoryStepResult";
 export * from "./InstrumentAddParams";

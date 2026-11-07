@@ -451,6 +451,21 @@ pub struct HistoryStepResult {
     pub history: HistoryInfo,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct HistoryGroupBeginParams {
+    /// The undo step's label, e.g. "assistant: punchier kick".
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct HistoryGroupResult {
+    /// The group begun or ended; null if `history.group_end` found none open.
+    pub label: Option<String>,
+    /// Keys the group's undo step changes so far (empty if it changed
+    /// nothing, or was undone).
+    pub changed: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct JournalGetParams {
     /// Only entries with a greater seq.
@@ -1355,6 +1370,12 @@ api! {
     HistoryRedo = "history.redo" (Empty) -> HistoryStepResult;
     /// The caller's undo and redo stacks.
     HistoryGet = "history.get" (Empty) -> HistoryInfo;
+    /// Start an undo group on this connection: its edits until
+    /// `history.group_end` (or until it disconnects) are one undo step with
+    /// this label. Fails if the connection already has a group open.
+    HistoryGroupBegin = "history.group_begin" (HistoryGroupBeginParams) -> HistoryGroupResult;
+    /// End this connection's undo group (nothing to do if none is open).
+    HistoryGroupEnd = "history.group_end" (Empty) -> HistoryGroupResult;
     /// Recent journal entries: every request that could change state.
     JournalGet = "journal.get" (JournalGetParams) -> JournalGetResult;
     /// The current history segment as a replayable recording.

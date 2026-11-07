@@ -143,7 +143,9 @@ between. Add a connection-scoped group:
 
 - `history.group_begin {label}` / `history.group_end`: every journal entry
   from this connection in between merges into one undo step labelled e.g.
-  "assistant: punchier kick". (CLI: `4s history group begin/end`.)
+  "assistant: punchier kick". (CLI: `4s group <label> <command>...`, which runs the
+  quoted commands over one connection between begin and end: a CLI
+  connection lasts one command, so a separate `begin` would end at once.)
 - Other users' edits during a group are not part of it. They follow the
   usual RFC 0006 rule: undoing the group skips any key another user wrote
   since, and reports it as skipped.
