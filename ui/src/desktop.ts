@@ -1,12 +1,15 @@
 // Local desktop features exposed by electron/preload.cjs. Absent in a plain
 // browser (e.g. `npm run dev` opened outside Electron).
 
+import type { AssistantBridge } from "./assistant";
 import { client } from "./store";
 
 type DesktopBridge = {
   platform: string;
   revealPath: (path: string) => Promise<{ ok: boolean; error: string | null }>;
   onHistory: (cb: (what: "undo" | "redo") => void) => void;
+  /** The in-app assistant (RFC 0013), run by Electron main. */
+  assistant?: AssistantBridge;
 };
 
 declare global {

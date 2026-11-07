@@ -93,6 +93,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 ## Follow-ups
 
+- (2026-11-07, assistant-panel branch) assistant panel: clicking a param
+  chip should focus that control (RFC 0013); chips are plain text now.
+  Two replies with the same text get the same undo label, so a reply's
+  Undo cannot tell them apart (`undoTurn` in `ui/src/assistant.ts`).
 - (2026-11-07, assistant-loop branch) assistant packaging: `ui/assistant/`
   reads `schema/4s.schema.json` from the repo, or from
   `<resources>/schema/` when packaged; there is no packaging config yet, so

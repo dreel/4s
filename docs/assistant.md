@@ -3,7 +3,22 @@
 A chat panel in the app where you ask a Claude-powered assistant to change
 the project for you ("make the kick punchier", "what does `bass.accent`
 do?"). Design: [RFC 0013](rfcs/0013-assistant.md). This page describes what
-is built (phase A: the loop and tools; the panel is the next step).
+is built (phase A: the panel, the loop, and its tools).
+
+## The panel
+
+- **Open it** with the header's `assistant` button or Cmd-K (Ctrl-K); it is
+  a drawer on the right and keeps the chat while closed. `new chat` clears
+  it.
+- **Settings**: the API key (write-only: it is never shown again, and the
+  popover says where it comes from) and the model, plus the session's
+  estimated cost.
+- **Messages** stream in. Tool calls show as chips: `drums.kick.decay 0.5 ->
+  0.3`, `+ compressor on ch 1`, and a refused or failed call in red.
+- **Stop** ends a running turn; what it did so far stays one undo step.
+- **Undo** under a reply takes back that whole reply (`history.undo` as
+  you) while it is still your latest undo step; otherwise it says what is in
+  the way (`undo "param.set mixer.1.pan" first`). Cmd-Z works as usual.
 
 ## Where it runs
 
@@ -106,5 +121,11 @@ instead.
   scripted SSE replies): a turn is one undo step that undo reverts, a
   refused method changes nothing, Stop closes the group, the tool-call cap,
   no key, and key storage with and without encryption.
-- The loop honours `ANTHROPIC_BASE_URL`, so the Electron e2e can run the app
-  against the same fake server. No test needs a real key.
+- `ui/e2e/assistant.spec.ts` (Playwright, the real app and a headless
+  daemon) runs the app against the same fake server (`ANTHROPIC_BASE_URL`):
+  Cmd-K and the toggle, the settings popover, "make the kick punchier"
+  changing params (checked over RPC) as one undo step that the reply's Undo
+  reverts, Undo refusing when another step is on top, Stop, and a refused
+  method. It types a dummy key, kept for the session only
+  (`FOURS_ASSISTANT_SESSION_KEY=1`: no keychain access in tests). No test
+  needs a real key. `ui/test-results/assistant.png` shows the panel.

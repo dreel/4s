@@ -4,6 +4,8 @@
 // Linux secret store) and never sent to the renderer. Where encryption is
 // not available, the key is not written anywhere: it is kept for this
 // session only. Without a stored key, ANTHROPIC_API_KEY is used if set.
+// FOURS_ASSISTANT_SESSION_KEY=1 keeps keys for the session only even where
+// encryption is available (tests: no keychain access).
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -16,7 +18,8 @@ class Settings {
    */
   constructor(dir, safeStorage) {
     this.file = path.join(dir, "settings.json");
-    this.safeStorage = safeStorage;
+    this.safeStorage =
+      process.env.FOURS_ASSISTANT_SESSION_KEY === "1" ? { ...safeStorage, isEncryptionAvailable: () => false } : safeStorage;
     /** @type {string | null} a key kept for this session only */
     this.sessionKey = null;
     /** @type {{ model?: string, key?: string }} */

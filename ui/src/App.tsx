@@ -1,5 +1,7 @@
 import { DevicePanel, Modulators } from "./components/Devices";
 import { Arrangement } from "./components/Arrangement";
+import { AssistantPanel } from "./components/Assistant";
+import { assistantAvailable, toggleAssistant, useAssistant } from "./assistant";
 import { Console } from "./components/Console";
 import { Editor } from "./components/Editor";
 import { MidiPanel, ProjectPanel, RenderPanel } from "./components/Panels";
@@ -55,6 +57,21 @@ export function installUndoKeys() {
   });
 }
 
+function AssistantToggle() {
+  const open = useAssistant((s) => s.open);
+  return (
+    <button
+      className={`px-2 py-0.5 rounded border text-xs ${open ? "border-zinc-400 text-zinc-100" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
+      title="assistant (Cmd-K)"
+      onClick={() => toggleAssistant()}
+      data-testid="assistant-toggle"
+      data-open={open}
+    >
+      assistant
+    </button>
+  );
+}
+
 function Header() {
   const connection = useApp((s) => s.connection);
   const audio = useApp((s) => s.snapshot?.audio);
@@ -80,6 +97,7 @@ function Header() {
           {audio.device ? ` - ${audio.device}` : ""} @ {audio.sample_rate} Hz
         </div>
       )}
+      {assistantAvailable && <AssistantToggle />}
       {error && (
         <button className="ml-auto text-xs text-red-400 truncate max-w-[40%]" title="dismiss" onClick={() => app.set({ error: null })} data-testid="error">
           {error}
@@ -91,9 +109,12 @@ function Header() {
 
 export function App() {
   const ready = useApp((s) => s.snapshot !== null);
+  const assistantOpen = useAssistant((s) => s.open);
   return (
     <div className="flex flex-col h-full">
       <Header />
+      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-col flex-1 min-w-0">
       {!ready ? (
         <div className="m-auto flex flex-col items-center gap-2 text-sm text-zinc-500" data-testid="waiting">
           <div>waiting for 4sd at {client.url} ...</div>
@@ -115,6 +136,9 @@ export function App() {
           </div>
         </main>
       )}
+      </div>
+      {assistantOpen && <AssistantPanel />}
+      </div>
     </div>
   );
 }
