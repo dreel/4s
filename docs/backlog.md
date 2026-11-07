@@ -93,6 +93,27 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 ## Follow-ups
 
+- (2026-11-07, #60 review) assistant `rpc` path params: `PATH_PARAMS` in
+  `ui/assistant/schema.cjs` lists the engine-host path params by hand (a
+  test scans the schema's descriptions to catch new ones). Deny by default
+  instead: mark path params in the protocol (a schema attribute) and refuse
+  any marked param.
+- (2026-11-07, #60 review) `ui/assistant/daemon.cjs`: `call` after the
+  socket closed but before `onclose` ran can `send` on a closing socket and
+  leave its promise pending forever; check `readyState` in `call` and
+  reject.
+- (2026-11-07, #60 review) assistant Stop: a stopped stream's partial text
+  is dropped from the conversation (`(stopped by the user)` replaces it in
+  `loop.cjs`), so the next turn does not know what was already said; keep
+  the text streamed so far.
+- (2026-11-07, #60 review) `ui/assistant/settings.cjs`:
+  `FOURS_ASSISTANT_SESSION_KEY` spreads Electron's `safeStorage` into a new
+  object, which drops its prototype methods; it works only because they
+  are never called in that mode. Use a small wrapper object instead.
+- (2026-11-07, assistant-panel branch) assistant panel: clicking a param
+  chip should focus that control (RFC 0013); chips are plain text now.
+  Two replies with the same text get the same undo label, so a reply's
+  Undo cannot tell them apart (`undoTurn` in `ui/src/assistant.ts`).
 - (2026-11-07, #60 review) assistant parity: there is no CLI equivalent
   (`4s ask "make the kick punchier"`) of the panel; RFC 0013 open question
   4. It would need the loop outside Electron (a Node CLI over
