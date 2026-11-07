@@ -15,6 +15,8 @@ if ! git diff --quiet -- ui/src/generated schema || [ -n "$(git ls-files --other
   exit 1
 fi
 echo "== ui typecheck"; (cd ui && npx tsc --noEmit -p .)
+echo "== assistant typecheck"; (cd ui && npm run -s typecheck:assistant)
+echo "== assistant tools and loop (headless daemon, fake API)"; node --test --test-reporter=dot ui/assistant/assistant.test.cjs
 echo "== gate tooling tests"; node --test --test-reporter=dot scripts/ci/*.test.mjs
 echo "== cli e2e"; scripts/e2e-cli.sh
 echo "== electron e2e"; (cd ui && npm run -s test:e2e)

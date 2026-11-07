@@ -26,6 +26,14 @@ daemon may be remote, and the action is meaningless there). The CLI still
 mirrors them as local commands (`4s project reveal`), so agents and humans keep
 the same capabilities.
 
+## Exception: the in-app assistant
+
+The assistant panel (RFC 0013, [assistant.md](assistant.md)) is UI-only:
+there is no `4s ask` yet. It is a client of the API, not a capability: every
+change it makes is an RPC that the CLI also has, made over its own
+connection and journaled with `origin: assistant`. The daemon pieces it
+needed (`history.group_begin/end`) are RPCs with CLI commands as usual.
+
 ## Why
 
 - **Agents can do anything a human can.** The CLI is the agentic interface, so
