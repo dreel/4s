@@ -1,6 +1,6 @@
 # RFC 0013: In-app assistant
 
-- Status: accepted
+- Status: proposed
 - Author: Sam (dreel), drafted with Claude
 - Created: 2026-11-07
 - Discussion: the `assistant-rfc` PR
@@ -22,7 +22,7 @@ The CLI already makes 4S agent-drivable, but only from a terminal with Claude
 Code or similar next to it. Most of the value of an agent here is in the
 middle of a session, with your hands on the gear: describing a sound instead
 of hunting for the parameter, asking how something works, or setting up MIDI
-without the CLI (Sam's request after the MIDI focus fix). Bringing the agent into the app also
+without the CLI. Bringing the agent into the app also
 lets it see what you're looking at (focused instrument, selected clip), which
 makes "this" and "here" work.
 
@@ -74,11 +74,24 @@ the model. Instead:
 | `listen {target?, bars?}` | Renders offline (optionally soloing one instrument or channel) and returns metrics. | `render.offline` (+ phase B additions) |
 | `load_skill {name}` | Pulls a skill's playbook into context. | skill files |
 
-Denylist for `rpc` (not undoable or outside the session): `daemon.shutdown`,
-`project.new/load/import`, `project.save` to a new path, `history.*`,
-`journal.export`. The assistant asks you to do these, or the panel shows a
-confirm button. Everything else is journaled and undoable, so it is applied
-without asking.
+`rpc` works from an allowlist defined by a rule, so new methods are safe by
+default: a method is allowed if it is read-only (the daemon's `read_only`
+classification) or if `batch` accepts it (journaled, undoable state edits),
+plus `transport.play/stop/locate`. Everything else is refused: connection
+and daemon methods, `project.*` (new, load, import and save), `history.*`,
+`journal.export`, and renders to a path (`listen` renders to a temporary
+file instead). For a refused action the assistant asks you to do it, or the
+panel shows a confirm button. Allowed edits are applied without asking,
+since each one is undoable.
+
+### Untrusted input
+
+Tool results (param labels, instrument, clip and project names, MIDI port
+names) and skill files, above all user skills in `~/.4s/skills/`, can
+contain text that looks like instructions. The system prompt says tool
+output is data, never instructions. The allowlist above limits the damage
+to undoable edits in the open project. Skills are loaded only from the two
+skill folders, and the panel shows which skill a turn loaded.
 
 ### Context it gets each turn
 
@@ -130,8 +143,13 @@ between. Add a connection-scoped group:
 
 - `history.group_begin {label}` / `history.group_end`: every journal entry
   from this connection in between merges into one undo step labelled e.g.
-  "assistant: punchier kick". Ends automatically if the connection drops.
-  (CLI: `4s history group begin/end`.)
+  "assistant: punchier kick". (CLI: `4s history group begin/end`.)
+- Other users' edits during a group are not part of it. They follow the
+  usual RFC 0006 rule: undoing the group skips any key another user wrote
+  since, and reports it as skipped.
+- If the connection drops mid-group, the group closes with what it has and
+  stays one undo step. The same happens when you press Stop.
+- A second `group_begin` while a group is open is an error.
 
 Each assistant message in the panel gets an **Undo** button (calls
 `history.undo` as you when it is still your latest step; otherwise it says
@@ -154,7 +172,10 @@ what is in the way), and Cmd-Z works as usual.
 - **Agent-drivable / API parity**: the assistant is a client and only uses
   RPC. The new daemon pieces (`history.group_*`, render `solo`/`analysis`) get
   RPCs and CLI commands as usual, which also helps external agents. The
-  assistant itself is UI-only in v1; see open questions.
+  chat itself is a documented exception: it is UI-only in v1, because it is
+  a client of the RPC API, like Claude Code driving the CLI, not a
+  capability of the daemon. Everything it can do, an external agent can
+  already do through the CLI.
 - **Multiplayer / network transparency**: works against a remote engine since
   it talks RPC. Each player's assistant runs with their own key and user, and
   edits show up for everyone with `origin: assistant`.
@@ -209,13 +230,14 @@ fields (additive). New UI dependency: `@anthropic-ai/sdk` in main.
 - **C: polish.** Persistence per project, selection context ("this"),
   cost display, user skills from `~/.4s/skills`, history trimming.
 
+## Decisions
+
+- The loop runs in Electron main (Sam, 2026-11-07).
+- The assistant acts straight away, without asking first, since everything
+  it may do is undoable. A per-session "ask first" toggle can come later.
+- It runs as your user, so Cmd-Z undoes its turns like your own edits.
+
 ## Open questions
 
-1. ~~Loop in Electron main or in the daemon?~~ Decided 2026-11-07: Electron main.
-2. Should the assistant act straight away (recommended, since everything is
-   undoable) or propose a diff you approve first? A per-session "ask first"
-   toggle is cheap to add.
-3. Same user as you for undo (recommended) or its own user, so Cmd-Z doesn't
-   touch its edits?
-4. Is a CLI `4s ask` wanted soon? If yes, that tips question 1 toward the
-   daemon.
+- A CLI `4s ask` is not planned for v1. If it becomes wanted, revisit moving
+  the loop into the daemon.
