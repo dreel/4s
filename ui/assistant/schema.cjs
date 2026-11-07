@@ -68,6 +68,31 @@ function rpcAllowed(s, method) {
   return s.read_only_methods.includes(method) || s.batchable_methods.includes(method) || TRANSPORT.includes(method);
 }
 
+/** Params that name a file on the engine host. The assistant may not pass
+ * them: a name it read from the project (or was talked into using) must
+ * not load or read arbitrary files there. A sample you loaded yourself can
+ * still be edited; a pad can still be loaded from an upload id. */
+const PATH_PARAMS = {
+  "sampler.load": "path",
+  "sample.info": "path",
+  "sample.peaks": "path",
+  "sample.play": "path",
+};
+
+/**
+ * Why the `rpc` tool refuses this call, or null if it may make it.
+ * @param {Schema} s
+ * @param {string} method
+ * @param {Record<string, unknown>} params
+ */
+function rpcRefusal(s, method, params) {
+  if (!rpcAllowed(s, method)) return `'${method}' is not allowed from the assistant; ask the user to do it in the app or the CLI`;
+  const key = PATH_PARAMS[/** @type {keyof typeof PATH_PARAMS} */ (method)];
+  if (key && params[key] != null)
+    return `'${method}' with a file path is not allowed from the assistant (files on the engine host); ask the user to load the file in the app`;
+  return null;
+}
+
 /**
  * A method's params schema with its `$ref`s inlined (to a depth), for the
  * `describe` tool.
@@ -95,4 +120,4 @@ function describeMethod(s, method) {
   return { method, description: m.doc, allowed: rpcAllowed(s, method), params: inline(m.params, 0) };
 }
 
-module.exports = { loadSchema, methods, rpcAllowed, describeMethod };
+module.exports = { loadSchema, methods, rpcAllowed, rpcRefusal, describeMethod, PATH_PARAMS };
