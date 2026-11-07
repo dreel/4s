@@ -66,3 +66,4 @@ decisions (before implementation).
 | [0010](0010-devices.md) | Devices: effects, buses, modulators, a sampler, automation | accepted (phases 2 to 5 implemented) |
 | [0011](0011-sample-sources.md) | Sample sources: formats, regions, and a decode cache | accepted (phases 1 and 2 implemented) |
 | [0012](0012-compressor-sidechain.md) | A compressor and sidechains | implemented |
+| [0013](0013-assistant.md) | An in-app assistant | proposed |
