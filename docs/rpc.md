@@ -27,7 +27,11 @@ Status: implemented (protocol version 2, RFC 0004). Run `4s methods` for the liv
   - `ui/src/generated/*.ts` -- one file per type, plus `methods.ts`.
   - `schema/4s.schema.json` -- JSON Schema for requests, events, snapshots,
     and project files. This is the language-neutral contract; any TS runtime
-    validators (e.g. Zod) must be generated from it, never hand-written.
+    validators (e.g. Zod) must be generated from it, never hand-written. It
+    also lists the method classes (`read_only_methods`: not journaled;
+    `batchable_methods`: what `batch` accepts), from `Method::read_only` /
+    `Method::batchable` in `crates/protocol/src/api.rs`, which the daemon
+    journals by and the in-app assistant allows `rpc` calls by.
 - Generated files are committed; `scripts/check.sh` regenerates them and fails
   if anything changed.
 

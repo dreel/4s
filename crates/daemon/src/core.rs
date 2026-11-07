@@ -2812,68 +2812,17 @@ impl Core {
     }
 }
 
-/// Requests a `batch` can hold: not another batch, nor what a connection,
-/// the journal, a project load, or the transport (which settles a running
-/// take before it is journaled) handles on its own.
+/// Requests a `batch` can hold (`Method::batchable`), except a sampler
+/// load of an upload: `handle` journals that as the load of the stored
+/// file, and a batch's requests do not go through `handle`.
 fn batchable(req: &Request) -> bool {
-    use Request::*;
-    !matches!(
-        req,
-        Batch(_)
-            | Hello(_)
-            | EventsSubscribe(_)
-            | EventsUnsubscribe(_)
-            | RenderOffline(_)
-            | DaemonInfo(_)
-            | DaemonShutdown(_)
-            | HistoryUndo(_)
-            | HistoryRedo(_)
-            | HistoryGet(_)
-            | HistoryGroupBegin(_)
-            | HistoryGroupEnd(_)
-            | JournalGet(_)
-            | JournalExport(_)
-            | ProjectNew(_)
-            | ProjectLoad(_)
-            | ProjectImport(_)
-            | TransportRecord(_)
-            | TransportPlay(_)
-            | TransportStop(_)
-            | TransportLocate(_)
-            // Journaled with the ports it applies, filled in by `handle`.
-            | SeatApplyLayout(_)
-            // Files, not project state, and not journaled (a load of the
-            // stored file is).
-            | SampleUpload(_)
-    ) && !matches!(req,
-        // Journaled as the load of the stored file by `handle`, which a
-        // batch's requests do not go through.
-        SamplerLoad(p) if p.upload.is_some())
+    req.kind().batchable() && !matches!(req, Request::SamplerLoad(p) if p.upload.is_some())
 }
 
-/// Requests that cannot change state, so are not journaled. An exhaustive
-/// match: a new method must be classified here.
+/// Requests that cannot change state, so are not journaled
+/// (`Method::read_only`).
 fn read_only(req: &Request) -> bool {
-    use Request::*;
-    match req {
-        Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
-        | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
-        | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
-        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) | SamplerGet(_) | SampleInfo(_) | SamplePeaks(_) | SampleUpload(_) | SamplePlay(_) | SampleStop(_) => true,
-        ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
-        | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | ClipLaunch(_) | SongPlace(_) | SongRemove(_)
-        | SongMove(_) | SongBack(_)
-        | Batch(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
-        | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
-        | HistoryGroupBegin(_) | HistoryGroupEnd(_)
-        | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
-        | PatternSetNote(_) | VoiceTrigger(_) | VoiceNoteOn(_) | VoiceNoteOff(_) | ControllerPress(_)
-        | ControllerKnob(_) | ControllerSetMode(_) | MidiConnect(_) | MidiDisconnect(_) | ProjectNew(_)
-        | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
-        | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
-        | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | ClipLaneSet(_) | ClipLaneRemove(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) | SamplerLoad(_) | SamplerClear(_) => false,
-    }
+    req.kind().read_only()
 }
 
 impl Core {
