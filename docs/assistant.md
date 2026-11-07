@@ -59,7 +59,8 @@ turn (`stop` is `end_turn`, `stopped`, `refusal`, `tool_limit`, `error`, ...).
    [journal.md](journal.md#undo-groups).
 
 Stop aborts the stream (or the remaining tool calls) and keeps the
-conversation valid for the next message.
+conversation valid for the next message. "New chat" during a turn stops it
+and waits for it to end before clearing the conversation.
 
 ## Tools
 
@@ -86,6 +87,14 @@ until the daemon classes it:
   import, save, list), `history.*` (the turn's undo group is the loop's),
   `journal.export`, `sample.upload`, and `render.offline` (it writes a file
   on the engine host).
+
+- and never with a **file path on the engine host**: `sampler.load`,
+  `sample.info`, `sample.peaks` and `sample.play` are refused when given a
+  `path` (a name read from the project, or one it was talked into using,
+  must not load or read arbitrary files there). Loading a pad from an
+  upload id still works, and you load files yourself in the app. A test
+  checks that every method whose params describe a file path is refused
+  or has its path param listed (`PATH_PARAMS` in `schema.cjs`).
 
 `gen-bindings` writes both classes into `schema/4s.schema.json`
 (`read_only_methods`, `batchable_methods`), which is where the assistant

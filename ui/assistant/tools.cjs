@@ -3,7 +3,7 @@
 // API, not one tool per method. Every tool talks to the daemon over RPC
 // only, so new instruments and devices work with no changes here.
 
-const { rpcAllowed, describeMethod, methods } = require("./schema.cjs");
+const { rpcAllowed, rpcRefusal, describeMethod, methods } = require("./schema.cjs");
 
 /** Longest tool result sent back to the model, in characters. */
 const MAX_RESULT = 12000;
@@ -57,7 +57,7 @@ const TOOL_DEFS = [
   {
     name: "rpc",
     description:
-      "Call any allowed 4S RPC method, for structural edits and reads that the other tools do not cover: add or remove devices (`device.add`), edit clips and notes (`clip.*`), instruments, channels, routing, sends, modulation, seats and MIDI. Use `describe` first if unsure of a method's params. Refused: project file operations (new/load/import/save), undo history, the daemon and connection, journal export, uploads and renders; ask the user to do those.",
+      "Call any allowed 4S RPC method, for structural edits and reads that the other tools do not cover: add or remove devices (`device.add`), edit clips and notes (`clip.*`), instruments, channels, routing, sends, modulation, seats and MIDI. Use `describe` first if unsure of a method's params. Refused: project file operations (new/load/import/save), undo history, the daemon and connection, journal export, uploads, renders, and file paths on the engine host (e.g. loading a sample by path); ask the user to do those.",
     input_schema: {
       type: "object",
       properties: {
@@ -250,8 +250,8 @@ class Tools {
     if (typeof method !== "string") throw new ToolError("method must be a string");
     if (typeof params !== "object" || Array.isArray(params)) throw new ToolError("params must be an object");
     if (!methods(this.schema).some((m) => m.name === method)) throw new ToolError(`unknown method '${method}'`);
-    if (!rpcAllowed(this.schema, method))
-      throw new ToolError(`'${method}' is not allowed from the assistant; ask the user to do it in the app or the CLI`);
+    const refused = rpcRefusal(this.schema, method, params);
+    if (refused) throw new ToolError(refused);
     let result;
     try {
       result = await this.daemon.call(method, params);
