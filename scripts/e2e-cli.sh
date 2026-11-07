@@ -443,6 +443,26 @@ check "journal --since shows only newer entries" "2 entries, first param.set" ba
 check "journal --limit keeps the newest" '"value":120' s journal --limit 1
 check "journal --follow streams entries" 'param.set {"path":"transport.tempo","value":122.0}' bash -c "$BIN/4s journal --follow > $TMP/follow.txt & P=\$!; sleep 0.5; $BIN/4s tempo 122 >/dev/null; sleep 0.5; kill \$P; cat $TMP/follow.txt"
 s tempo 120 >/dev/null
+# Undo groups: everything one connection does between history.group_begin
+# and history.group_end is one undo step (the in-app assistant's turns).
+DECAY_BEFORE=$(s get drums.kick.decay); TONE_BEFORE=$(s get drums.kick.tone); DEVICES_BEFORE=$(s device list)
+check "a group's edits are one undo step" "group 'tighter kick': one undo step, 2 keys" s group "tighter kick" "set drums.kick.decay 0.4" "set drums.kick.tone 0.6"
+check "...labelled as the group" "undid: tighter kick" s undo
+check "...and undo puts them all back" "$DECAY_BEFORE $TONE_BEFORE" bash -c 'echo $('"$BIN"'/4s get drums.kick.decay) $('"$BIN"'/4s get drums.kick.tone)'
+check "a group that fails part-way still closes" "history.group_end" bash -c "$BIN/4s group oops 'set nope.nope 1' 'set drums.kick.decay 0.1' 2>/dev/null; $BIN/4s journal --limit 1"
+check "...and runs nothing after the failure" "$DECAY_BEFORE" s get drums.kick.decay
+check "history shows the connection's open group" "open group: peek" s group peek history
+check "an undo in a group ends the group, then undoes all of it" "undid: undone kick
+group 'undone kick': ended by an undo or redo" s group "undone kick" "set drums.kick.decay 0.2" "set drums.kick.tone 0.2" undo
+check "...so both edits are back" "$DECAY_BEFORE $TONE_BEFORE" bash -c 'echo $('"$BIN"'/4s get drums.kick.decay) $('"$BIN"'/4s get drums.kick.tone)'
+s redo >/dev/null; s undo >/dev/null
+check "a nested group is refused" "nested begin refused: an undo group is already open on this connection" node tests/e2e/undo-group.mjs "$BIN/4s"
+check "a connection that goes ends its group" "e2e  assistant  history.group_end" s journal --limit 1
+check "the group is one step on top of the stack" "undo: assistant: punchier kick" s history
+check "another user's edit meanwhile is theirs" "mixer.1.pan = 0.25" bash -c "$BIN/4s undo >/dev/null; $BIN/4s get mixer.1.pan"
+check "undoing the group took back every edit in it" "$DECAY_BEFORE $TONE_BEFORE" bash -c 'echo $('"$BIN"'/4s get drums.kick.decay) $('"$BIN"'/4s get drums.kick.tone)'
+check "...including the device it added" "$DEVICES_BEFORE" s device list
+FOURS_USER=bob s undo >/dev/null
 mkdir -p "$FOURS_DATA_DIR/projects/bad.4s"
 python3 -c "
 import json

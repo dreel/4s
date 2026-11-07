@@ -21,6 +21,7 @@ flaky e2e.
 4s --json journal                  # full entries (params, before/after values, context)
 
 4s undo | 4s redo | 4s history     # your own undo history (--user / FOURS_USER to act as someone)
+4s group <label> '<cmd>' '<cmd>'   # several commands as one undo step
 
 4s journal export -o rec.json      # this session as a recording (read-only; safe on any daemon)
 4s journal export --format sh      # the same as `4s call` lines (approximate, editable)
@@ -242,6 +243,39 @@ Block share one history (the host user).
 In the app, use the header buttons or Edit > Undo / Redo (Cmd/Ctrl+Z,
 Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
 
+### Undo groups
+
+Several requests can be one undo step without being one `batch`: a
+connection calls `history.group_begin {label}`, makes its edits (with
+reads, renders, or anything else in between), then `history.group_end`.
+Every edit that connection makes as its user in between joins one step
+with that label (the in-app assistant wraps each turn in one, RFC 0013).
+From the CLI, `4s group <label> <command>...` runs quoted commands as one
+step over one connection:
+
+```
+4s group "punchier kick" 'set drums.kick.decay 0.4' 'device add compressor --on 1'
+```
+
+- **One group per connection.** A second `group_begin` while one is open
+  is an error; `group_end` with none open does nothing (`label: null`).
+- **Ends with the connection.** A connection that drops ends its group,
+  journaled as its `history.group_end`, so what it did is still one step.
+- **Only that connection's edits join.** Another user's edits meanwhile
+  are theirs (undoing the group skips keys they wrote since, as usual), and
+  so are your own edits from another client (e.g. a knob turned in the app
+  during an assistant turn): those are steps of their own, on top of the
+  group's step. Undo them first to reach the group.
+- **Undo or redo on the grouping connection ends the group first,** then
+  acts on the top step (the group's, unless something else is on top).
+  Your undo from another client while the group is open moves its step to
+  redo as usual; the group's later edits then start a new step.
+- **An edit that puts a key back** where the group found it drops the key
+  from the step; a group that changed nothing takes no step.
+- `history.get` shows the caller's open group (`group`; `4s history`:
+  `open group:`). `group_begin` and `group_end` are journaled (with no
+  changes), so a replay groups the same edits.
+
 ## Limits
 
 - **Not replayed:** `project.save`, `project.load` (a successful one starts
@@ -266,7 +300,7 @@ Shift+Cmd+Z / Ctrl+Y). `4s history` shows your stacks.
   in-memory journal (100k entries), export fails; replay the `.jsonl` file
   instead.
 - **Several RPCs are several steps,** unless sent as one `batch` (one
-  entry, one undo step). A UI action that sends several RPCs (e.g. a
+  entry, one undo step) or inside an undo group (several entries, one step). A UI action that sends several RPCs (e.g. a
   strip's `(none)`) undoes one RPC at a time.
 - **An undo or redo with nothing to do is not journaled.** It changes
   nothing.

@@ -107,7 +107,9 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   same for E4 and G4.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
-  happened in a session. `4s undo` / `4s redo` act on your own history.
+  happened in a session. `4s undo` / `4s redo` act on your own history;
+  `4s group "label" 'set a 1' 'set b 2'` makes several commands one undo
+  step (`history.group_begin` / `history.group_end`).
 - `4s journal export -o rec.json` saves a session; `4s journal replay rec.json`
   (into an isolated daemon -- it replaces the project) reproduces it and
   checks every step matches. See [docs/journal.md](docs/journal.md).
