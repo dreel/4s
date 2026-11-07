@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { DaemonClient } = require("./daemon.cjs");
-const { loadSchema, methods, rpcAllowed } = require("./schema.cjs");
+const { loadSchema, methods, rpcAllowed, rpcRefusal, PATH_PARAMS } = require("./schema.cjs");
 const { Tools } = require("./tools.cjs");
 const { Assistant, MAX_TOOL_CALLS } = require("./loop.cjs");
 const { Settings } = require("./settings.cjs");
@@ -52,6 +52,26 @@ test("the rpc allowlist follows the daemon's method classes", () => {
   assert.ok(all.length > 100);
   assert.ok(schema.read_only_methods.every((m) => all.includes(m)));
   assert.ok(schema.batchable_methods.every((m) => all.includes(m)));
+});
+
+test("file paths on the engine host are refused, for every method that takes one", () => {
+  assert.match(rpcRefusal(schema, "sampler.load", { pad: 1, path: "/etc/passwd" }), /file path is not allowed/);
+  assert.match(rpcRefusal(schema, "sample.info", { path: "../../secret.wav" }), /file path is not allowed/);
+  assert.equal(rpcRefusal(schema, "sampler.load", { pad: 1, upload: "abc" }), null);
+  assert.equal(rpcRefusal(schema, "param.set", { path: "drums.kick.decay", value: 1 }), null);
+  // Any method whose params mention files or paths (by their schema
+  // description) is refused outright or has its path param listed.
+  const defs = schema.request.$defs;
+  for (const v of schema.request.oneOf) {
+    const m = v.properties.method.const;
+    const props = defs[(v.properties.params.$ref ?? "").replace("#/$defs/", "")]?.properties ?? {};
+    for (const [k, p] of Object.entries(props)) {
+      if (!/(relative paths|engine-side|bundle path|file)/i.test(p.description ?? "")) continue;
+      if (!rpcAllowed(schema, m)) continue;
+      if (/upload|start|end|name|offset|model|profile/.test(k)) continue; // not paths
+      assert.equal(PATH_PARAMS[m], k, `${m}.${k} looks like an engine-host path; refuse it in schema.cjs`);
+    }
+  }
 });
 
 test("tools: overview, find_params, set_params, rpc, describe", async () => {
@@ -192,6 +212,27 @@ test("stop ends the turn and its undo group, keeping it one undo step", async ()
     assert.equal(h.events.filter((e) => e.type === "done")[1].stop, "end_turn");
     const roles = h.fake.requests.at(-1).body.messages.map((m) => m.role);
     assert.deepEqual(roles, ["user", "assistant", "user", "assistant", "user"]);
+  } finally {
+    await h.close();
+  }
+});
+
+test("new chat during a running turn waits for it, so the new chat starts clean", async () => {
+  const h = await harness([
+    { match: "hang", replies: [{ content: [{ type: "text", text: "Working on it for a long time " }], hang: true, delayMs: 10 }] },
+    { match: "fresh", replies: [{ content: [{ type: "text", text: "hi" }] }] },
+  ]);
+  try {
+    const sent = h.a.send("hang around");
+    while (!h.events.some((e) => e.type === "text")) await new Promise((r) => setTimeout(r, 20));
+    await h.a.reset();
+    await sent;
+    assert.deepEqual(h.a.messages, []);
+    await h.a.send("fresh start");
+    const msgs = h.fake.requests.at(-1).body.messages;
+    assert.equal(msgs.length, 1);
+    assert.equal(msgs[0].role, "user");
+    assert.equal(h.events.filter((e) => e.type === "done").at(-1).stop, "end_turn");
   } finally {
     await h.close();
   }

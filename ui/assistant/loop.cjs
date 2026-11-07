@@ -59,6 +59,8 @@ class Assistant {
     /** @type {any[]} the conversation (Anthropic MessageParam[]) */
     this.messages = [];
     this.turn = 0;
+    /** The running turn, if any. @type {Promise<void> | null} */
+    this.current = null;
     /** @type {AbortController | null} */
     this.abort = null;
     /** Session totals. @type {Usage} */
@@ -69,9 +71,11 @@ class Assistant {
     return this.abort != null;
   }
 
-  /** Forget the conversation (the panel's "New chat"). */
-  reset() {
+  /** Forget the conversation (the panel's "New chat"). A running turn is
+   * stopped first and waited for, so it cannot write into the new one. */
+  async reset() {
     this.stop();
+    await this.current;
     this.messages = [];
   }
 
@@ -114,7 +118,21 @@ class Assistant {
    * @param {{ focus?: string | null, panel?: string | null }} [ctx]
    */
   async send(text, ctx = {}) {
-    if (this.running) throw new Error("a turn is already running");
+    if (this.running || this.current) throw new Error("a turn is already running");
+    const turn = this.runTurn(text, ctx);
+    this.current = turn;
+    try {
+      await turn;
+    } finally {
+      this.current = null;
+    }
+  }
+
+  /**
+   * @param {string} text
+   * @param {{ focus?: string | null, panel?: string | null }} ctx
+   */
+  async runTurn(text, ctx) {
     const key = this.opts.apiKey();
     const turn = ++this.turn;
     const label = `assistant: ${text.trim().replace(/\s+/g, " ").slice(0, 48)}`;

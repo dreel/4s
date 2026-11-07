@@ -93,6 +93,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 ## Follow-ups
 
+- (2026-11-07, #60 review) assistant parity: there is no CLI equivalent
+  (`4s ask "make the kick punchier"`) of the panel; RFC 0013 open question
+  4. It would need the loop outside Electron (a Node CLI over
+  `ui/assistant/`, or the loop in the daemon).
 - (2026-11-07, assistant-loop branch) assistant packaging: `ui/assistant/`
   reads `schema/4s.schema.json` from the repo, or from
   `<resources>/schema/` when packaged; there is no packaging config yet, so

@@ -47,7 +47,7 @@ function setupAssistant(o) {
   // Resolves when the turn has ended; events arrive on "assistant:event".
   o.ipcMain.handle("assistant:send", async (_e, text, ctx) => {
     if (typeof text !== "string" || !text.trim()) return { ok: false, error: "empty message" };
-    if (assistant.running) return { ok: false, error: "a turn is already running" };
+    if (assistant.running || assistant.current) return { ok: false, error: "a turn is already running" };
     await assistant.send(text, ctx && typeof ctx === "object" ? ctx : {});
     return { ok: true, turn: assistant.turn };
   });
@@ -55,8 +55,8 @@ function setupAssistant(o) {
     assistant.stop();
     return { ok: true };
   });
-  o.ipcMain.handle("assistant:reset", () => {
-    assistant.reset();
+  o.ipcMain.handle("assistant:reset", async () => {
+    await assistant.reset();
     return { ok: true };
   });
   return { assistant, daemon, settings };
