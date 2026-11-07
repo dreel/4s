@@ -114,30 +114,30 @@ export function App() {
     <div className="flex flex-col h-full">
       <Header />
       <div className="flex flex-1 min-h-0">
-      <div className="flex flex-col flex-1 min-w-0">
-      {!ready ? (
-        <div className="m-auto flex flex-col items-center gap-2 text-sm text-zinc-500" data-testid="waiting">
-          <div>waiting for 4sd at {client.url} ...</div>
-          {launch.error && <div className="text-red-400" data-testid="daemon-error">{launch.error}</div>}
-          {launch.lifecycle === "external" && <div>start it with: 4s daemon start</div>}
+        <div className="flex flex-col flex-1 min-w-0">
+          {!ready ? (
+            <div className="m-auto flex flex-col items-center gap-2 text-sm text-zinc-500" data-testid="waiting">
+              <div>waiting for 4sd at {client.url} ...</div>
+              {launch.error && <div className="text-red-400" data-testid="daemon-error">{launch.error}</div>}
+              {launch.lifecycle === "external" && <div>start it with: 4s daemon start</div>}
+            </div>
+          ) : (
+            <main className="flex flex-col gap-3 p-4 overflow-auto *:shrink-0">
+              <SeatChooser />
+              <Console />
+              <DevicePanel />
+              <Modulators />
+              <Arrangement />
+              <Editor />
+              <div className="grid grid-cols-3 gap-3">
+                <MidiPanel />
+                <ProjectPanel />
+                <RenderPanel />
+              </div>
+            </main>
+          )}
         </div>
-      ) : (
-        <main className="flex flex-col gap-3 p-4 overflow-auto *:shrink-0">
-          <SeatChooser />
-          <Console />
-          <DevicePanel />
-          <Modulators />
-          <Arrangement />
-          <Editor />
-          <div className="grid grid-cols-3 gap-3">
-            <MidiPanel />
-            <ProjectPanel />
-            <RenderPanel />
-          </div>
-        </main>
-      )}
-      </div>
-      {assistantOpen && <AssistantPanel />}
+        {assistantOpen && <AssistantPanel />}
       </div>
     </div>
   );

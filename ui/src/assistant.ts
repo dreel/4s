@@ -120,6 +120,10 @@ export async function sendMessage(text: string) {
   try {
     const r = await bridge.send(text.trim(), context());
     if (!r.ok) lastTurn((t) => ({ ...t, done: { stop: "error", label: "", changed: [], error: r.error } }));
+  } catch (e) {
+    // The IPC call itself failed: end the turn rather than leave it running.
+    const error = e instanceof Error ? e.message : String(e);
+    lastTurn((t) => (t.done ? t : { ...t, done: { stop: "error", label: "", changed: [], error } }));
   } finally {
     set({ running: false });
   }
