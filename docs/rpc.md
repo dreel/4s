@@ -80,7 +80,9 @@ auditioning (`voice.trigger`), the controller (`controller.*`;
 `controller.set_mode` also takes `grid`, steps or launch, and a pitched
 focus's `base_note`), MIDI (`midi.*`),
 seats and their bindings (`seat.*`, RFC 0007), undo and the journal
-(`history.*`, `journal.get`, `journal.export`), projects (`project.*`,
+(`history.*`, including connection-scoped undo groups
+`history.group_begin` / `history.group_end`, see
+[journal.md](journal.md#undo-groups); `journal.get`, `journal.export`), projects (`project.*`,
 including `project.import` to load a project sent inline), rendering
 (`render.offline`), status (`engine.status`), and the
 daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).

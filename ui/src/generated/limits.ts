@@ -9,4 +9,4 @@ export const TRANSPORT_PREFIXES = ["transport.", "song."];
 /** The largest chunk of a `sample.upload`, in bytes. */
 export const MAX_UPLOAD_BYTES = 11534336;
 /** The protocol version this UI speaks (`session.hello`). */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;

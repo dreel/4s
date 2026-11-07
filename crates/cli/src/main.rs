@@ -391,6 +391,17 @@ enum Cmd {
     Redo,
     /// Your undo and redo stacks.
     History,
+    /// Run several commands as one undo step, e.g.
+    /// `4s group "punchier kick" 'set drums.kick.decay 0.4' 'device add compressor --on 1'`.
+    /// Each command is quoted, without global options. Uses
+    /// history.group_begin / history.group_end on one connection.
+    Group {
+        /// The undo step's label.
+        label: String,
+        /// The commands, each one quoted argument.
+        #[arg(required = true)]
+        commands: Vec<String>,
+    },
     /// The journal: every request that could change state, who sent it, and
     /// what it changed. Times are UTC. See docs/journal.md.
     Journal {
@@ -1870,6 +1881,12 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
         Cmd::Undo => vec![Request::HistoryUndo(e)],
         Cmd::Redo => vec![Request::HistoryRedo(e)],
         Cmd::History => vec![Request::HistoryGet(e)],
+        Cmd::Group { label, .. } => {
+            let mut reqs = vec![Request::HistoryGroupBegin(HistoryGroupBeginParams { label: label.clone() })];
+            reqs.extend(group_plans(cmd)?.into_iter().flat_map(|(_, r)| r));
+            reqs.push(Request::HistoryGroupEnd(e));
+            reqs
+        }
         Cmd::Journal { cmd: Some(JournalCmd::Export { .. }), .. } => vec![Request::JournalExport(e)],
         // Client-side: see `replay::run`.
         Cmd::Journal { cmd: Some(JournalCmd::Replay { .. }), .. } => vec![],
@@ -1893,6 +1910,68 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
 // ---------------------------------------------------------------------------
 // Output
 // ---------------------------------------------------------------------------
+
+/// Split a command line into words: whitespace separates them, and single
+/// or double quotes keep spaces in one.
+fn split_words(s: &str) -> Result<Vec<String>> {
+    let (mut words, mut cur, mut quote, mut any) = (Vec::new(), String::new(), None, false);
+    for ch in s.chars() {
+        match (quote, ch) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => cur.push(c),
+            (None, '\'' | '"') => (quote, any) = (Some(ch), true),
+            (None, c) if c.is_whitespace() => {
+                if any || !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+                any = false;
+            }
+            (None, c) => cur.push(c),
+        }
+    }
+    if quote.is_some() {
+        bail!("unclosed quote in '{s}'");
+    }
+    if any || !cur.is_empty() {
+        words.push(cur);
+    }
+    Ok(words)
+}
+
+/// The commands of `4s group`, parsed and planned. Commands that stream,
+/// wait, manage the daemon, or group themselves cannot be in a group.
+fn group_plans(cmd: &Cmd) -> Result<Vec<(Cmd, Vec<Request>)>> {
+    let Cmd::Group { commands, .. } = cmd else {
+        return Ok(Vec::new());
+    };
+    commands
+        .iter()
+        .map(|c| {
+            let argv = std::iter::once("4s".to_string()).chain(split_words(c)?);
+            let sub = Cli::try_parse_from(argv).map_err(|e| anyhow!("group command '{c}': {e}"))?;
+            let ok = !matches!(
+                sub.cmd,
+                Cmd::Group { .. }
+                    | Cmd::Daemon { .. }
+                    | Cmd::Methods
+                    | Cmd::Watch { .. }
+                    | Cmd::Key { .. }
+                    | Cmd::Midi {
+                        cmd: MidiCmd::Monitor { .. }
+                    }
+                    | Cmd::Journal { .. }
+                    | Cmd::Project {
+                        cmd: ProjectCmd::Reveal { .. }
+                    }
+            );
+            if !ok {
+                bail!("group command '{c}': this command cannot be in a group");
+            }
+            let reqs = plan(&sub.cmd)?;
+            Ok((sub.cmd, reqs))
+        })
+        .collect()
+}
 
 fn grid_line(label: &str, steps: &[u8], length: usize) -> String {
     let s = format_steps(&steps[..length.min(steps.len())]);
@@ -2343,6 +2422,9 @@ fn print_history(h: &HistoryInfo) {
     println!("user: {}", h.user);
     println!("undo: {}", if h.undo.is_empty() { "(empty)".into() } else { h.undo.join(" | ") });
     println!("redo: {}", if h.redo.is_empty() { "(empty)".into() } else { h.redo.join(" | ") });
+    if let Some(g) = &h.group {
+        println!("open group: {g}");
+    }
 }
 
 fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
@@ -2969,6 +3051,51 @@ async fn save_session(c: &mut Client, data_dir: &std::path::Path) -> Result<Stri
     })
 }
 
+/// `4s group`: begin, each command's requests (stopping at the first that
+/// fails), end; then each command's output. The group ends even if a
+/// command failed, so what ran is still one undo step.
+async fn run_group(cli: &Cli, client: &mut Client, reqs: &[Request]) -> Result<()> {
+    let plans = group_plans(&cli.cmd)?;
+    let Cmd::Group { label, .. } = &cli.cmd else {
+        unreachable!()
+    };
+    client.call(&reqs[0]).await?;
+    let mut outputs = Vec::new();
+    let mut failed = None;
+    'run: for (cmd, sub) in &plans {
+        let mut results = Vec::new();
+        for r in sub {
+            match client.call(r).await {
+                Ok(v) => results.push(v),
+                Err(e) => {
+                    failed = Some(e);
+                    break 'run;
+                }
+            }
+        }
+        outputs.push((cmd, results));
+    }
+    let end: HistoryGroupResult =
+        serde_json::from_value(client.call(&Request::HistoryGroupEnd(Empty {})).await?)?;
+    for (cmd, results) in &outputs {
+        if !results.is_empty() {
+            present(cmd, results, cli.json)?;
+        }
+    }
+    if let Some(e) = failed {
+        return Err(e.context(format!("group '{label}' stopped")));
+    }
+    if !cli.json {
+        match (end.label, end.changed.len()) {
+            // An undo or redo in the group ended it early.
+            (None, _) => println!("group '{label}': ended by an undo or redo"),
+            (_, 0) => println!("group '{label}': no changes"),
+            (_, n) => println!("group '{label}': one undo step, {n} keys"),
+        }
+    }
+    Ok(())
+}
+
 async fn run(cli: Cli) -> Result<()> {
     if let Cmd::Methods = cli.cmd {
         for (m, doc) in METHOD_DOCS {
@@ -3015,6 +3142,10 @@ async fn run(cli: Cli) -> Result<()> {
         }
         client.call(&reqs[1]).await?;
         return Ok(());
+    }
+
+    if let Cmd::Group { .. } = &cli.cmd {
+        return run_group(&cli, &mut client, &reqs).await;
     }
 
     let mut results = Vec::new();
@@ -3080,6 +3211,8 @@ mod tests {
         let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../protocol/fixtures/project-v2.json");
         covered.extend(methods_for(&format!("project import {fixture}")));
         covered.extend(methods_for("journal export"));
+        let group = Cli::try_parse_from(["4s", "group", "punchier kick", "set drums.kick.decay 0.4"]).unwrap();
+        covered.extend(plan(&group.cmd).unwrap().iter().map(|r| r.method()));
         covered.insert("session.hello"); // sent by every command on connect
         let all: BTreeSet<&str> = METHODS.iter().copied().collect();
         let missing: Vec<_> = all.difference(&covered).collect();

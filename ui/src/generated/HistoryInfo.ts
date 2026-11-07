@@ -3,4 +3,9 @@
 /**
  * A user's undo and redo stacks (labels, newest first).
  */
-export type HistoryInfo = { user: string, undo: Array<string>, redo: Array<string>, };
+export type HistoryInfo = { user: string, undo: Array<string>, redo: Array<string>, 
+/**
+ * The label of the undo group open on the caller's connection
+ * (`history.group_begin`), if any.
+ */
+group: string | null, };

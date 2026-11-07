@@ -2932,7 +2932,7 @@
     "type": "object"
   },
   "project_format_version": 8,
-  "protocol_version": 10,
+  "protocol_version": 11,
   "request": {
     "$defs": {
       "BatchParams": {
@@ -3758,6 +3758,18 @@
         "required": [
           "client_name",
           "protocol_version"
+        ],
+        "type": "object"
+      },
+      "HistoryGroupBeginParams": {
+        "properties": {
+          "label": {
+            "description": "The undo step's label, e.g. \"assistant: punchier kick\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
         ],
         "type": "object"
       },
@@ -6740,6 +6752,40 @@
         "properties": {
           "method": {
             "const": "history.get",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Start an undo group on this connection: its edits until\n`history.group_end` (or until it disconnects) are one undo step with\nthis label. Fails if the connection already has a group open.",
+        "properties": {
+          "method": {
+            "const": "history.group_begin",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/HistoryGroupBeginParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "End this connection's undo group (nothing to do if none is open).",
+        "properties": {
+          "method": {
+            "const": "history.group_end",
             "type": "string"
           },
           "params": {

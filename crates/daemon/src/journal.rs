@@ -104,6 +104,8 @@ struct Step {
     /// A params-only edit that a following edit of the same params may
     /// merge into (one step for a whole knob drag).
     mergeable: bool,
+    /// The undo group (`history.group_begin`) whose edits this step holds.
+    group: Option<String>,
 }
 
 #[derive(Default)]
@@ -142,7 +144,44 @@ impl History {
     /// Record an edit. Consecutive edits of the same params merge into one
     /// step (unless another user changed one of them in between); any other
     /// edit starts a new one and clears the user's redo.
-    pub fn record(&mut self, user: &str, seq: u64, label: String, changes: &[Change]) {
+    ///
+    /// An edit made in an undo group (`group`: its id and label) joins the
+    /// group's step wherever it is in the user's stack, so an edit the user
+    /// makes from another client meanwhile stays a step of its own.
+    pub fn record(&mut self, user: &str, seq: u64, label: String, changes: &[Change], group: Option<(&str, &str)>) {
+        if let Some((id, label)) = group {
+            self.touch(user, changes);
+            let st = self.users.entry(user.to_string()).or_default();
+            st.redo.clear();
+            if let Some(i) = st.undo.iter().rposition(|s| s.group.as_deref() == Some(id)) {
+                let step = &mut st.undo[i];
+                for c in changes {
+                    match step.changes.iter_mut().find(|t| t.key == c.key) {
+                        Some(t) => t.after = c.after.clone(),
+                        None => step.changes.push(c.clone()),
+                    }
+                }
+                // A key back where the group found it is no change.
+                step.changes.retain(|t| t.before != t.after);
+                step.seq = seq;
+                if step.changes.is_empty() {
+                    st.undo.remove(i);
+                }
+            } else {
+                let step = Step {
+                    seq,
+                    label: label.to_string(),
+                    changes: changes.to_vec(),
+                    mergeable: false,
+                    group: Some(id.to_string()),
+                };
+                st.undo.push(step);
+                if st.undo.len() > MAX_STEPS {
+                    st.undo.remove(0);
+                }
+            }
+            return;
+        }
         let interleaved = changes.iter().any(|c| self.last_touch.get(&c.key).is_some_and(|u| u != user));
         self.touch(user, changes);
         let st = self.users.entry(user.to_string()).or_default();
@@ -161,7 +200,7 @@ impl History {
             top.seq = seq;
             return;
         }
-        st.undo.push(Step { seq, label, changes: changes.to_vec(), mergeable: params_only });
+        st.undo.push(Step { seq, label, changes: changes.to_vec(), mergeable: params_only, group: None });
         if st.undo.len() > MAX_STEPS {
             st.undo.remove(0);
         }
@@ -211,7 +250,7 @@ impl History {
         if changes.is_empty() {
             return;
         }
-        let next = Step { seq, label: step.label, changes, mergeable: false };
+        let next = Step { seq, label: step.label, changes, mergeable: false, group: None };
         if redo { st.undo.push(next) } else { st.redo.push(next) }
     }
 
@@ -240,6 +279,14 @@ impl History {
         self.users.drain().filter(|(_, s)| !s.undo.is_empty() || !s.redo.is_empty()).map(|(u, _)| u).collect()
     }
 
+    /// The keys a group's step changes (empty if it has none, e.g. it was
+    /// undone).
+    pub fn group_keys(&self, user: &str, id: &str) -> Vec<String> {
+        let st = self.users.get(user);
+        let step = st.and_then(|s| s.undo.iter().rev().find(|s| s.group.as_deref() == Some(id)));
+        step.map(|s| s.changes.iter().map(|c| c.key.clone()).collect()).unwrap_or_default()
+    }
+
     pub fn summary(&self, user: &str) -> Summary {
         let st = self.users.get(user);
         let undo = st.map(|s| &s.undo[..]).unwrap_or_default();
@@ -257,7 +304,7 @@ impl History {
             v.map(|v| v.iter().rev().take(20).map(|s| s.label.clone()).collect()).unwrap_or_default()
         };
         let st = self.users.get(user);
-        HistoryInfo { user: user.to_string(), undo: labels(st.map(|s| &s.undo)), redo: labels(st.map(|s| &s.redo)) }
+        HistoryInfo { user: user.to_string(), undo: labels(st.map(|s| &s.undo)), redo: labels(st.map(|s| &s.redo)), group: None }
     }
 }
 
@@ -414,7 +461,7 @@ mod tests {
     }
 
     fn set(h: &mut History, user: &str, seq: u64, before: &Doc, after: &Doc) {
-        h.record(user, seq, format!("edit {seq}"), &diff(before, after));
+        h.record(user, seq, format!("edit {seq}"), &diff(before, after), None);
     }
 
     #[test]
@@ -490,7 +537,7 @@ mod tests {
         let d = |pan: f64, vol: f64| doc(&[("param:mixer.1.pan", json!(pan)), ("param:mixer.1.volume", json!(vol))]);
         set(&mut h, "alice", 1, &d(0.0, 1.0), &d(0.5, 0.5));
         let bob = doc(&[("param:mixer.1.pan", json!(-0.5))]);
-        h.record("bob", 2, "bob".into(), &diff(&doc(&[("param:mixer.1.pan", json!(0.5))]), &bob));
+        h.record("bob", 2, "bob".into(), &diff(&doc(&[("param:mixer.1.pan", json!(0.5))]), &bob), None);
 
         let p = h.plan("alice", false).unwrap();
         assert_eq!(p.skipped, vec!["param:mixer.1.pan".to_string()]);
@@ -509,7 +556,7 @@ mod tests {
         let mut h = History::default();
         let added = doc(&[("instrument:bass", json!({"type": "tb303", "name": "Bass"})), ("route:bass", json!(2))]);
         set(&mut h, "alice", 1, &Doc::new(), &added);
-        h.record("bob", 2, "bob".into(), &diff(&Doc::new(), &doc(&[("event:bass.1.0.36", json!({"len": 24, "velocity": 89}))])));
+        h.record("bob", 2, "bob".into(), &diff(&Doc::new(), &doc(&[("event:bass.1.0.36", json!({"len": 24, "velocity": 89}))])), None);
         let p = h.plan("alice", false).unwrap();
         assert!(p.sets.is_empty());
         assert_eq!(p.skipped, vec!["instrument:bass".to_string(), "route:bass".to_string()]);
@@ -541,5 +588,131 @@ mod tests {
         set(&mut h, "a", 1, &Doc::new(), &doc(&[("param:x", json!(1))]));
         assert_eq!(h.clear(), vec!["a".to_string()]);
         assert!(h.plan("a", false).is_none());
+    }
+
+    fn grouped(h: &mut History, user: &str, seq: u64, before: &Doc, after: &Doc, group: &str) {
+        h.record(
+            user,
+            seq,
+            format!("edit {seq}"),
+            &diff(before, after),
+            Some((group, "assistant: punchier kick")),
+        );
+    }
+
+    #[test]
+    fn a_groups_edits_are_one_step_with_its_label() {
+        let mut h = History::default();
+        let a = doc(&[("param:kick.decay", json!(0.5))]);
+        let b = doc(&[("param:kick.decay", json!(0.3))]);
+        let c = doc(&[
+            ("param:kick.decay", json!(0.3)),
+            ("device:comp", json!({"type": "compressor"})),
+        ]);
+        let d = doc(&[
+            ("param:kick.decay", json!(0.2)),
+            ("device:comp", json!({"type": "compressor"})),
+        ]);
+        grouped(&mut h, "sam", 1, &a, &b, "g1");
+        grouped(&mut h, "sam", 2, &b, &c, "g1");
+        grouped(&mut h, "sam", 3, &c, &d, "g1");
+        assert_eq!(h.info("sam").undo, vec!["assistant: punchier kick"]);
+        let plan = h.plan("sam", false).unwrap();
+        // Undo puts every key back where the group found it.
+        assert_eq!(
+            plan.sets,
+            vec![
+                ("param:kick.decay".to_string(), json!(0.5)),
+                ("device:comp".to_string(), Value::Null)
+            ]
+        );
+        assert_eq!(plan.seq, 3);
+        assert_eq!(
+            h.group_keys("sam", "g1"),
+            vec!["param:kick.decay", "device:comp"]
+        );
+        // A later group is a step of its own.
+        grouped(&mut h, "sam", 4, &d, &a, "g2");
+        assert_eq!(h.summary("sam").undo_count, 2);
+    }
+
+    #[test]
+    fn a_group_that_ends_where_it_began_takes_no_step() {
+        let mut h = History::default();
+        let a = doc(&[("param:x", json!(0.5))]);
+        let b = doc(&[("param:x", json!(0.3))]);
+        grouped(&mut h, "sam", 1, &a, &b, "g");
+        grouped(&mut h, "sam", 2, &b, &a, "g");
+        assert_eq!(h.summary("sam").undo_count, 0);
+        assert!(h.group_keys("sam", "g").is_empty());
+    }
+
+    #[test]
+    fn the_users_own_edit_from_another_client_meanwhile_is_its_own_step() {
+        let mut h = History::default();
+        let a = doc(&[("param:x", json!(0.5)), ("param:y", json!(0.5))]);
+        let b = doc(&[("param:x", json!(0.3)), ("param:y", json!(0.5))]);
+        let c = doc(&[("param:x", json!(0.3)), ("param:y", json!(0.9))]);
+        let d = doc(&[("param:x", json!(0.1)), ("param:y", json!(0.9))]);
+        grouped(&mut h, "sam", 1, &a, &b, "g");
+        set(&mut h, "sam", 2, &b, &c); // a knob turned in the app
+        grouped(&mut h, "sam", 3, &c, &d, "g");
+        // The knob is on top, the group (both of its x edits) under it.
+        assert_eq!(
+            h.info("sam").undo,
+            vec!["edit 2", "assistant: punchier kick"]
+        );
+        let plan = h.plan("sam", false).unwrap();
+        assert_eq!(plan.sets, vec![("param:y".to_string(), json!(0.5))]);
+        h.finish(
+            "sam",
+            false,
+            4,
+            diff(
+                &d,
+                &doc(&[("param:x", json!(0.1)), ("param:y", json!(0.5))]),
+            ),
+        );
+        let plan = h.plan("sam", false).unwrap();
+        assert_eq!(plan.sets, vec![("param:x".to_string(), json!(0.5))]);
+        // Nor does the knob join the group's step when turned again.
+        set(&mut h, "sam", 5, &d, &c);
+        assert_eq!(h.summary("sam").undo_count, 2);
+    }
+
+    #[test]
+    fn undoing_a_group_leaves_what_another_user_changed_during_it() {
+        let mut h = History::default();
+        let a = doc(&[("param:x", json!(0.5)), ("param:y", json!(0.5))]);
+        let b = doc(&[("param:x", json!(0.3)), ("param:y", json!(0.5))]);
+        let c = doc(&[("param:x", json!(0.3)), ("param:y", json!(0.2))]);
+        let d = doc(&[("param:x", json!(0.9)), ("param:y", json!(0.2))]);
+        let e = doc(&[("param:x", json!(0.9)), ("param:y", json!(0.4))]);
+        grouped(&mut h, "sam", 1, &a, &b, "g");
+        set(&mut h, "bob", 2, &b, &c); // bob edits y
+        set(&mut h, "bob", 3, &c, &d); // and x, which the group set
+        grouped(&mut h, "sam", 4, &d, &e, "g"); // the group sets y after bob
+        let plan = h.plan("sam", false).unwrap();
+        // y goes back to bob's value, which the group changed; x is bob's.
+        assert_eq!(plan.sets, vec![("param:y".to_string(), json!(0.2))]);
+        assert_eq!(plan.skipped, vec!["param:x"]);
+        assert_eq!(h.info("bob").undo.len(), 2);
+    }
+
+    #[test]
+    fn an_undo_during_a_group_starts_a_new_step_for_the_rest() {
+        let mut h = History::default();
+        let a = doc(&[("param:x", json!(0.5))]);
+        let b = doc(&[("param:x", json!(0.3))]);
+        let c = doc(&[("param:x", json!(0.1))]);
+        grouped(&mut h, "sam", 1, &a, &b, "g");
+        h.finish("sam", false, 2, diff(&b, &a));
+        grouped(&mut h, "sam", 3, &a, &c, "g");
+        assert_eq!(h.info("sam").undo, vec!["assistant: punchier kick"]);
+        assert_eq!(
+            h.plan("sam", false).unwrap().sets,
+            vec![("param:x".to_string(), json!(0.5))]
+        );
+        assert!(h.info("sam").redo.is_empty());
     }
 }
