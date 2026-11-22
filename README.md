@@ -7,8 +7,9 @@ sync.
 
 ![The 4S UI: mixer console with transport, the 808 step sequencer, and the Livid Block mirror](docs/images/ui.png)
 
-Today 4S has two fully synthesized instruments (no samples): a TR-808-style
-drum machine and a TB-303-style bass synth with accent and slide. Add as many
+Today 4S has three synthesized instruments: a TR-808-style drum machine, a
+TB-303-style bass synth with accent and slide, and an eight-voice
+polyphonic synth for chords and pads; plus a sampler. Add as many
 as you like, route them into a multi-channel stereo mixer with the transport
 on top, and sequence them all from one 64-step clock with swing. The Livid
 Block grid controller is supported first-class. It is a modular suite

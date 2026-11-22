@@ -3,4 +3,4 @@
 /**
  * An instrument type. Instances are created with `instrument.add`.
  */
-export type InstrumentType = "tr808" | "tb303" | "sampler";
+export type InstrumentType = "tr808" | "tb303" | "sampler" | "poly";

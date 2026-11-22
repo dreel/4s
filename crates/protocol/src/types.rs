@@ -154,16 +154,19 @@ pub enum InstrumentType {
     Tb303,
     /// 16 pads, each a sample on its own note (RFC 0010).
     Sampler,
+    /// An eight-voice analog-style polyphonic synth.
+    Poly,
 }
 
 impl InstrumentType {
-    pub const ALL: [InstrumentType; 3] = [InstrumentType::Tr808, InstrumentType::Tb303, InstrumentType::Sampler];
+    pub const ALL: [InstrumentType; 4] = [InstrumentType::Tr808, InstrumentType::Tb303, InstrumentType::Sampler, InstrumentType::Poly];
 
     pub fn id(self) -> &'static str {
         match self {
             InstrumentType::Tr808 => "tr808",
             InstrumentType::Tb303 => "tb303",
             InstrumentType::Sampler => "sampler",
+            InstrumentType::Poly => "poly",
         }
     }
 
@@ -173,6 +176,7 @@ impl InstrumentType {
             InstrumentType::Tr808 => "drums",
             InstrumentType::Tb303 => "bass",
             InstrumentType::Sampler => "sampler",
+            InstrumentType::Poly => "synth",
         }
     }
 
@@ -181,6 +185,7 @@ impl InstrumentType {
             InstrumentType::Tr808 => "Drums",
             InstrumentType::Tb303 => "Bass",
             InstrumentType::Sampler => "Sampler",
+            InstrumentType::Poly => "Synth",
         }
     }
 
@@ -189,6 +194,7 @@ impl InstrumentType {
             "tr808" | "808" | "drums" => Some(InstrumentType::Tr808),
             "tb303" | "303" | "bass" => Some(InstrumentType::Tb303),
             "sampler" | "pads" => Some(InstrumentType::Sampler),
+            "poly" | "synth" | "polysynth" => Some(InstrumentType::Poly),
             _ => None,
         }
     }

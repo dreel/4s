@@ -100,6 +100,12 @@ fn process_never_allocates() {
             Command::SetRoute { slot: 2, output: 0, channel: Some(1) },
             Command::SetSample { slot: 2, pad: 0, sample: Some(sample.clone()) },
             Command::NoteOn { slot: 2, note: 36, velocity: 1.0, gate: false },
+            // A polyphonic synth playing a chord.
+            Command::AddInstrument { slot: 3, instrument: instrument::make(InstrumentType::Poly, sr as f32) },
+            Command::SetRoute { slot: 3, output: 0, channel: Some(1) },
+            Command::NoteOn { slot: 3, note: 60, velocity: 0.8, gate: false },
+            Command::NoteOn { slot: 3, note: 64, velocity: 0.8, gate: false },
+            Command::NoteOn { slot: 3, note: 67, velocity: 0.8, gate: false },
             // An audition (RFC 0011) plays after the master.
             Command::Preview { sample: Some(sample.clone()) },
             // An LFO (RFC 0010) moving the filter's cutoff and channel 1's pan.
@@ -201,6 +207,7 @@ fn process_never_allocates() {
             Command::RemoveInstrument { slot: 0 },
             Command::RemoveInstrument { slot: 1 },
             Command::RemoveInstrument { slot: 2 },
+            Command::RemoveInstrument { slot: 3 },
             Command::SetModRoute { index: 1, route: None },
             Command::RemoveModulator { slot: 0 },
             Command::RemoveEffect { slot: 0 },
@@ -216,7 +223,7 @@ fn process_never_allocates() {
         assert_eq!(n, 0, "round {round}: {n} heap operations while removing");
         // The removed instruments and effects, and the stopped audition's
         // sample, came back to be dropped here, off the audio thread.
-        assert_eq!(link.returns.slots(), 9);
+        assert_eq!(link.returns.slots(), 10);
         while let Ok(b) = link.returns.pop() {
             drop(b);
         }

@@ -987,6 +987,34 @@ s channel rm 3 >/dev/null
 s set comp.sidechain 1 >/dev/null
 check "the sidechain saves and loads back" "comp.sidechain = 1" bash -c "$BIN/4s project save comp >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load comp >/dev/null && $BIN/4s get comp.sidechain"
 check "a session with a sidechain replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/comp.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/comp.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
+# The polyphonic synth: a C major chord from one clip step sounds all three
+# pitches (chord.py: each probe pitch's level over 0.2..0.6 s), and none
+# between them.
+s project new >/dev/null
+cat > "$TMP/chord.py" <<PY
+import array, json, math, struct, subprocess
+r = json.loads(subprocess.check_output(['$BIN/4s', '--json', 'render', '--out', 'renders/chord.wav']))
+b = open(r['path'], 'rb').read(); i = b.index(b'data'); n = struct.unpack('<I', b[i + 4:i + 8])[0]
+a = array.array('f'); a.frombytes(b[i + 8:i + 8 + n]); sr = r['sample_rate']
+x = a[int(0.2 * sr) * 2:int(0.6 * sr) * 2:2]
+def g(hz):
+    w = 2 * math.pi * hz / sr; c = 2 * math.cos(w); s1 = s2 = 0.0
+    for v in x:
+        s1, s2 = v + c * s1 - s2, s1
+    return math.sqrt(max(s1 * s1 + s2 * s2 - c * s1 * s2, 0)) / len(x)
+on = min(g(261.63), g(329.63), g(392.0)); off = max(g(293.66), g(369.99))
+print('chord' if on > 4 * off else 'no chord %.4f %.4f' % (on, off))
+PY
+check "add a synth" "synth      poly   Synth        (Stereo main)" s instrument add poly
+check "its parameters" "synth.osc2_fine          7.0 ct" s params synth.osc2_fine
+check "it plays through the generic note layout: a row per pitch" "C4" bash -c "$BIN/4s clip add synth 0 C4 --len 288 >/dev/null && $BIN/4s clip add synth 0 E4 --len 288 >/dev/null && $BIN/4s clip add synth 0 G4 --len 288 >/dev/null && $BIN/4s clip launch synth 1 >/dev/null && $BIN/4s clip show synth"
+check "three notes on one step sound as a chord" "chord" python3 "$TMP/chord.py"
+check "the render reports three notes at once" "triggers: 3 (synth 3)" s render --out renders/chord2.wav
+check "a sine at the cutoff's top still plays the chord" "chord" bash -c "$BIN/4s set synth.osc1_wave 3 >/dev/null && $BIN/4s set synth.cutoff 1 >/dev/null && python3 '$TMP/chord.py'"
+check "the synth saves and loads back" "synth.osc1_wave = 3" bash -c "$BIN/4s project save synth >/dev/null && $BIN/4s project new >/dev/null && $BIN/4s project load synth >/dev/null && $BIN/4s get synth.osc1_wave"
+check "...with its chord" "0:C4:288:89 0:E4:288:89 0:G4:288:89" s clip show synth
+check "removing it removes its parameters" "no parameters" bash -c "$BIN/4s instrument rm synth >/dev/null; $BIN/4s params synth. | grep -q synth && echo still there || echo no parameters; $BIN/4s undo >/dev/null"
+check "a session with the synth replays" "replay matched" bash -c "$BIN/4s journal export -o '$TMP/synth.json' >/dev/null && B=\$(mktemp -d) && FOURS_DATA_DIR=\$B $BIN/4s daemon start --no-audio --no-midi --listen 127.0.0.1:0 >/dev/null && FOURS_DATA_DIR=\$B $BIN/4s journal replay '$TMP/synth.json'; FOURS_DATA_DIR=\$B $BIN/4s daemon stop >/dev/null"
 # Modulators (RFC 0010): an LFO moving a filter's cutoff around its value.
 s project new >/dev/null
 s pattern set closed_hat "xxxxxxxxxxxxxxxx" >/dev/null
