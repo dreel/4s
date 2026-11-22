@@ -231,9 +231,16 @@ fn run(args: Args) -> Result<()> {
             loop {
                 // List ports without the core lock: if CoreMIDI blocks, only
                 // this thread waits, not every request.
-                if core.lock().unwrap().midi_scan_needed(auto) {
-                    let (inputs, _) = midi::list_ports();
-                    core.lock().unwrap().midi_autoconnect(&inputs, auto);
+                let started = core.lock().unwrap().midi_scan_start(auto);
+                if let Some(connected) = started {
+                    let (mut inputs, _) = midi::list_ports();
+                    if inputs.is_empty() && !connected.is_empty() {
+                        // Every connected port gone at once: maybe so, or
+                        // the MIDI server restarted under our clients.
+                        midi::reset_lister();
+                        inputs = midi::list_ports().0;
+                    }
+                    core.lock().unwrap().midi_autoconnect(&inputs, &connected, auto);
                 }
                 std::thread::sleep(Duration::from_secs(2));
             }

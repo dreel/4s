@@ -1382,17 +1382,19 @@ impl Core {
         })
     }
 
-    /// Whether the hotplug scan has anything to do: auto-connect is on, or
-    /// some port is connected (and may vanish).
-    pub fn midi_scan_needed(&self, auto: bool) -> bool {
-        auto || !self.midi.is_empty()
+    /// For the hotplug scan: the connected input ports, or None when the
+    /// scan has nothing to do (auto-connect off and nothing connected).
+    pub fn midi_scan_start(&self, auto: bool) -> Option<Vec<String>> {
+        let connected = self.midi.connected_inputs();
+        (auto || !connected.is_empty()).then_some(connected)
     }
 
-    /// Hotplug, given the input ports present now (`list_ports`, called
-    /// without the core lock): drop vanished ports and, if `auto`, connect a
-    /// Livid Block that appeared, and any port connected before.
-    pub fn midi_autoconnect(&mut self, inputs: &[String], auto: bool) {
-        let mut changed = self.midi.prune(inputs);
+    /// Hotplug, given the input ports present (`list_ports`, called without
+    /// the core lock) and the ports connected when they were listed: drop
+    /// vanished ports and, if `auto`, connect a Livid Block that appeared,
+    /// and any port connected before.
+    pub fn midi_autoconnect(&mut self, inputs: &[String], listed_with: &[String], auto: bool) {
+        let mut changed = self.midi.prune(inputs, listed_with);
         if changed {
             tracing::info!("MIDI device disconnected");
         }
