@@ -93,6 +93,14 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 ## Follow-ups
 
+- (2026-10-18, midi-focus branch) MPK: the mod wheel moves `focus.cutoff`,
+  so with the drums focused and the keys playing a synth through
+  `@pitched`, the wheel moves nothing; a `@pitched.cutoff` CC target would
+  follow the keys (`crates/daemon/devices/akai-mpk-mini-iv.json`).
+- (2026-10-18, midi-focus branch) UI: changing a device's bindings still
+  means the seat panel's binding list; a "this keyboard plays: [synth v]"
+  picker per connected device would cover the common case in one control.
+
 - (2026-10-17, polysynth branch) synth: no presets, no glide or mono
   mode, no per-voice LFO or second filter mode (high/band pass), and no
   keyboard tracking of the cutoff; `crates/engine/src/poly.rs`.

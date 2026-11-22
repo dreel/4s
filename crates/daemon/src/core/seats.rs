@@ -68,12 +68,13 @@ pub(super) struct Pickup {
     pub last_in: Option<f64>,
 }
 
-/// A binding target: `focus`, an instrument id, or `@<type>`.
-/// Alternatives separated by `|` are tried in order (`@tb303|focus`).
+/// A binding target: `focus`, an instrument id, `@<type>`, or `@pitched`
+/// (the focus if it plays pitches, else the first instrument that does).
+/// Alternatives separated by `|` are tried in order (`@pitched|focus`).
 fn check_target(t: &str) -> Result<(), RpcError> {
     for part in t.split('|') {
         match part.strip_prefix('@') {
-            _ if part == "focus" => {}
+            _ if part == "focus" || part == PITCHED => {}
             Some(kind) => {
                 InstrumentType::parse(kind)
                     .ok_or_else(|| RpcError::invalid(format!("unknown instrument type in target '{t}'")))?;
@@ -90,6 +91,10 @@ fn check_target(t: &str) -> Result<(), RpcError> {
 pub(super) fn input_key(channel: u8, note: u8) -> u16 {
     channel as u16 * 128 + note as u16
 }
+
+/// The binding target for a keyboard: the focus if it plays pitches, else
+/// the first instrument that does.
+pub(super) const PITCHED: &str = "@pitched";
 
 /// Relative encoder steps per parameter range.
 const RELATIVE_STEPS: f64 = 200.0;
@@ -818,6 +823,15 @@ impl Core {
         }
         if target == "focus" {
             return self.seat_focus(seat);
+        }
+        if target == PITCHED {
+            // A keyboard plays the focus when it takes pitches, else the
+            // first instrument that does.
+            let pitched = |id: &str| self.find_instrument(id).is_ok_and(|i| i.kind.is_pitched());
+            return self
+                .seat_focus(seat)
+                .filter(|f| pitched(f))
+                .or_else(|| self.instruments.iter().find(|i| pitched(&i.id)).map(|i| i.id.clone()));
         }
         if let Some(kind) = target.strip_prefix('@') {
             let kind = InstrumentType::parse(kind)?;

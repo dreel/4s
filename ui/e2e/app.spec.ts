@@ -131,11 +131,10 @@ test("console: add, rename, and remove channels; remove an instrument from the e
   await expect(page.getByTestId("strip-2")).toHaveCount(0);
   expect((await rpc("state.get", {})).graph.channels.map((c) => c.n)).toEqual([1]);
 
-  // A second 808: the Block follows it once focused, and removing it from
+  // A second 808: the Block follows it once its tab focuses it, and removing it from
   // the editor hands the focus back to the first instrument, `drums`.
   await rpc("instrument.add", { type: "tr808", id: null, name: null, channel: null, no_channel: false });
   await page.getByTestId("select-drums2").click();
-  await page.getByTestId("make-target").click();
   await expect.poll(async () => (await rpc("controller.get", {})).focus).toBe("drums2");
   await expect(page.getByTestId("block-target")).toHaveText("drums2");
 
@@ -268,9 +267,10 @@ test("MIDI panel connects a device by name; with no bindings it plays the seat's
       .toMatchObject({ device, profile: "generic" });
     await expect(page.getByTestId(`midi-device-${device}`)).toBeVisible();
 
-    // Focus the 303 from its editor; the device's notes then play it.
+    // Selecting the 303's tab focuses it for this seat; the device's notes
+    // then play it.
     await page.getByTestId("select-lead").click();
-    await page.getByTestId("make-target").click();
+    await expect(page.getByTestId("focused-lead")).toBeVisible();
     await expect.poll(async () => (await rpc("controller.get", {})).focus).toBe("lead");
     await rpc("midi.input", { device, data: [0x90, 36, 100], seat: null, profile: null });
     await expect(page.getByTestId("bass-last-note")).toHaveAttribute("data-note", "36");

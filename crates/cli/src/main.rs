@@ -358,7 +358,9 @@ enum Cmd {
         /// Semitones to add.
         #[arg(long, allow_hyphen_values = true)]
         transpose: Option<i8>,
-        /// Instrument id, `focus`, or `@<type>` (the first tr808: `@tr808`).
+        /// Instrument id, `focus`, `@<type>` (the first tr808: `@tr808`), or
+        /// `@pitched` (the focus if it plays pitches, else the first
+        /// instrument that does).
         #[arg(long, default_value = "focus")]
         to: String,
         /// Output notes for the input notes from the range's low end, e.g.

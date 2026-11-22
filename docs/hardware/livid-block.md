@@ -38,8 +38,10 @@ unplug.
 
 - The Block plays in the host seat (RFC 0007: the seat of this machine's
   devices, see `4s midi ports`) and drives that seat's **focus** (default:
-  the first instrument). Choose it with `4s focus drums2` or the focus
-  button in an instrument's editor. If the focus is removed, the first
+  the first instrument). Choose it with `4s focus drums2`, by selecting
+  the instrument's tab in the app (which focuses it for the app's seat,
+  the host seat when you run it on the engine's machine), or the "control
+  with Block" button in a drum editor. If the focus is removed, the first
   instrument takes over. The focus is the armed track (RFC 0009): the grid
   edits the clip it is playing (its launched clip, or the placement's clip
   under the playhead), else the clip it launched, else its selected clip
