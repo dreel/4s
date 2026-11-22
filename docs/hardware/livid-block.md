@@ -16,7 +16,8 @@ transposed. The knob CCs are still unverified -- see "Calibrating" below.
 
 - `4sd` scans MIDI ports every 2 s and auto-connects any input whose name
   contains "block" as a Livid Block, using the matching output for LEDs.
-  Disable with `--no-midi`.
+  Disable with `--no-midi` (the scan then only watches for hand-connected
+  ports vanishing, and does nothing while none is connected).
 - Manual: `4s midi connect "block Controls"` (or the MIDI panel in the UI).
 - Disconnected devices are dropped automatically; replugging reconnects.
 - macOS note: CoreMIDI only tells a process about newly plugged-in devices
