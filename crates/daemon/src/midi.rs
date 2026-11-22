@@ -226,10 +226,10 @@ impl Midi {
         }
     }
 
-    /// Drop connections whose ports no longer exist. Returns true if any were removed.
     /// Drop connections to ports that were connected when `inputs` was
-    /// listed (`listed_with`) and are gone from it. A port connected since
-    /// is kept: the list may be older than the connection.
+    /// listed (`listed_with`) and are gone from it; a port connected since
+    /// is kept, as the list may be older than the connection. Returns true
+    /// if any were removed.
     pub fn prune(&mut self, inputs: &[String], listed_with: &[String]) -> bool {
         let before = self.conns.len();
         self.conns.retain(|c| inputs.contains(&c.info.input) || !listed_with.contains(&c.info.input));
