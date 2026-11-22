@@ -179,7 +179,9 @@ impl Core {
                 self.in_flight
             )));
         }
-        self.ensure_room(2 * n + 2 + commands + self.route_commands())
+        // Plus a sidechain cleared per compressor at most.
+        let keyed = self.devices.iter().filter(|d| d.kind == DeviceType::Compressor).count();
+        self.ensure_room(2 * n + 2 + commands + keyed + self.route_commands())
     }
 
     /// Remove every effect on a channel (it is going away).

@@ -91,9 +91,10 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
   while playing) and `4s song back` returns (RFC 0009).
 - `4s device add delay --on 1` (or `--on master`) puts an audio effect in
   a channel's insert chain; `4s device list|mv|rm|types`, and its
-  parameters are `<id>.*` (RFC 0010). `4s channel add --return` makes a
-  return bus and `4s send 1 3 40%` feeds it from channel 1. `4s device add
-  lfo` and `4s mod route lfo.1 bass.cutoff 40%` modulate any continuous
+  parameters are `<id>.*` (RFC 0010). `4s device add compressor --on 2`
+  and `4s set comp.sidechain 1` duck channel 2 under channel 1 (RFC 0012).
+  `4s channel add --return` makes a return bus and `4s send 1 3 40%`
+  feeds it from channel 1. `4s device add lfo` and `4s mod route lfo.1 bass.cutoff 40%` modulate any continuous
   parameter. `4s instrument add sampler` and `4s sampler load 1 kick.wav`
   play samples on pads (notes 36-51); any common format, and a region of
   a long file: `4s sampler load 1 song.mp3 --from 1:23.40 --to 1:23.65`

@@ -3,4 +3,4 @@
 /**
  * A device type that is not an instrument.
  */
-export type DeviceType = "filter" | "delay" | "reverb" | "lfo";
+export type DeviceType = "filter" | "delay" | "reverb" | "compressor" | "lfo";
