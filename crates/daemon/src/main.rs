@@ -235,8 +235,9 @@ fn run(args: Args) -> Result<()> {
                 if let Some(connected) = started {
                     let (mut inputs, _) = midi::list_ports();
                     if inputs.is_empty() && !connected.is_empty() {
-                        // Every connected port gone at once: maybe so, or
-                        // the MIDI server restarted under our clients.
+                        // Every connected port gone at once: unplugged, or
+                        // the MIDI server restarted under our clients. New
+                        // clients tell which (a one-off cost either way).
                         midi::reset_lister();
                         inputs = midi::list_ports().0;
                     }
