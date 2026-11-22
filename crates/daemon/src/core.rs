@@ -119,6 +119,8 @@ pub struct Core {
     sources: sources::SourceCache,
     /// Uploads (`sample.upload`) in progress or done, by id.
     uploads: HashMap<String, samples::Upload>,
+    /// The engine holds an audition (`sample.play`), to be handed back.
+    previewing: bool,
     /// Counts uploads as they start (the oldest goes first).
     upload_clock: u64,
     /// Modulator slots of the engine in use.
@@ -227,6 +229,7 @@ impl Core {
             samples: HashMap::new(),
             sources: sources::SourceCache::new(DEFAULT_SAMPLE_CACHE_MB << 20, audio.sample_rate),
             uploads: HashMap::new(),
+            previewing: false,
             upload_clock: 0,
             mod_used: [false; MAX_MODULATORS],
             mod_routes: Vec::new(),
@@ -2671,6 +2674,8 @@ impl Core {
             | Request::SampleUpload(_)
             | Request::SampleInfo(_)
             | Request::SamplePeaks(_)
+            | Request::SamplePlay(_)
+            | Request::SampleStop(_)
             | Request::SamplerClear(_) => {
                 unreachable!("handled by handle_sampler")
             }
@@ -2739,7 +2744,7 @@ fn read_only(req: &Request) -> bool {
         Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
         | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
         | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
-        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) | SamplerGet(_) | SampleInfo(_) | SamplePeaks(_) | SampleUpload(_) => true,
+        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) | SamplerGet(_) | SampleInfo(_) | SamplePeaks(_) | SampleUpload(_) | SamplePlay(_) | SampleStop(_) => true,
         ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
         | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | ClipLaunch(_) | SongPlace(_) | SongRemove(_)
         | SongMove(_) | SongBack(_)

@@ -96,6 +96,8 @@ fn process_never_allocates() {
             Command::SetRoute { slot: 2, output: 0, channel: Some(1) },
             Command::SetSample { slot: 2, pad: 0, sample: Some(sample.clone()) },
             Command::NoteOn { slot: 2, note: 36, velocity: 1.0, gate: false },
+            // An audition (RFC 0011) plays after the master.
+            Command::Preview { sample: Some(sample.clone()) },
             // An LFO (RFC 0010) moving the filter's cutoff and channel 1's pan.
             Command::AddModulator { slot: 0, modulator: modulator::make(DeviceType::Lfo) },
             Command::SetParam { target: ParamTarget::Modulator { slot: 0, index: 2 }, value: 0.8 },
@@ -201,14 +203,15 @@ fn process_never_allocates() {
             Command::RemoveEffect { slot: 1 },
             Command::RemoveEffect { slot: 2 },
             Command::SetChannelActive { ch: 1, active: false },
+            Command::Preview { sample: None },
         ] {
             assert!(link.commands.push(c).is_ok());
         }
         let n = counted(|| rt.process(&mut out, 2));
         assert_eq!(n, 0, "round {round}: {n} heap operations while removing");
-        // The removed instruments and effects came back to be dropped here,
-        // off the audio thread.
-        assert_eq!(link.returns.slots(), 7);
+        // The removed instruments and effects, and the stopped audition's
+        // sample, came back to be dropped here, off the audio thread.
+        assert_eq!(link.returns.slots(), 8);
         while let Ok(b) = link.returns.pop() {
             drop(b);
         }

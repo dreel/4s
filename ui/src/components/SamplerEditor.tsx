@@ -9,6 +9,7 @@ import type { NoteRow } from "../generated/NoteRow";
 import { act, client, useApp } from "../store";
 import { uploadFile } from "../upload";
 import { ParamKnob, pan, pct, st } from "./ParamKnob";
+import { SampleEditor } from "./SampleEditor";
 import { StepView } from "./StepView";
 
 /** File types the picker offers (the engine checks what it gets). */
@@ -57,6 +58,7 @@ function PadControls({ id, row, pad, selected, onSelect }: { id: string; row: No
 
 export function SamplerEditor({ id }: { id: string }) {
   const [pad, setPad] = useState(1);
+  const loaded = useApp((s) => !!s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.some((x) => x.pad === pad));
   const p = (name: string) => `${id}.${pad}.${name}`;
   return (
     <div className="flex flex-col gap-3" data-testid={`sampler-editor-${id}`}>
@@ -78,6 +80,7 @@ export function SamplerEditor({ id }: { id: string }) {
         <ParamKnob path={p("release")} label="release" format={pct} />
         <ParamKnob path={p("choke")} label="choke" format={(v) => (Math.round(v) === 0 ? "off" : `${Math.round(v)}`)} />
       </section>
+      {loaded && <SampleEditor key={pad} id={id} pad={pad} />}
     </div>
   );
 }

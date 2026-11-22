@@ -1013,6 +1013,10 @@ check "...plays what that region holds (one hit)" "triggers: 1 (sampler 1)" bash
 check "...journaled as a load of the stored file (not the upload), with its region" "path and region" bash -c "$BIN/4s --json journal --limit 3 | python3 -c 'import json,sys; e=[x[\"params\"] for x in json.load(sys.stdin)[\"entries\"] if x[\"method\"]==\"sampler.load\"][-1]; print(\"path and region\" if e[\"path\"].endswith(\"song.mp3\") and e[\"upload\"] is None and e[\"start\"]==1.5 else e)'"
 check "a region in m:ss.ms, of a FLAC file" "0:00.000 - 0:00.500 of" s sampler load 2 $FX/song.flac --from 0:00.000 --to 0:00.5
 check "undo brings back the pad's last region" "0:01.500 - 0:01.800" bash -c "$BIN/4s sampler load 1 $FX/song.mp3 --from 1.0 --to 1.1 >/dev/null && $BIN/4s undo >/dev/null && $BIN/4s sampler | grep 'pad 1 '"
+SEQ=$(s --json journal --limit 1 | python3 -c "import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])")
+check "auditioning a region through the engine (not in the project)" "playing 0:01.500 - 0:01.800" s sample play $FX/song.mp3 --from 1.5 --to 1.8
+check "...and stopping it" "stopped" s sample stop
+check "...journals nothing" "seq=$SEQ" bash -c "echo seq=\$($BIN/4s --json journal --limit 1 | python3 -c \"import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])\")"
 check "a region past the file's end is refused" "past the end of the file" s sampler load 3 $FX/song.mp3 --from 5 --to 6
 python3 - "$TMP/long.wav" <<'PY'
 import struct, sys

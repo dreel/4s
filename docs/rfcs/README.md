@@ -64,4 +64,4 @@ decisions (before implementation).
 | [0008](0008-recording-and-arrangement.md) | Recording and the arrangement | accepted (phases A, B1, B2 implemented; C in progress) |
 | [0009](0009-sequencing-model.md) | One transport, clip launching, and a generic step view | accepted (phases 1 and 2 implemented) |
 | [0010](0010-devices.md) | Devices: effects, buses, modulators, a sampler, automation | accepted (phases 2 to 5 implemented) |
-| [0011](0011-sample-sources.md) | Sample sources: formats, regions, and a decode cache | accepted (phase 1 implemented) |
+| [0011](0011-sample-sources.md) | Sample sources: formats, regions, and a decode cache | accepted (phases 1 and 2 implemented) |

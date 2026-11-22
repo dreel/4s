@@ -5268,6 +5268,35 @@
         ],
         "type": "object"
       },
+      "SamplePlayParams": {
+        "description": "Audition `start..end` seconds of a file once, through the engine,\noutside the mix (RFC 0011). Without a region, all of a file of at most\n60 s; a longer file needs `start`/`end` (at most 60 s apart).",
+        "properties": {
+          "end": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "As in `sample.info`.",
+            "type": "string"
+          },
+          "start": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
       "SampleUploadParams": {
         "description": "Send a file to the engine host in chunks (from a client on another\nmachine): the same `upload` id for each, at increasing `offset`s, the\nlast with `done`. The finished file is checked (it must decode) and\nstored under `<data dir>/samples/`.",
         "properties": {
@@ -6456,6 +6485,40 @@
           },
           "params": {
             "$ref": "#/$defs/SamplePeaksParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Audition a region of an audio file on the engine host (not in the\nmix, not recorded, not saved).",
+        "properties": {
+          "method": {
+            "const": "sample.play",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SamplePlayParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Stop an audition.",
+        "properties": {
+          "method": {
+            "const": "sample.stop",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/Empty"
           }
         },
         "required": [

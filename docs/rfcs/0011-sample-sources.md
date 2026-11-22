@@ -1,7 +1,6 @@
 # RFC 0011: Sample sources: formats, regions, and a decode cache
 
-- Status: accepted (phase 1 implemented; the editor is phase 2; slicing to
-  pads later)
+- Status: accepted (phases 1 and 2 implemented; slicing to pads later)
 - Author: Claude, with Sam
 - Created: 2026-10-17
 - Discussion: project thread
@@ -32,7 +31,7 @@ be slow, and keeping a decoded song per pad wasteful.
   The pad's `start`/`end` parameters stay as trims within the region (and
   can still be modulated and automated).
 - **Cache** (`crates/daemon/src/core/sources.rs`): decoded sources by a
-  hash of the file's bytes (a path's size and modification time remember
+  blake3 hash of the file's bytes (a path's size and modification time remember
   its hash, so an unchanged file is not read again), least recently used
   dropped past a budget (`4sd --sample-cache-mb`, default 512), decoded
   again when needed. A pad gets a copy of its region, so a song is not
@@ -63,8 +62,8 @@ be slow, and keeping a decoded song per pad wasteful.
   waveform is computed there and sent as a few thousand numbers.
 - **Real-time safety**: decoding, resampling, and region copies happen on
   the control side; the audio thread still gets one buffer per pad.
-- **Validation**: unit tests decode MP3, FLAC, and AAC fixtures
-  (`tests/fixtures/audio`) and check the cache; the CLI e2e loads regions,
+- **Validation**: unit tests decode MP3, FLAC, AAC, AIFF, ALAC, and
+  Vorbis fixtures (`tests/fixtures/audio`) and check the cache; the CLI e2e loads regions,
   renders them, uploads in chunks, saves and reloads bundles.
 - **Modularity**: no new node types; the sampler's parameters are as before.
 
@@ -89,3 +88,25 @@ Format 8 reads v7 sample paths as all of the file. Protocol 10 removes
 2. The sample editor in the UI: waveform with zoom and scroll, select a
    region, audition it through the engine, assign it to a pad.
 3. Later: slice a region to pads by its transients.
+
+## Implementation notes (phase 2: the editor)
+
+- `sample.play {path, start?, end?}` auditions a region once through the
+  engine and `sample.stop` stops it: the engine plays it after the master
+  (like the metronome's click: not in the mix, not on the meters, not in a
+  render), faded in and out over 128 frames, and hands the buffer back when
+  replaced (`Command::Preview`). There is one audition for the engine,
+  shared by every client: one client's play or stop ends another's (no
+  event says so). Neither is journaled or saved. CLI:
+  `4s sample play <file> --from --to`, `4s sample stop`.
+- UI (`SampleEditor.tsx`, under the selected pad's knobs in the sampler):
+  the pad's file as a waveform from `sample.peaks` (a bin a pixel,
+  refetched as the view moves), opened on the file the pad was cut from
+  when the engine host still has it (a part of a bundle copy maps to that
+  part of its origin), else on the pad's own file. Drag to select, drag an
+  edge to move it, or type the times; wheel zooms around the pointer,
+  shift-wheel scrolls; `all` and `selection` zoom. `play`/`stop` audition
+  the selection (a cursor follows it); `apply to pad` loads it into the pad
+  (`sampler.load` with the region, one undo step).
+- Not built: snapping to zero crossings or transients, and slicing a
+  region to pads (next).

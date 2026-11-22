@@ -84,6 +84,8 @@ import type { SampleInfo } from "./SampleInfo";
 import type { SampleInfoParams } from "./SampleInfoParams";
 import type { SamplePeaks } from "./SamplePeaks";
 import type { SamplePeaksParams } from "./SamplePeaksParams";
+import type { SamplePlayParams } from "./SamplePlayParams";
+import type { SamplePlaying } from "./SamplePlaying";
 import type { SampleUploadParams } from "./SampleUploadParams";
 import type { SampleUploadResult } from "./SampleUploadResult";
 import type { SamplerGetParams } from "./SamplerGetParams";
@@ -148,6 +150,8 @@ export interface Methods {
   "sample.upload": { params: SampleUploadParams; result: SampleUploadResult };
   "sample.info": { params: SampleInfoParams; result: SampleInfo };
   "sample.peaks": { params: SamplePeaksParams; result: SamplePeaks };
+  "sample.play": { params: SamplePlayParams; result: SamplePlaying };
+  "sample.stop": { params: Empty; result: Empty };
   "sampler.clear": { params: SamplerPadParams; result: SamplerInfo };
   "mod.route": { params: ModRouteParams; result: ModRoutesResult };
   "mod.unroute": { params: ModUnrouteParams; result: ModRoutesResult };
@@ -260,6 +264,8 @@ export const METHODS: MethodName[] = [
   "sample.upload",
   "sample.info",
   "sample.peaks",
+  "sample.play",
+  "sample.stop",
   "sampler.clear",
   "mod.route",
   "mod.unroute",

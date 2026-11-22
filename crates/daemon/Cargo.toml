@@ -19,6 +19,7 @@ futures-util.workspace = true
 hound.workspace = true
 symphonia.workspace = true
 rubato.workspace = true
+blake3.workspace = true
 libc = "0.2"
 midir.workspace = true
 rtrb.workspace = true
