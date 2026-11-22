@@ -193,6 +193,14 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   doc (one key per clip event) twice per message; diff only the touched keys.
 - (2026-10-09, #25 follow-up) `cc learn` from an endless encoder stores an
   absolute map; add a way to learn relative mode, or say so in the help.
+- (2026-11-22, MIDI scan fix) `midi.ports`, `midi.connect` and auto-connect's
+  own `connect` still call CoreMIDI while holding the core lock; if the
+  system MIDI service stops answering, those requests (and everything queued
+  behind the lock) hang. List ports before taking the lock there too, or
+  bound the CoreMIDI calls with a timeout.
+- (2026-11-22, MIDI scan fix) after macOS's MIDIServer restarts, a running
+  daemon lists no ports until it is restarted (its CoreMIDI clients are
+  dead); recreate the listing clients when the server comes back.
 - (2026-10-09, #24/#25 follow-up) auto-connect of model ports and
   auto-reconnect of hand-connected ports have no e2e (the e2e daemons run
   with `--no-midi`).

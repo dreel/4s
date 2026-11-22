@@ -5,6 +5,7 @@
 use anyhow::{Context, Result, anyhow};
 use fours_protocol::{DeviceProfile, MidiConnection};
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+use std::sync::Mutex;
 use std::sync::mpsc::Sender;
 
 const CLIENT: &str = "4S";
@@ -66,13 +67,26 @@ pub fn start_device_watcher() {
 #[cfg(not(target_os = "macos"))]
 pub fn start_device_watcher() {}
 
+/// The clients `list_ports` enumerates through, made once and kept. Making
+/// (and dropping) a CoreMIDI client on every hotplug scan, every 2 s for the
+/// life of every daemon, wore down macOS's MIDIServer until it stopped
+/// answering, and the scan hung inside CoreMIDI.
+static LISTER: Mutex<Option<(MidiInput, MidiOutput)>> = Mutex::new(None);
+
+/// The names of the MIDI input and output ports present now. This can block
+/// if the system's MIDI service does, so call it without holding the core
+/// lock where possible.
 pub fn list_ports() -> (Vec<String>, Vec<String>) {
-    let inputs = MidiInput::new(CLIENT)
-        .map(|m| m.ports().iter().filter_map(|p| m.port_name(p).ok()).collect())
-        .unwrap_or_default();
-    let outputs = MidiOutput::new(CLIENT)
-        .map(|m| m.ports().iter().filter_map(|p| m.port_name(p).ok()).collect())
-        .unwrap_or_default();
+    let mut lister = LISTER.lock().unwrap_or_else(|e| e.into_inner());
+    if lister.is_none() {
+        match (MidiInput::new(CLIENT), MidiOutput::new(CLIENT)) {
+            (Ok(i), Ok(o)) => *lister = Some((i, o)),
+            _ => return Default::default(),
+        }
+    }
+    let Some((mi, mo)) = lister.as_ref() else { return Default::default() };
+    let inputs = mi.ports().iter().filter_map(|p| mi.port_name(p).ok()).collect();
+    let outputs = mo.ports().iter().filter_map(|p| mo.port_name(p).ok()).collect();
     (inputs, outputs)
 }
 
@@ -88,6 +102,10 @@ fn find_port(names: &[String], query: &str) -> Option<String> {
 impl Midi {
     pub fn connections(&self) -> Vec<MidiConnection> {
         self.conns.iter().map(|c| c.info.clone()).collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.conns.is_empty()
     }
 
     pub fn is_connected(&self, input: &str) -> bool {
