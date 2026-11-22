@@ -189,11 +189,13 @@ pub struct DeviceTypeInfo {
 
 /// Pads in a `sampler`.
 pub const SAMPLER_PADS: u32 = 16;
-/// The largest sample a `sampler.upload` takes, decoded from base64 (its
+/// The largest chunk of a `sample.upload`, decoded from base64 (its
 /// base64 then fits a 16 MiB WebSocket frame).
 pub const MAX_UPLOAD_BYTES: usize = 11 * 1024 * 1024;
+/// The largest file an upload can send, in chunks.
+pub const MAX_UPLOAD_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 
-/// A loaded pad of a sampler.
+/// A loaded pad of a sampler (RFC 0010, regions RFC 0011).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct SamplerPad {
     /// 1..16.
@@ -202,7 +204,54 @@ pub struct SamplerPad {
     pub name: String,
     /// Where it is on the engine host.
     pub path: String,
+    /// The region of the file the pad plays, in seconds.
+    pub start: f64,
+    pub end: f64,
+    /// The region's length (`end - start`).
     pub seconds: f64,
+    /// The whole file's length.
+    pub file_seconds: f64,
+    /// For a project's own copy of a region: the file and region it was
+    /// cut from, to edit again if that file is still there.
+    pub origin: Option<SampleOrigin>,
+}
+
+/// Where a region came from: a file on the engine host and the seconds
+/// of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SampleOrigin {
+    pub path: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+/// An audio file on the engine host (`sample.info`), decoded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SampleInfo {
+    pub path: String,
+    pub name: String,
+    pub seconds: f64,
+    /// Codec, rate, and channels, e.g. `mp3, 44100 Hz, 2 ch`.
+    pub format: String,
+}
+
+/// A waveform overview (`sample.peaks`): `bins` (min, max) pairs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SamplePeaks {
+    pub start: f64,
+    pub end: f64,
+    pub peaks: Vec<[f32; 2]>,
+}
+
+/// Where an upload is (`sample.upload`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SampleUploadResult {
+    pub upload: String,
+    /// Bytes received so far.
+    #[ts(type = "number")]
+    pub received: u64,
+    /// Once done: where the file is stored on the engine host.
+    pub path: Option<String>,
 }
 
 /// A sampler's loaded pads.

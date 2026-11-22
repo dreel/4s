@@ -17,7 +17,7 @@ pub use project::*;
 pub use types::*;
 
 /// Bumped on any breaking change to the wire protocol.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// Default address the daemon listens on.
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:4440";

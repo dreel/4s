@@ -80,11 +80,16 @@ import type { Recording } from "./Recording";
 import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
 import type { RouteSetParams } from "./RouteSetParams";
+import type { SampleInfo } from "./SampleInfo";
+import type { SampleInfoParams } from "./SampleInfoParams";
+import type { SamplePeaks } from "./SamplePeaks";
+import type { SamplePeaksParams } from "./SamplePeaksParams";
+import type { SampleUploadParams } from "./SampleUploadParams";
+import type { SampleUploadResult } from "./SampleUploadResult";
 import type { SamplerGetParams } from "./SamplerGetParams";
 import type { SamplerInfo } from "./SamplerInfo";
 import type { SamplerLoadParams } from "./SamplerLoadParams";
 import type { SamplerPadParams } from "./SamplerPadParams";
-import type { SamplerUploadParams } from "./SamplerUploadParams";
 import type { Seat } from "./Seat";
 import type { SeatApplyLayoutParams } from "./SeatApplyLayoutParams";
 import type { SeatBindParams } from "./SeatBindParams";
@@ -140,7 +145,9 @@ export interface Methods {
   "device.move": { params: DeviceMoveParams; result: Graph };
   "sampler.get": { params: SamplerGetParams; result: SamplerInfo };
   "sampler.load": { params: SamplerLoadParams; result: SamplerInfo };
-  "sampler.upload": { params: SamplerUploadParams; result: SamplerInfo };
+  "sample.upload": { params: SampleUploadParams; result: SampleUploadResult };
+  "sample.info": { params: SampleInfoParams; result: SampleInfo };
+  "sample.peaks": { params: SamplePeaksParams; result: SamplePeaks };
   "sampler.clear": { params: SamplerPadParams; result: SamplerInfo };
   "mod.route": { params: ModRouteParams; result: ModRoutesResult };
   "mod.unroute": { params: ModUnrouteParams; result: ModRoutesResult };
@@ -250,7 +257,9 @@ export const METHODS: MethodName[] = [
   "device.move",
   "sampler.get",
   "sampler.load",
-  "sampler.upload",
+  "sample.upload",
+  "sample.info",
+  "sample.peaks",
   "sampler.clear",
   "mod.route",
   "mod.unroute",

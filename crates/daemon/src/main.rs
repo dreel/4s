@@ -55,6 +55,10 @@ struct Args {
     /// Keep the journal in memory only (no files under <data-dir>/journal).
     #[arg(long)]
     no_journal_file: bool,
+    /// Memory budget for decoded sample files (RFC 0011), in MB: the least
+    /// recently used are dropped (and decoded again when needed) past it.
+    #[arg(long, env = "FOURS_SAMPLE_CACHE_MB", default_value_t = core::DEFAULT_SAMPLE_CACHE_MB)]
+    sample_cache_mb: usize,
 }
 
 /// The person running the daemon: their host seat is matched by this name
@@ -162,6 +166,7 @@ fn run(args: Args) -> Result<()> {
         journal_dir,
         host_user(),
     )));
+    core.lock().expect("core").set_sample_cache_mb(args.sample_cache_mb);
     tracing::info!("data dir: {}", data_dir.display());
 
     if let Some(p) = &args.project {

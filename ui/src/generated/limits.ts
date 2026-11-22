@@ -6,3 +6,7 @@ export const MAX_LANES = 8;
 export const MAX_LANE_POINTS = 64;
 /** Parameters under these prefixes are the transport's (`transport_param`). */
 export const TRANSPORT_PREFIXES = ["transport.", "song."];
+/** The largest chunk of a `sample.upload`, in bytes. */
+export const MAX_UPLOAD_BYTES = 11534336;
+/** The protocol version this UI speaks (`session.hello`). */
+export const PROTOCOL_VERSION = 10;

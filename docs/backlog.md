@@ -380,6 +380,22 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   land on the slot's new occupant for one meter period (tag reports with
   a graph generation).
 
+- (2026-10-17, sample sources) decoding a long file (and hashing it the
+  first time) runs on the core thread under the core lock, so everything
+  waits for it, live MIDI and controllers included (a few hundred ms for a
+  song, more for the 20-minute limit). Decode on a worker and answer when
+  done.
+- (2026-10-17, sample sources) `4s sampler load` / `4s sample upload`
+  encode every chunk of a file before sending the first (about 1.3x the
+  file in memory); stream them one at a time.
+- (2026-10-17, sample sources) saving a pad's new cut under a fresh name
+  (never over a file an undo could load) leaves older cuts that nothing
+  uses in the bundle's `samples/`; prune unreferenced files after a save.
+- (2026-10-17, sample sources) files sent to the engine host (uploads,
+  and `4s sample info|peaks` of a file on the CLI's machine) stay in
+  `<data dir>/samples/` whether or not a pad uses them; nothing cleans
+  them up.
+
 ## Mismatches
 
 - (2026-10-10, recording branch review) RFC 0008 says live-note ticks are

@@ -21,7 +21,7 @@ mysong.4s/
 snapshot; loading applies it. One set of types covers the API and the file, and
 agents can generate or edit projects directly.
 
-It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010):
+It contains (format version 8; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010, RFC 0011):
 
 - The graph: `instruments` (`{id, type, name}`, in creation order),
   `channels` (`{n, name}`, in display order; a return bus has `"kind":
@@ -32,11 +32,14 @@ It contains (format version 7; RFC 0004, RFC 0007, RFC 0008, RFC 0009, RFC 0010)
   has none). Their parameters are in `params` under their ids. Modulation
   routes under `mod_routes`: `{source, target, depth}`. Both absent when
   empty.
-- Samplers' samples under `samples`: instrument id -> pad -> path. Saving
-  copies each sample into the bundle's `samples/` folder and stores the
-  path inside the bundle (`samples/<id>.<pad>.<file>`), so a bundle
-  moves between machines whole; a missing file leaves its pad empty with
-  a warning.
+- Samplers' samples under `samples`: instrument id -> pad -> a path (all
+  of the file) or `{path, start?, end?, origin?}` (a region in seconds,
+  RFC 0011). Saving puts each sample in the bundle's `samples/` folder and
+  stores the path inside the bundle: all of a WAV file is copied
+  (`samples/<id>.<pad>.<file>`); a region, or another format, is written
+  as a WAV of the region (`samples/<id>.<pad>.<name>.wav`) with `origin`,
+  the file and region it was cut from. A bundle moves between machines
+  whole; a missing file leaves its pad empty with a warning.
 - Parameter values as a `path -> value` map (e.g. `"mixer.2.volume": 0.7`,
   `"bass.cutoff": 0.3`).
 - Each instrument's track (RFC 0008, RFC 0009) under `tracks`: its clip
@@ -113,7 +116,9 @@ a track) before anything changes.
   track's selected clip (an instrument without a track gets one, its empty
   clip launched), so it plays as it did, and a clip without a length gets
   `sequencer.length` (default 16 steps) in ticks. v6 -> v7 (RFC 0010) adds
-  `devices` (none in an older project).
+  `devices` (none in an older project). v7 -> v8 (RFC 0011) lets a sample
+  be `{path, start?, end?, origin?}`; a v7 path is read as all of the
+  file.
 - Parameters are stored by path, so added params take their defaults from the
   parameter registry. Unknown paths are warned about (whether they are kept or
   dropped is decided when building).

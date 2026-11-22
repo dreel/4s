@@ -1,27 +1,25 @@
 // Editor for a `sampler` (RFC 0010): the step view with each pad's sample
 // beside its row (audition, load a WAV from this computer, clear), and the
-// selected pad's knobs. A file chosen here is sent to the engine
-// (`sampler.upload`), so it works with a remote engine too.
+// selected pad's knobs. A file chosen here (any format the engine reads:
+// WAV, AIFF, FLAC, MP3, AAC/M4A, ALAC, Ogg Vorbis) is sent to the engine
+// (`sample.upload`, `upload.ts`), so it works with a remote engine too.
 
 import { useState } from "react";
 import type { NoteRow } from "../generated/NoteRow";
 import { act, client, useApp } from "../store";
+import { uploadFile } from "../upload";
 import { ParamKnob, pan, pct, st } from "./ParamKnob";
 import { StepView } from "./StepView";
 
-/** Base64 of a file's bytes. */
-async function base64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let s = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-}
+/** File types the picker offers (the engine checks what it gets). */
+export const AUDIO_ACCEPT = "audio/*,.wav,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,.caf";
 
 function PadControls({ id, row, pad, selected, onSelect }: { id: string; row: NoteRow; pad: number; selected: boolean; onSelect: () => void }) {
   const sample = useApp((s) => s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.find((p) => p.pad === pad));
   const load = async (file: File | undefined) => {
     if (!file) return;
-    await act(client.call("sampler.upload", { instrument: id, pad, name: file.name, data: await base64(file) }));
+    const upload = await uploadFile(file);
+    if (upload) await act(client.call("sampler.load", { instrument: id, pad, path: null, upload, start: null, end: null }));
   };
   return (
     <div className="flex items-center gap-1 w-56 shrink-0">
@@ -39,9 +37,9 @@ function PadControls({ id, row, pad, selected, onSelect }: { id: string; row: No
         <span className="text-zinc-500 mr-1">{pad}</span>
         {sample?.name ?? "empty"}
       </button>
-      <label className="px-1.5 h-6 flex items-center rounded border border-zinc-700 text-[10px] text-zinc-400 hover:border-zinc-500 cursor-pointer" title="load a WAV">
+      <label className="px-1.5 h-6 flex items-center rounded border border-zinc-700 text-[10px] text-zinc-400 hover:border-zinc-500 cursor-pointer" title="load an audio file">
         load
-        <input type="file" accept=".wav,audio/wav" className="hidden" data-testid={`pad-load-${id}-${pad}`} onChange={(e) => void load(e.target.files?.[0])} />
+        <input type="file" accept={AUDIO_ACCEPT} className="hidden" data-testid={`pad-load-${id}-${pad}`} onChange={(e) => void load(e.target.files?.[0])} />
       </label>
       {sample && (
         <button
