@@ -26,6 +26,26 @@ macro_rules! api {
             pub fn method(&self) -> &'static str {
                 match self { $( Request::$variant(_) => $name, )* }
             }
+
+            /// The method, without its params.
+            pub fn kind(&self) -> Method {
+                match self { $( Request::$variant(_) => Method::$variant, )* }
+            }
+        }
+
+        /// A method without its params, for classifying requests.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum Method {
+            $( $variant, )*
+        }
+
+        impl Method {
+            /// Every method, in declaration order.
+            pub const ALL: &[Method] = &[ $( Method::$variant ),* ];
+
+            pub fn name(self) -> &'static str {
+                match self { $( Method::$variant => $name, )* }
+            }
         }
 
         /// Every RPC method name, in declaration order.
@@ -449,6 +469,21 @@ pub struct HistoryStepResult {
     /// Keys left alone because another user changed them since.
     pub skipped: Vec<String>,
     pub history: HistoryInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct HistoryGroupBeginParams {
+    /// The undo step's label, e.g. "assistant: punchier kick".
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct HistoryGroupResult {
+    /// The group begun or ended; null if `history.group_end` found none open.
+    pub label: Option<String>,
+    /// Keys the group's undo step changes so far (empty if it changed
+    /// nothing, or was undone).
+    pub changed: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -1355,6 +1390,12 @@ api! {
     HistoryRedo = "history.redo" (Empty) -> HistoryStepResult;
     /// The caller's undo and redo stacks.
     HistoryGet = "history.get" (Empty) -> HistoryInfo;
+    /// Start an undo group on this connection: its edits until
+    /// `history.group_end` (or until it disconnects) are one undo step with
+    /// this label. Fails if the connection already has a group open.
+    HistoryGroupBegin = "history.group_begin" (HistoryGroupBeginParams) -> HistoryGroupResult;
+    /// End this connection's undo group (nothing to do if none is open).
+    HistoryGroupEnd = "history.group_end" (Empty) -> HistoryGroupResult;
     /// Recent journal entries: every request that could change state.
     JournalGet = "journal.get" (JournalGetParams) -> JournalGetResult;
     /// The current history segment as a replayable recording.
@@ -1534,6 +1575,74 @@ pub fn parse_request(method: &str, params: Option<serde_json::Value>) -> Result<
     }
     serde_json::from_value(serde_json::json!({ "method": method, "params": params }))
         .map_err(|e| format!("invalid params for '{method}': {e}"))
+}
+
+impl Method {
+    /// Requests that cannot change state, so are not journaled. An exhaustive
+    /// match: a new method must be classified here.
+    ///
+    /// The daemon journals requests by this, and the in-app assistant's
+    /// `rpc` tool allows methods by it (RFC 0013); both lists are in the
+    /// generated schema.
+    pub fn read_only(self) -> bool {
+        use Method::*;
+        match self {
+            Hello | StateGet | EventsSubscribe | EventsUnsubscribe | ParamList | ParamGet
+            | InstrumentTypes | InstrumentList | PatternGet | PatternGetNotes | HistoryGet
+            | JournalGet | JournalExport | ControllerGet | MidiPorts | ProjectList | RenderOffline
+            | EngineStatus | DaemonInfo | DaemonShutdown | SeatList | ClipGet | MidiModels | SongGet | StepGet | DeviceTypes | DeviceList | SamplerGet | SampleInfo | SamplePeaks | SampleUpload | SamplePlay | SampleStop => true,
+            ParamSet | TransportPlay | TransportStop | TransportRecord | TransportLocate | ClipNew
+            | ClipDuplicate | ClipRename | ClipDelete | ClipSelect | ClipLaunch | SongPlace | SongRemove
+            | SongMove | SongBack
+            | Batch | InstrumentAdd | InstrumentRemove | ChannelAdd
+            | ChannelRemove | ChannelRename | ChannelMove | RouteSet | HistoryUndo | HistoryRedo
+            | HistoryGroupBegin | HistoryGroupEnd
+            | PatternSet | PatternSetStep | PatternToggleStep | PatternClear | PatternSetNotes
+            | PatternSetNote | VoiceTrigger | VoiceNoteOn | VoiceNoteOff | ControllerPress
+            | ControllerKnob | ControllerSetMode | MidiConnect | MidiDisconnect | ProjectNew
+            | ProjectSave | ProjectLoad | ProjectImport | MidiRename | MidiSetSeat | MidiInput
+            | SeatClaim | SeatCreate | SeatLeave | SeatRemove | SeatFocus | SeatPage | SeatBind
+            | SeatUnbind | SeatMapCc | SeatUnmapCc | SeatLearnCc | SeatFollowKnobs | ClipSet | ClipAdd
+            | ClipRemove | ClipUpdate | ClipLength | ClipClear | ClipQuantize | ClipLaneSet | ClipLaneRemove | SeatApplyLayout | StepSet | DeviceAdd | DeviceRemove | DeviceMove | ModRoute | ModUnroute | SamplerLoad | SamplerClear => false,
+        }
+    }
+
+    /// Requests a `batch` can hold (journaled, undoable edits, plus
+    /// performance and controller input): not another batch, nor what a connection,
+    /// the journal, a project load, or the transport (which settles a running
+    /// take before it is journaled) handles on its own.
+    pub fn batchable(self) -> bool {
+        use Method::*;
+        !matches!(
+            self,
+            Batch
+                | Hello
+                | EventsSubscribe
+                | EventsUnsubscribe
+                | RenderOffline
+                | DaemonInfo
+                | DaemonShutdown
+                | HistoryUndo
+                | HistoryRedo
+                | HistoryGet
+                | HistoryGroupBegin
+                | HistoryGroupEnd
+                | JournalGet
+                | JournalExport
+                | ProjectNew
+                | ProjectLoad
+                | ProjectImport
+                | TransportRecord
+                | TransportPlay
+                | TransportStop
+                | TransportLocate
+                // Journaled with the ports it applies, filled in by `handle`.
+                | SeatApplyLayout
+                // Files, not project state, and not journaled (a load of the
+                // stored file is).
+                | SampleUpload
+        )
+    }
 }
 
 #[cfg(test)]

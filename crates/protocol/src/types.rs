@@ -885,6 +885,10 @@ pub struct HistoryInfo {
     pub user: String,
     pub undo: Vec<String>,
     pub redo: Vec<String>,
+    /// The label of the undo group open on the caller's connection
+    /// (`history.group_begin`), if any.
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

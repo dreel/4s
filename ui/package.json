@@ -10,12 +10,14 @@
     "gen": "cargo run -q -p fours-protocol --bin gen-bindings",
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc --noEmit -p . && npm run -s typecheck:assistant",
+    "typecheck:assistant": "tsc --ignoreConfig --noEmit --allowJs --checkJs --target es2022 --module nodenext --typeRoots node_modules/@types --types node --skipLibCheck assistant/index.cjs",
     "start": "vite build && electron .",
     "electron": "electron .",
     "test:e2e": "vite build && playwright test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

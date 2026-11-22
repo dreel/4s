@@ -13,7 +13,7 @@
 // (the window stays hidden and, on macOS, the app has no Dock icon and never
 // activates; the e2e harness sets it).
 
-const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, safeStorage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -195,6 +195,23 @@ async function main() {
   });
   // Seats are matched by the user's name, as the daemon's host seat is.
   const user = process.env.FOURS_USER || os.userInfo().username;
+  // The in-app assistant (RFC 0013): its loop, API key, and own daemon
+  // connection live here; the renderer only sees its events.
+  try {
+    require("../assistant/index.cjs").setupAssistant({
+      ipcMain,
+      safeStorage,
+      send: (channel, payload) => {
+        if (!win.isDestroyed()) win.webContents.send(channel, payload);
+      },
+      url,
+      user,
+      token: process.env.FOURS_TOKEN ?? null,
+      dataDir: DATA_DIR,
+    });
+  } catch (e) {
+    console.error(`[4s] assistant not available: ${e.message}`);
+  }
   const query = { daemon: url, lifecycle, user, ...(error ? { daemonError: error } : {}) };
   const devUrl = process.env.FOURS_UI_DEV_URL;
   if (devUrl) {

@@ -12,7 +12,10 @@ and agents can drive and verify every part of it.
 2. **The UI is thin.** An Electron app (React + Tailwind) renders daemon state
    and sends commands. No business logic in the UI.
 3. **One API, two clients.** Every UI action is an RPC that is also available
-   from the CLI, 1:1. The CLI is the primary agentic interface.
+   from the CLI, 1:1. The CLI is the primary agentic interface. The in-app
+   assistant ([docs/assistant.md](docs/assistant.md), RFC 0013) is a
+   UI-only client of that same API: it only calls RPCs (each also in the
+   CLI), so it adds no capability the CLI lacks.
 4. **Close the loop.** Every component must be drivable and verifiable end-to-end
    by an agent: headless audio renders, a virtual controller, scripted UI tests.
 5. **Modular by design.** Instruments, mixer channels, effects, and MIDI devices
@@ -45,6 +48,7 @@ and agents can drive and verify every part of it.
 - [Journal](docs/journal.md) -- what happened and who did it, undo/redo, reproducing bugs by replaying recordings, recordings as tests
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
 - [Akai MPK mini IV](docs/hardware/akai-mpk-mini-iv.md) -- device model, ports, default layout
+- [Assistant](docs/assistant.md) -- the in-app assistant: loop in Electron main, tools, rpc allowlist, key storage, fake-API tests
 - [Backlog](docs/backlog.md) -- noticed but not done: possible bugs, follow-ups, doc/code mismatches
 
 ## Build, run, verify
@@ -105,9 +109,14 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 - `4s instrument add poly` adds an eight-voice synth (`synth.*`); a chord
   is several notes on one step: `4s clip add synth 0 C4 --len 96`, then the
   same for E4 and G4.
+- The app's assistant panel (Cmd-K, [docs/assistant.md](docs/assistant.md))
+  runs a Claude tool loop in Electron main; its e2e
+  (`ui/e2e/assistant.spec.ts`) uses a fake Anthropic server, so no key.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
-  happened in a session. `4s undo` / `4s redo` act on your own history.
+  happened in a session. `4s undo` / `4s redo` act on your own history;
+  `4s group "label" 'set a 1' 'set b 2'` makes several commands one undo
+  step (`history.group_begin` / `history.group_end`).
 - `4s journal export -o rec.json` saves a session; `4s journal replay rec.json`
   (into an isolated daemon -- it replaces the project) reproduces it and
   checks every step matches. See [docs/journal.md](docs/journal.md).

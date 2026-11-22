@@ -27,7 +27,11 @@ Status: implemented (protocol version 2, RFC 0004). Run `4s methods` for the liv
   - `ui/src/generated/*.ts` -- one file per type, plus `methods.ts`.
   - `schema/4s.schema.json` -- JSON Schema for requests, events, snapshots,
     and project files. This is the language-neutral contract; any TS runtime
-    validators (e.g. Zod) must be generated from it, never hand-written.
+    validators (e.g. Zod) must be generated from it, never hand-written. It
+    also lists the method classes (`read_only_methods`: not journaled;
+    `batchable_methods`: what `batch` accepts), from `Method::read_only` /
+    `Method::batchable` in `crates/protocol/src/api.rs`, which the daemon
+    journals by and the in-app assistant allows `rpc` calls by.
 - Generated files are committed; `scripts/check.sh` regenerates them and fails
   if anything changed.
 
@@ -80,7 +84,9 @@ auditioning (`voice.trigger`), the controller (`controller.*`;
 `controller.set_mode` also takes `grid`, steps or launch, and a pitched
 focus's `base_note`), MIDI (`midi.*`),
 seats and their bindings (`seat.*`, RFC 0007), undo and the journal
-(`history.*`, `journal.get`, `journal.export`), projects (`project.*`,
+(`history.*`, including connection-scoped undo groups
+`history.group_begin` / `history.group_end`, see
+[journal.md](journal.md#undo-groups); `journal.get`, `journal.export`), projects (`project.*`,
 including `project.import` to load a project sent inline), rendering
 (`render.offline`), status (`engine.status`), and the
 daemon itself (`daemon.info`, `daemon.shutdown`; see [lifecycle.md](lifecycle.md)).

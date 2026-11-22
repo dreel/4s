@@ -153,6 +153,8 @@ pub struct Core {
     /// A journaled request is being handled: changes made now are part of
     /// its entry (see `journaled`).
     in_request: bool,
+    /// Open undo groups (`history.group_begin`) by connection (`conn:<id>`).
+    groups: HashMap<String, UndoGroup>,
     controller: Controller,
     /// The controller state last sent to clients.
     controller_sent: Option<ControllerState>,
@@ -190,6 +192,16 @@ pub struct Core {
     /// project new/load/import): the journal seq and the project then.
     segment_seq: u64,
     segment_base: ProjectFile,
+}
+
+/// An open `history.group_begin` on one connection.
+struct UndoGroup {
+    /// Unique per begin (`conn:<id>@<seq>`), so a later group never joins
+    /// an earlier group's step.
+    id: String,
+    /// The user it was begun as; only that user's edits join it.
+    user: String,
+    label: String,
 }
 
 impl Core {
@@ -245,6 +257,7 @@ impl Core {
             record: RecordSettings::default(),
             take: None,
             in_request: false,
+            groups: HashMap::new(),
             controller: Controller::default(),
             controller_sent: None,
             block_map,
@@ -2044,6 +2057,66 @@ impl Core {
         Ok(HistoryStepResult { label: Some(plan.label), changed, skipped, history: self.history.info(user) })
     }
 
+    /// The undo group a connection's edits as `user` join, if it has one
+    /// open: its id and label.
+    fn group_of<'a>(groups: &'a HashMap<String, UndoGroup>, client: &str, user: &str) -> Option<(&'a str, &'a str)> {
+        groups.get(client).filter(|g| g.user == user).map(|g| (g.id.as_str(), g.label.as_str()))
+    }
+
+    /// Whether a connection has an undo group open (the server ends it when
+    /// the connection goes).
+    pub fn has_group(&self, client: &str) -> bool {
+        self.groups.contains_key(client)
+    }
+
+    /// `history.group_begin` / `history.group_end`: open or close this
+    /// connection's undo group. Journaled (with no changes), so a replay
+    /// groups the same edits.
+    fn history_group(
+        &mut self,
+        req: Request,
+        origin: &str,
+        client: &str,
+        user: &str,
+    ) -> Result<HistoryGroupResult, RpcError> {
+        let context = self.journal_context(client);
+        let method = req.method();
+        let params = serde_json::to_value(&req).ok().and_then(|mut v| v.get_mut("params").map(Value::take));
+        let seq = self.journal.next_seq();
+        let result = match req {
+            Request::HistoryGroupBegin(p) => {
+                let label = p.label.trim().to_string();
+                if label.is_empty() {
+                    Err(RpcError::invalid("an undo group needs a label"))
+                } else if let Some(g) = self.groups.get(client) {
+                    Err(RpcError::failed(format!("an undo group is already open on this connection: '{}'", g.label)))
+                } else {
+                    let id = format!("{client}@{seq}");
+                    self.groups.insert(client.to_string(), UndoGroup { id, user: user.to_string(), label: label.clone() });
+                    Ok(HistoryGroupResult { label: Some(label), changed: Vec::new() })
+                }
+            }
+            _ => Ok(match self.groups.remove(client) {
+                Some(g) => HistoryGroupResult { changed: self.history.group_keys(&g.user, &g.id), label: Some(g.label) },
+                None => HistoryGroupResult { label: None, changed: Vec::new() },
+            }),
+        };
+        let entry = JournalEntry {
+            seq,
+            time: unix_time(),
+            user: user.to_string(),
+            origin: origin.to_string(),
+            method: method.to_string(),
+            params: params.unwrap_or(Value::Null),
+            context,
+            changes: Vec::new(),
+            reverts: None,
+            error: result.as_ref().err().map(|e| e.message.clone()),
+        };
+        self.journal_push(entry, origin);
+        result
+    }
+
     /// Set doc keys to the given values (`null`: absent, or the default for
     /// params and steps), in an order that keeps the graph valid: channels
     /// and instruments are created first, then order, routes, params, and
@@ -2335,9 +2408,23 @@ impl Core {
 
     fn handle_as(&mut self, req: Request, origin: &str, client: &str, user: String) -> RpcResult {
         match &req {
-            Request::HistoryUndo(_) => return ok(self.history_step(&user, origin, client, false)?),
-            Request::HistoryRedo(_) => return ok(self.history_step(&user, origin, client, true)?),
-            Request::HistoryGet(_) => return ok(self.history.info(&user)),
+            // An undo or redo on a connection with an open group ends the
+            // group first, so undo takes back the whole group.
+            Request::HistoryUndo(_) | Request::HistoryRedo(_) => {
+                if self.groups.contains_key(client) {
+                    self.history_group(Request::HistoryGroupEnd(Empty {}), origin, client, &user)?;
+                }
+                let redo = matches!(req, Request::HistoryRedo(_));
+                return ok(self.history_step(&user, origin, client, redo)?);
+            }
+            Request::HistoryGet(_) => {
+                let mut info = self.history.info(&user);
+                info.group = self.groups.get(client).map(|g| g.label.clone());
+                return ok(info);
+            }
+            Request::HistoryGroupBegin(_) | Request::HistoryGroupEnd(_) => {
+                return ok(self.history_group(req, origin, client, &user)?);
+            }
             Request::JournalGet(p) => return ok(JournalGetResult { entries: self.journal.get(p) }),
             Request::JournalExport(_) => return ok(self.journal_export()?),
             _ => {}
@@ -2406,7 +2493,8 @@ impl Core {
             }
         } else if !changes.is_empty() {
             let was = self.history.summary(&user);
-            self.history.record(&user, seq, journal::label(method, &params, &changes), &changes);
+            let group = Self::group_of(&self.groups, client, &user);
+            self.history.record(&user, seq, journal::label(method, &params, &changes), &changes, group);
             if self.history.summary(&user) != was {
                 self.emit_history(&user, origin);
             }
@@ -2450,7 +2538,8 @@ impl Core {
         let seq = self.journal.next_seq();
         if !changes.is_empty() {
             let was = self.history.summary(user);
-            self.history.record(user, seq, journal::label(method, &params, &changes), &changes);
+            let group = Self::group_of(&self.groups, client, user);
+            self.history.record(user, seq, journal::label(method, &params, &changes), &changes, group);
             if self.history.summary(user) != was {
                 self.emit_history(user, origin);
             }
@@ -2667,6 +2756,8 @@ impl Core {
             Request::HistoryUndo(_)
             | Request::HistoryRedo(_)
             | Request::HistoryGet(_)
+            | Request::HistoryGroupBegin(_)
+            | Request::HistoryGroupEnd(_)
             | Request::JournalGet(_)
             | Request::JournalExport(_) => {
                 Err(RpcError::failed("handled by Core::handle"))
@@ -2729,65 +2820,17 @@ impl Core {
     }
 }
 
-/// Requests a `batch` can hold: not another batch, nor what a connection,
-/// the journal, a project load, or the transport (which settles a running
-/// take before it is journaled) handles on its own.
+/// Requests a `batch` can hold (`Method::batchable`), except a sampler
+/// load of an upload: `handle` journals that as the load of the stored
+/// file, and a batch's requests do not go through `handle`.
 fn batchable(req: &Request) -> bool {
-    use Request::*;
-    !matches!(
-        req,
-        Batch(_)
-            | Hello(_)
-            | EventsSubscribe(_)
-            | EventsUnsubscribe(_)
-            | RenderOffline(_)
-            | DaemonInfo(_)
-            | DaemonShutdown(_)
-            | HistoryUndo(_)
-            | HistoryRedo(_)
-            | HistoryGet(_)
-            | JournalGet(_)
-            | JournalExport(_)
-            | ProjectNew(_)
-            | ProjectLoad(_)
-            | ProjectImport(_)
-            | TransportRecord(_)
-            | TransportPlay(_)
-            | TransportStop(_)
-            | TransportLocate(_)
-            // Journaled with the ports it applies, filled in by `handle`.
-            | SeatApplyLayout(_)
-            // Files, not project state, and not journaled (a load of the
-            // stored file is).
-            | SampleUpload(_)
-    ) && !matches!(req,
-        // Journaled as the load of the stored file by `handle`, which a
-        // batch's requests do not go through.
-        SamplerLoad(p) if p.upload.is_some())
+    req.kind().batchable() && !matches!(req, Request::SamplerLoad(p) if p.upload.is_some())
 }
 
-/// Requests that cannot change state, so are not journaled. An exhaustive
-/// match: a new method must be classified here.
+/// Requests that cannot change state, so are not journaled
+/// (`Method::read_only`).
 fn read_only(req: &Request) -> bool {
-    use Request::*;
-    match req {
-        Hello(_) | StateGet(_) | EventsSubscribe(_) | EventsUnsubscribe(_) | ParamList(_) | ParamGet(_)
-        | InstrumentTypes(_) | InstrumentList(_) | PatternGet(_) | PatternGetNotes(_) | HistoryGet(_)
-        | JournalGet(_) | JournalExport(_) | ControllerGet(_) | MidiPorts(_) | ProjectList(_) | RenderOffline(_)
-        | EngineStatus(_) | DaemonInfo(_) | DaemonShutdown(_) | SeatList(_) | ClipGet(_) | MidiModels(_) | SongGet(_) | StepGet(_) | DeviceTypes(_) | DeviceList(_) | SamplerGet(_) | SampleInfo(_) | SamplePeaks(_) | SampleUpload(_) | SamplePlay(_) | SampleStop(_) => true,
-        ParamSet(_) | TransportPlay(_) | TransportStop(_) | TransportRecord(_) | TransportLocate(_) | ClipNew(_)
-        | ClipDuplicate(_) | ClipRename(_) | ClipDelete(_) | ClipSelect(_) | ClipLaunch(_) | SongPlace(_) | SongRemove(_)
-        | SongMove(_) | SongBack(_)
-        | Batch(_) | InstrumentAdd(_) | InstrumentRemove(_) | ChannelAdd(_)
-        | ChannelRemove(_) | ChannelRename(_) | ChannelMove(_) | RouteSet(_) | HistoryUndo(_) | HistoryRedo(_)
-        | PatternSet(_) | PatternSetStep(_) | PatternToggleStep(_) | PatternClear(_) | PatternSetNotes(_)
-        | PatternSetNote(_) | VoiceTrigger(_) | VoiceNoteOn(_) | VoiceNoteOff(_) | ControllerPress(_)
-        | ControllerKnob(_) | ControllerSetMode(_) | MidiConnect(_) | MidiDisconnect(_) | ProjectNew(_)
-        | ProjectSave(_) | ProjectLoad(_) | ProjectImport(_) | MidiRename(_) | MidiSetSeat(_) | MidiInput(_)
-        | SeatClaim(_) | SeatCreate(_) | SeatLeave(_) | SeatRemove(_) | SeatFocus(_) | SeatPage(_) | SeatBind(_)
-        | SeatUnbind(_) | SeatMapCc(_) | SeatUnmapCc(_) | SeatLearnCc(_) | SeatFollowKnobs(_) | ClipSet(_) | ClipAdd(_)
-        | ClipRemove(_) | ClipUpdate(_) | ClipLength(_) | ClipClear(_) | ClipQuantize(_) | ClipLaneSet(_) | ClipLaneRemove(_) | SeatApplyLayout(_) | StepSet(_) | DeviceAdd(_) | DeviceRemove(_) | DeviceMove(_) | ModRoute(_) | ModUnroute(_) | SamplerLoad(_) | SamplerClear(_) => false,
-    }
+    req.kind().read_only()
 }
 
 impl Core {
