@@ -73,6 +73,12 @@ pub fn start_device_watcher() {}
 /// answering, and the scan hung inside CoreMIDI.
 static LISTER: Mutex<Option<(MidiInput, MidiOutput)>> = Mutex::new(None);
 
+/// Drop the kept listing clients so the next `list_ports` makes new ones:
+/// clients made before macOS's MIDIServer restarted list nothing.
+pub fn reset_lister() {
+    *LISTER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 /// The names of the MIDI input and output ports present now. This can block
 /// if the system's MIDI service does, so call it without holding the core
 /// lock where possible.
@@ -104,8 +110,9 @@ impl Midi {
         self.conns.iter().map(|c| c.info.clone()).collect()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.conns.is_empty()
+    /// The connected input ports.
+    pub fn connected_inputs(&self) -> Vec<String> {
+        self.conns.iter().map(|c| c.info.input.clone()).collect()
     }
 
     pub fn is_connected(&self, input: &str) -> bool {
@@ -220,9 +227,12 @@ impl Midi {
     }
 
     /// Drop connections whose ports no longer exist. Returns true if any were removed.
-    pub fn prune(&mut self, inputs: &[String]) -> bool {
+    /// Drop connections to ports that were connected when `inputs` was
+    /// listed (`listed_with`) and are gone from it. A port connected since
+    /// is kept: the list may be older than the connection.
+    pub fn prune(&mut self, inputs: &[String], listed_with: &[String]) -> bool {
         let before = self.conns.len();
-        self.conns.retain(|c| inputs.contains(&c.info.input));
+        self.conns.retain(|c| inputs.contains(&c.info.input) || !listed_with.contains(&c.info.input));
         before != self.conns.len()
     }
 
