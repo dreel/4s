@@ -76,7 +76,8 @@ static LISTER: Mutex<Option<(MidiInput, MidiOutput)>> = Mutex::new(None);
 /// Drop the kept listing clients so the next `list_ports` makes new ones:
 /// clients made before macOS's MIDIServer restarted list nothing.
 pub fn reset_lister() {
-    *LISTER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    let old = LISTER.lock().unwrap_or_else(|e| e.into_inner()).take();
+    drop(old); // disposed without the mutex: a wedged MIDIServer can block it
 }
 
 /// The names of the MIDI input and output ports present now. This can block
@@ -228,8 +229,9 @@ impl Midi {
 
     /// Drop connections to ports that were connected when `inputs` was
     /// listed (`listed_with`) and are gone from it; a port connected since
-    /// is kept, as the list may be older than the connection. Returns true
-    /// if any were removed.
+    /// is kept, as the list may be older than the connection (one dropped
+    /// and remade by hand while the list was taken is not). Returns true if
+    /// any were removed.
     pub fn prune(&mut self, inputs: &[String], listed_with: &[String]) -> bool {
         let before = self.conns.len();
         self.conns.retain(|c| inputs.contains(&c.info.input) || !listed_with.contains(&c.info.input));
