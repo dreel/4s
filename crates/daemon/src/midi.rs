@@ -84,13 +84,13 @@ pub fn reset_lister() {
 /// lock where possible.
 pub fn list_ports() -> (Vec<String>, Vec<String>) {
     let mut lister = LISTER.lock().unwrap_or_else(|e| e.into_inner());
-    if lister.is_none() {
-        match (MidiInput::new(CLIENT), MidiOutput::new(CLIENT)) {
-            (Ok(i), Ok(o)) => *lister = Some((i, o)),
+    let (mi, mo) = match &mut *lister {
+        Some(l) => l,
+        empty => match (MidiInput::new(CLIENT), MidiOutput::new(CLIENT)) {
+            (Ok(i), Ok(o)) => empty.insert((i, o)),
             _ => return Default::default(),
-        }
-    }
-    let Some((mi, mo)) = lister.as_ref() else { return Default::default() };
+        },
+    };
     let inputs = mi.ports().iter().filter_map(|p| mi.port_name(p).ok()).collect();
     let outputs = mo.ports().iter().filter_map(|p| mo.port_name(p).ok()).collect();
     (inputs, outputs)

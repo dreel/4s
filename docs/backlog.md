@@ -204,7 +204,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   only when every connected port vanishes at once; a daemon with nothing
   connected keeps clients made before a MIDIServer restart, which list no
   ports, so a device plugged in later is not auto-connected until the daemon
-  restarts. Rebuild them when the list has been empty for a while.
+  restarts. Rebuild them when the list has been empty for a while. And when
+  the scan does rebuild them and the connected ports are listed again, their
+  connections (made under the old server) are likely dead but still count as
+  connected, so auto-connect skips them; drop and remake them there.
 - (2026-11-22, MIDI scan fix) the CLI e2e covers the scan (`virtual_block`
   unplugged and pruned), but not the MIDIServer hang or restart that
   motivated the fix: no harness reproduces those.
