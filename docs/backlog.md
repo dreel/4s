@@ -535,5 +535,13 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   `os.userInfo().username` (`root`): no seat matches, the seat chooser
   covers the app, and nearly every Electron e2e times out. Have both use
   the same fallback, or set `FOURS_USER` in the harness.
+- (2026-11-23, sampler long files) the UI's 60 s pad limit
+  (`MAX_REGION` in `SampleEditor.tsx`) copies the daemon's
+  `sources::MAX_REGION_SECONDS`; put it in `crates/protocol` and
+  `generated/limits.ts` so they cannot drift.
+- (2026-11-23, sample editor) typing a start past the selection's end
+  swaps the two (the selection is kept sorted), so typing 70 then 70.3
+  into a 0..60 selection gives 60..70.3. Keep the length or move the end
+  along instead.
 
 ## Process

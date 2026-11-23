@@ -3,24 +3,48 @@
 // selected pad's knobs. A file chosen here (any format the engine reads:
 // WAV, AIFF, FLAC, MP3, AAC/M4A, ALAC, Ogg Vorbis) is sent to the engine
 // (`sample.upload`, `upload.ts`), so it works with a remote engine too.
+// A file longer than a pad plays (a whole song, to cut a hit out of) loads
+// its first MAX_REGION seconds and opens the sample editor on all of it,
+// to choose the part the pad plays.
 
 import { useState } from "react";
 import type { NoteRow } from "../generated/NoteRow";
 import { act, client, useApp } from "../store";
 import { uploadFile } from "../upload";
 import { ParamKnob, pan, pct, st } from "./ParamKnob";
-import { SampleEditor } from "./SampleEditor";
+import { MAX_REGION, SampleEditor } from "./SampleEditor";
 import { StepView } from "./StepView";
 
 /** File types the picker offers (the engine checks what it gets). */
 export const AUDIO_ACCEPT = "audio/*,.wav,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,.caf";
 
-function PadControls({ id, row, pad, selected, onSelect }: { id: string; row: NoteRow; pad: number; selected: boolean; onSelect: () => void }) {
+function PadControls({
+  id,
+  row,
+  pad,
+  selected,
+  onSelect,
+  onCut,
+}: {
+  id: string;
+  row: NoteRow;
+  pad: number;
+  selected: boolean;
+  onSelect: () => void;
+  /** The file (its path on the engine host) was longer than a pad plays:
+   * the pad has its start. */
+  onCut: (path: string) => void;
+}) {
   const sample = useApp((s) => s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.find((p) => p.pad === pad));
   const load = async (file: File | undefined) => {
     if (!file) return;
     const upload = await uploadFile(file);
-    if (upload) await act(client.call("sampler.load", { instrument: id, pad, path: null, upload, start: null, end: null }));
+    if (!upload) return;
+    // The first MAX_REGION seconds: all of a file up to that long (the
+    // engine stops the region at the file's end), the start of a longer one.
+    const info = await act(client.call("sampler.load", { instrument: id, pad, path: null, upload, start: 0, end: MAX_REGION }));
+    const loaded = info?.pads.find((p) => p.pad === pad);
+    if (loaded && loaded.file_seconds > loaded.end - loaded.start + 0.001) onCut(loaded.path);
   };
   return (
     <div className="flex items-center gap-1 w-56 shrink-0">
@@ -58,6 +82,9 @@ function PadControls({ id, row, pad, selected, onSelect }: { id: string; row: No
 
 export function SamplerEditor({ id }: { id: string }) {
   const [pad, setPad] = useState(1);
+  /** The pad just loaded with the start of a longer file, whose editor
+   * opens on the whole file; `n` counts loads, so each opens it anew. */
+  const [cut, setCut] = useState<{ pad: number; n: number; path: string } | null>(null);
   const loaded = useApp((s) => !!s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.some((x) => x.pad === pad));
   const p = (name: string) => `${id}.${pad}.${name}`;
   return (
@@ -66,7 +93,23 @@ export function SamplerEditor({ id }: { id: string }) {
         id={id}
         rowExtras={(r) => {
           const k = Number(r.id.replace("pad", ""));
-          return <PadControls id={id} row={r} pad={k} selected={k === pad} onSelect={() => setPad(k)} />;
+          return (
+            <PadControls
+              id={id}
+              row={r}
+              pad={k}
+              selected={k === pad}
+              onSelect={() => {
+                setPad(k);
+                // Back on a pad later, its editor shows its region again.
+                setCut((c) => (c && c.pad !== k ? null : c));
+              }}
+              onCut={(path) => {
+                setPad(k);
+                setCut((c) => ({ pad: k, n: (c?.n ?? 0) + 1, path }));
+              }}
+            />
+          );
         }}
       />
       <section className="flex items-center gap-4 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800" data-testid={`sampler-pad-${id}`}>
@@ -80,7 +123,7 @@ export function SamplerEditor({ id }: { id: string }) {
         <ParamKnob path={p("release")} label="release" format={pct} />
         <ParamKnob path={p("choke")} label="choke" format={(v) => (Math.round(v) === 0 ? "off" : `${Math.round(v)}`)} />
       </section>
-      {loaded && <SampleEditor key={pad} id={id} pad={pad} />}
+      {loaded && <SampleEditor key={cut?.pad === pad ? `${pad}-${cut.n}` : `${pad}`} id={id} pad={pad} whole={cut?.pad === pad ? cut.path : null} />}
     </div>
   );
 }
