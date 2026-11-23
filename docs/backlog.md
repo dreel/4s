@@ -565,6 +565,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   periods: a beat it drops or adds mid-song shifts every later bar line
   by a beat. Fill gaps over 1.5 periods before stepping, or re-anchor bars
   to the nearest tracked beat on a `first_downbeat + k * bar` grid.
-
+- (2026-11-23, sample analysis review) the assistant's `padFile` checks a
+  pad's `origin` with `sample.info` on every analyze and cut (a decode
+  under the lock the first time); cache it per path for the chat. And
+  consider limiting `origin` paths the assistant reads to the data dir or
+  to sources already in the cache (files the user opened).
 
 ## Process

@@ -257,6 +257,12 @@ fn subscribe(core: &Shared, conn: &mut Conn, tx: &mpsc::UnboundedSender<String>,
 /// `sample.analyze`: the file is decoded (or found in the cache) under
 /// the lock; the analysis runs off it.
 async fn analyze(core: &Shared, p: SampleAnalyzeParams) -> Result<Value, RpcError> {
+    // One analysis at a time, its decode included: a 20-minute song takes
+    // a few hundred MB while it runs. The permit goes with the work, so a
+    // dropped request does not free it while the analysis still runs.
+    static RUNNING: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> = std::sync::OnceLock::new();
+    let running = RUNNING.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone();
+    let one = running.acquire_owned().await.map_err(|e| RpcError::failed(format!("analysis: {e}")))?;
     let (path, data, rate) = core.lock().unwrap().analysis_source(&p.path)?;
     let seconds = data.len() as f64 / 2.0 / rate.max(1) as f64;
     let start = p.start.unwrap_or(0.0);
@@ -269,13 +275,6 @@ async fn analyze(core: &Shared, p: SampleAnalyzeParams) -> Result<Value, RpcErro
     {
         return Err(RpcError::invalid("beats_per_bar must be 1..16"));
     }
-    // One analysis at a time: a 20-minute song takes a few hundred MB
-    // while it runs.
-    // The permit goes with the work, so a dropped request does not free
-    // it while the analysis still runs.
-    static RUNNING: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> = std::sync::OnceLock::new();
-    let running = RUNNING.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone();
-    let one = running.acquire_owned().await.map_err(|e| RpcError::failed(format!("analysis: {e}")))?;
     tokio::task::spawn_blocking(move || {
         let _one = one;
         let a = crate::analysis::analyze(&crate::analysis::Request {
