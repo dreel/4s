@@ -1527,6 +1527,7 @@ test("sampler: a song longer than a pad plays loads its first 60 s and opens the
   const short = (await rpc("sampler.get", { instrument: "cut" })).pads.find((p) => p.pad === 4)!;
   expect(short.start).toBe(0);
   expect(short.end).toBeCloseTo(short.file_seconds, 3);
+  await page.getByTestId("pad-cut-4").click();
   await expect(page.getByTestId("sample-wave-cut-4")).toBeVisible();
   await expect(page.getByTestId("sample-cut-note-cut-4")).toHaveCount(0);
 });
