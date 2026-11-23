@@ -93,6 +93,13 @@ test("tools: overview, find_params, set_params, rpc, describe", async () => {
   const d = JSON.parse((await tools.run("describe", { method: "device.add" })).text);
   assert.equal(d.allowed, true);
   assert.ok(d.params.properties.type);
+  // What a step is, and the constants' values, reach the model.
+  const steps = JSON.parse((await tools.run("describe", { method: "pattern.set" })).text).params.properties.steps;
+  assert.match(steps.description, /0 off, 1 on, 2 accent/);
+  assert.equal(steps.items.maximum, 2);
+  const length = JSON.parse((await tools.run("describe", { method: "clip.length" })).text).params.properties.length;
+  assert.match(length.description, /`MAX_CLIP_TICKS` \(\d+\)/);
+  assert.equal(length.minimum, 1);
 });
 
 /** An assistant against the fake API, collecting its events. */

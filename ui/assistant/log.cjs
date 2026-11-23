@@ -39,7 +39,7 @@ class SessionLog {
   }
 
   open() {
-    fs.mkdirSync(this.dir, { recursive: true });
+    fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     this.file = path.join(this.dir, `${stamp}-${process.pid}.jsonl`);
     const old = fs

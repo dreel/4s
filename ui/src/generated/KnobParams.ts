@@ -6,6 +6,6 @@ export type KnobParams = {
  */
 index: number, 
 /**
- * Normalized position 0..1 (as from a 0..127 MIDI CC).
+ * Normalized position 0..1, clamped (as from a 0..127 MIDI CC).
  */
 value: number, };

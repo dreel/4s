@@ -59,58 +59,38 @@ fn walk(v: &mut serde_json::Value, table: &[(&'static str, String)]) {
     }
 }
 
-/// Backticked ALL_CAPS names left in descriptions that have no value in
-/// `doc_constants` (after `resolve_doc_constants`).
+/// Backticked ALL_CAPS names in descriptions that `doc_constants` has no
+/// value for. gen-bindings refuses to write a schema with any.
 pub fn unresolved_doc_constants(schema: &serde_json::Value) -> Vec<String> {
+    let known: Vec<&str> = doc_constants().into_iter().map(|(n, _)| n).collect();
     let mut out = Vec::new();
-    collect(schema, &mut out);
+    collect(schema, &known, &mut out);
     out.sort();
     out.dedup();
     out
 }
 
-fn collect(v: &serde_json::Value, out: &mut Vec<String>) {
+fn collect(v: &serde_json::Value, known: &[&str], out: &mut Vec<String>) {
     match v {
         serde_json::Value::Object(m) => {
             for (k, child) in m {
                 match child {
                     serde_json::Value::String(s) if k == "description" => {
                         for (i, part) in s.split('`').enumerate() {
-                            let resolved = s.split('`').nth(i + 1).is_some_and(|after| after.starts_with(" ("));
                             if i % 2 == 1
                                 && part.len() > 2
                                 && part.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-                                && !resolved
+                                && !known.contains(&part)
                             {
                                 out.push(part.to_string());
                             }
                         }
                     }
-                    _ => collect(child, out),
+                    _ => collect(child, known, out),
                 }
             }
         }
-        serde_json::Value::Array(a) => a.iter().for_each(|c| collect(c, out)),
+        serde_json::Value::Array(a) => a.iter().for_each(|c| collect(c, known, out)),
         _ => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every constant a schema description names has its value written next
-    /// to it, so `describe` never shows a bare name. Add new ones to
-    /// `doc_constants`.
-    #[test]
-    fn schema_descriptions_name_only_known_constants() {
-        let mut schema = serde_json::json!({
-            "request": schemars::schema_for!(Request),
-            "event": schemars::schema_for!(EventEnvelope),
-            "snapshot": schemars::schema_for!(Snapshot),
-            "project": schemars::schema_for!(ProjectFile),
-        });
-        resolve_doc_constants(&mut schema);
-        assert_eq!(unresolved_doc_constants(&schema), Vec::<String>::new());
     }
 }

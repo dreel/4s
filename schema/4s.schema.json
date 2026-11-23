@@ -4067,10 +4067,8 @@
             "type": "integer"
           },
           "value": {
-            "description": "Normalized position 0..1 (as from a 0..127 MIDI CC).",
+            "description": "Normalized position 0..1, clamped (as from a 0..127 MIDI CC).",
             "format": "double",
-            "maximum": 1.0,
-            "minimum": 0.0,
             "type": "number"
           }
         },

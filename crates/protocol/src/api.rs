@@ -1034,8 +1034,7 @@ pub struct KnobParams {
     /// 0-based knob index, 0..7.
     #[schemars(range(max = 7))]
     pub index: u32,
-    /// Normalized position 0..1 (as from a 0..127 MIDI CC).
-    #[schemars(range(min = 0.0, max = 1.0))]
+    /// Normalized position 0..1, clamped (as from a 0..127 MIDI CC).
     pub value: f64,
 }
 
