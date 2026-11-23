@@ -324,8 +324,8 @@ class Tools {
     let key = path;
     if (whole) {
       const info = await this.daemon.call("sample.info", { path }).catch(() => null);
-      key = `${path}|${info?.seconds}|${info?.format}`;
-      if (this.analyses.has(key)) return this.analyses.get(key);
+      key = info ? `${path}|${info.seconds}|${info.format}` : "";
+      if (key && this.analyses.has(key)) return this.analyses.get(key);
     }
     let a;
     try {
@@ -333,7 +333,7 @@ class Tools {
     } catch (e) {
       throw new ToolError(`sample.analyze: ${/** @type {Error} */ (e).message}`);
     }
-    if (whole) this.analyses.set(key, a);
+    if (key && whole) this.analyses.set(key, a);
     return a;
   }
 

@@ -560,7 +560,11 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   from kick flux plus where the band balance changes; a song that keeps
   its kick on 1 and 3 and never changes parts on a bar line can come out
   two beats off. A "shift the grid by a beat" option on `cut_sample` and
-  `sample.analyze` would let the user correct it.
+  `sample.analyze` would let the user correct it. Also, bar lines are
+  every Nth tracked beat, and the tracker allows a gap of up to two
+  periods: a beat it drops or adds mid-song shifts every later bar line
+  by a beat. Fill gaps over 1.5 periods before stepping, or re-anchor bars
+  to the nearest tracked beat on a `first_downbeat + k * bar` grid.
 
 
 ## Process

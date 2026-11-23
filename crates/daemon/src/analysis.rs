@@ -131,7 +131,7 @@ pub fn analyze(r: &Request) -> SampleAnalysis {
             // And forward to its end (beats the tracker dropped in a quiet
             // outro), so only the last bar can be short.
             let mut last = *bar_starts.last().unwrap();
-            while last + bar_len < span_end - 0.25 {
+            while last + bar_len <= span_end + 0.05 {
                 bounds.push((last, last + bar_len));
                 last += bar_len;
             }

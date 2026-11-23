@@ -271,9 +271,13 @@ async fn analyze(core: &Shared, p: SampleAnalyzeParams) -> Result<Value, RpcErro
     }
     // One analysis at a time: a 20-minute song takes a few hundred MB
     // while it runs.
-    static RUNNING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
-    let _one = RUNNING.acquire().await.map_err(|e| RpcError::failed(format!("analysis: {e}")))?;
+    // The permit goes with the work, so a dropped request does not free
+    // it while the analysis still runs.
+    static RUNNING: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> = std::sync::OnceLock::new();
+    let running = RUNNING.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone();
+    let one = running.acquire_owned().await.map_err(|e| RpcError::failed(format!("analysis: {e}")))?;
     tokio::task::spawn_blocking(move || {
+        let _one = one;
         let a = crate::analysis::analyze(&crate::analysis::Request {
             path: path.to_string_lossy().into_owned(),
             data: &data,
