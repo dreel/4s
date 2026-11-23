@@ -8,6 +8,7 @@ const { DaemonClient } = require("./daemon.cjs");
 const { loadSchema } = require("./schema.cjs");
 const { Assistant } = require("./loop.cjs");
 const { Settings } = require("./settings.cjs");
+const { SessionLog } = require("./log.cjs");
 
 /**
  * @param {{
@@ -33,6 +34,7 @@ function setupAssistant(o) {
     emit: (e) => o.send("assistant:event", e),
     // The SDK also reads ANTHROPIC_BASE_URL; tests point it at a fake server.
     baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
+    log: new SessionLog(path.join(o.dataDir, "assistant", "sessions")),
   });
 
   o.ipcMain.handle("assistant:settings", () => settings.view());

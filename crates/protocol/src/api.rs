@@ -275,7 +275,8 @@ pub struct DeviceMoveParams {
 pub struct ModRouteParams {
     pub source: String,
     pub target: String,
-    /// -1..1.
+    /// How far the source moves the target, -1..1 of its range.
+    #[schemars(range(min = -1.0, max = 1.0))]
     pub depth: f32,
 }
 
@@ -332,7 +333,8 @@ pub struct SamplerGetParams {
 pub struct SamplerLoadParams {
     #[serde(default)]
     pub instrument: Option<String>,
-    /// 1..16.
+    /// 1..`SAMPLER_PADS`.
+    #[schemars(range(min = 1, max = crate::SAMPLER_PADS))]
     pub pad: u32,
     /// Relative paths are under the data dir; absolute paths as given.
     #[serde(default)]
@@ -399,6 +401,7 @@ pub struct SamplePeaksParams {
     #[serde(default)]
     pub end: Option<f64>,
     /// 1..4096.
+    #[schemars(range(min = 1, max = 4096))]
     pub bins: u32,
 }
 

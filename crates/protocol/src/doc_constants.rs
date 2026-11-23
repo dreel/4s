@@ -25,6 +25,7 @@ pub fn doc_constants() -> Vec<(&'static str, String)> {
         ("MAX_UPLOAD_BYTES", MAX_UPLOAD_BYTES.to_string()),
         ("MAX_INSTRUMENTS", MAX_INSTRUMENTS.to_string()),
         ("MAX_CHANNELS", MAX_CHANNELS.to_string()),
+        ("SAMPLER_PADS", SAMPLER_PADS.to_string()),
         ("VEL_ON", VEL_ON.to_string()),
         ("VEL_ACCENT", VEL_ACCENT.to_string()),
         ("VEL_ACCENT_MIN", VEL_ACCENT_MIN.to_string()),

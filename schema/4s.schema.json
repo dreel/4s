@@ -4379,8 +4379,10 @@
         "description": "Route a modulator output to a parameter (or set an existing route's\ndepth).",
         "properties": {
           "depth": {
-            "description": "-1..1.",
+            "description": "How far the source moves the target, -1..1 of its range.",
             "format": "float",
+            "maximum": 1.0,
+            "minimum": -1.0,
             "type": "number"
           },
           "source": {
@@ -5433,7 +5435,8 @@
           "bins": {
             "description": "1..4096.",
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 4096,
+            "minimum": 1,
             "type": "integer"
           },
           "end": {
@@ -5558,9 +5561,10 @@
             ]
           },
           "pad": {
-            "description": "1..16.",
+            "description": "1..`SAMPLER_PADS` (16).",
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 16,
+            "minimum": 1,
             "type": "integer"
           },
           "path": {

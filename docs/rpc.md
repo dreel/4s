@@ -34,6 +34,17 @@ Status: implemented (protocol version 2, RFC 0004). Run `4s methods` for the liv
     journals by and the in-app assistant allows `rpc` calls by.
 - Generated files are committed; `scripts/check.sh` regenerates them and fails
   if anything changed.
+- **The doc comments are the API's documentation** for every reader: `4s
+  methods`, the schema, and the in-app assistant's `describe`, which agents
+  read instead of the code. So a param's doc says what its values mean
+  (drum step levels are 0 off, 1 on, 2 accent; a clip event's velocity is
+  MIDI 1..127, `note.on`'s is 0..1), and the range the daemon enforces
+  goes in the schema too, as `#[schemars(range(...))]` /
+  `#[schemars(length(...))]`. A doc may name a constant in backticks
+  (`` `PPQ` ``); gen-bindings writes its value next to it in the schema
+  (`` `PPQ` (96) ``) from `crates/protocol/src/doc_constants.rs`, and fails
+  on a name that table does not know. Prefer that to writing the number,
+  which drifts.
 
 ## Wire format
 

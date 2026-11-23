@@ -6,6 +6,7 @@
 
 const Anthropic = require("@anthropic-ai/sdk").default;
 const { TOOL_DEFS, Tools, ToolError } = require("./tools.cjs");
+const { NO_LOG } = require("./log.cjs");
 
 const MODELS = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"];
 const DEFAULT_MODEL = "claude-sonnet-5-5";
@@ -51,10 +52,13 @@ class Assistant {
    *   model: () => string,
    *   emit: (e: AssistantEvent) => void,
    *   baseURL?: string,
+   *   log?: { write(record: Record<string, unknown>): void, rotate(): void },
    * }} opts
    */
   constructor(opts) {
     this.opts = opts;
+    /** The session log (log.cjs): every message, reply and tool call. */
+    this.log = opts.log ?? NO_LOG;
     this.tools = new Tools(opts.daemon, opts.schema, opts.user);
     /** @type {any[]} the conversation (Anthropic MessageParam[]) */
     this.messages = [];
@@ -77,6 +81,7 @@ class Assistant {
     this.stop();
     await this.current;
     this.messages = [];
+    this.log.rotate();
   }
 
   /** Stop the running turn. Its undo group still closes. */
@@ -136,14 +141,15 @@ class Assistant {
     const key = this.opts.apiKey();
     const turn = ++this.turn;
     const label = `assistant: ${text.trim().replace(/\s+/g, " ").slice(0, 48)}`;
+    const model = this.opts.model();
     if (!key) {
+      this.log.write({ type: "done", turn, stop: "error", error: "no API key" });
       this.opts.emit({ type: "done", turn, stop: "error", label, changed: [], usage: this.usage, error: "Add an Anthropic API key in the assistant's settings." });
       return;
     }
     const abort = new AbortController();
     this.abort = abort;
     const client = new Anthropic({ apiKey: key, ...(this.opts.baseURL ? { baseURL: this.opts.baseURL } : {}) });
-    const model = this.opts.model();
     const daemon = this.opts.daemon;
     /** @type {string} */
     let stop = "end_turn";
@@ -154,6 +160,7 @@ class Assistant {
       await daemon.call("history.group_begin", { label });
       grouped = true;
       const head = await this.header(ctx);
+      this.log.write({ type: "user", turn, model, label, header: head, text });
       this.pushUser([{ type: "text", text: `${head}\n\n${text}` }]);
       stop = await this.loop(client, model, turn, abort.signal);
     } catch (e) {
@@ -174,6 +181,7 @@ class Assistant {
         error ??= `could not close the undo group: ${describeError(e)}`;
       }
     }
+    this.log.write({ type: "done", turn, stop, changed, ...(error ? { error } : {}), usage: { ...this.usage } });
     this.opts.emit({ type: "done", turn, stop, label, changed, usage: { ...this.usage }, ...(error ? { error } : {}) });
   }
 
@@ -227,6 +235,7 @@ class Assistant {
         message = await stream.finalMessage();
         jsonRetries = 0;
       } catch (e) {
+        this.log.write({ type: "api_error", turn, error: describeError(e), aborted: signal.aborted });
         if (signal.aborted) {
           // Keep what was said, so the next turn knows it was cut off.
           this.messages.push({ role: "assistant", content: [{ type: "text", text: "(stopped by the user)" }] });
@@ -237,6 +246,7 @@ class Assistant {
         continue;
       }
       this.addUsage(model, message.usage);
+      this.log.write({ type: "reply", turn, model: message.model, stop_reason: message.stop_reason, content: message.content, usage: message.usage });
       this.messages.push({ role: "assistant", content: message.content });
       if (message.stop_reason === "refusal") return "refusal";
       if (message.stop_reason === "pause_turn") continue;
@@ -245,6 +255,7 @@ class Assistant {
       // Told to wrap up and still calling tools: end the turn here.
       if (wrapUp) {
         const refused = uses.map((/** @type {any} */ u) => ({ type: "tool_result", tool_use_id: u.id, is_error: true, content: "tool call limit reached" }));
+        for (const u of uses) this.log.write({ type: "tool", turn, id: u.id, name: u.name, input: u.input, ok: false, error: "tool call limit reached" });
         this.pushUser(refused);
         return "tool_limit";
       }
@@ -276,6 +287,10 @@ class Assistant {
           this.opts.emit({ type: "tool", turn, id: use.id, name: use.name, input: use.input, ok: false, chips: [], error: msg });
         }
       }
+      uses.forEach((/** @type {any} */ u, /** @type {number} */ i) => {
+        const r = results[i];
+        this.log.write({ type: "tool", turn, id: u.id, name: u.name, input: u.input, ok: !r.is_error, ...(r.is_error ? { error: r.content } : { result: r.content }) });
+      });
       this.pushUser(results);
       if (signal.aborted) throw new Error("stopped");
     }

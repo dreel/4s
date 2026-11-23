@@ -7,7 +7,7 @@
  */
 export type SamplerLoadParams = { instrument: string | null, 
 /**
- * 1..16.
+ * 1..`SAMPLER_PADS`.
  */
 pad: number, 
 /**

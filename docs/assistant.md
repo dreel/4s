@@ -32,6 +32,7 @@ The loop lives in the **Electron main process**, in `ui/assistant/`:
 | `schema.cjs` | Reads `schema/4s.schema.json` (method params, method classes) and decides what `rpc` may call. |
 | `daemon.cjs` | Its own JSON-RPC connection to 4sd. |
 | `settings.cjs` | API key and model. |
+| `log.cjs` | The session log (below). |
 
 It opens its **own** WebSocket connection to the daemon, with
 `session.hello {client_name: "assistant", user: <the app's user>}`. So its
@@ -101,6 +102,26 @@ until the daemon classes it:
 reads them. For a refused method the assistant tells you what to do
 instead.
 
+## Session log
+
+Each chat is written to `<data dir>/assistant/sessions/<time>-<pid>.jsonl`
+for debugging, one JSON record a line: `user` (your message, the context
+header, the model), `reply` (the model's whole response: text, tool calls,
+stop reason, usage), `tool` (each call's input and its result or error,
+refused and failed calls too), `api_error`, and `done` (the turn's stop
+reason, changed keys, error, session usage). "New chat" starts a new file;
+the newest 50 are kept. The journal has only the edits that reached the
+daemon; this has everything the model saw and did, so read it first when
+the assistant misbehaves:
+
+```
+f=$(ls -t ~/.4s/assistant/sessions/*.jsonl | head -1)
+jq -c 'select(.type == "tool" and .ok == false) | {name, input, error}' "$f"
+```
+
+It holds project data (whatever the tools returned) and stays on this
+machine. The API key is never written to it.
+
 ## Model, key, and what is sent
 
 - Models: `claude-sonnet-5-5` (default), `claude-opus-5-5`,
@@ -129,7 +150,8 @@ instead.
   and whole turns against **a fake Anthropic API** (`ui/e2e/fake-anthropic.cjs`,
   scripted SSE replies): a turn is one undo step that undo reverts, a
   refused method changes nothing, Stop closes the group, the tool-call cap,
-  no key, and key storage with and without encryption.
+  no key, key storage with and without encryption, and the session log
+  (refused and failed calls in it, a new file per chat, no key).
 - `ui/e2e/assistant.spec.ts` (Playwright, the real app and a headless
   daemon) runs the app against the same fake server (`ANTHROPIC_BASE_URL`):
   Cmd-K and the toggle, the settings popover, "make the kick punchier"

@@ -126,6 +126,16 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   method's params schema only; the schema has no result types (they are
   only in `ui/src/generated/methods.ts`). Add results to the schema if the
   model needs them.
+- (2026-11-22, assistant tool failures) schema bounds: the music-editing
+  params (patterns, steps, clips, notes, record, pads, knobs) now carry the
+  ranges the daemon enforces; others still say a range only in prose or
+  not at all (seat CC numbers and MIDI channels, `device.add` position,
+  `sampler.pad`'s other params). Add
+  `#[schemars(range(...))]` where the daemon checks one.
+- (2026-11-22, assistant tool failures) assistant session log: written in
+  Electron main, so `4s` cannot show it, and a remote engine's host never
+  has it. If agents need it, a `4s assistant log` would have to read the
+  UI host's data dir.
 - (2026-11-07, assistant-loop branch) assistant conversation: kept in memory
   in main and lost on restart; RFC 0013 phase C persists it per project and
   trims it past a token budget (no trimming yet, so a very long chat grows
