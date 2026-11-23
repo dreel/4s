@@ -3038,6 +3038,7 @@
     "sample.upload",
     "sample.info",
     "sample.peaks",
+    "sample.analyze",
     "sample.play",
     "sample.stop",
     "history.get",
@@ -5391,6 +5392,56 @@
         ],
         "type": "object"
       },
+      "SampleAnalyzeParams": {
+        "description": "Analyze `start..end` seconds of an audio file (default: all of it,\nup to the 20 minutes a source can be): tempo and bar grid, key, level,\na timeline a bar a row, and its sections. See `SampleAnalysis`.",
+        "properties": {
+          "beats": {
+            "default": false,
+            "description": "Also list every beat's time.",
+            "type": "boolean"
+          },
+          "beats_per_bar": {
+            "default": null,
+            "description": "Beats in a bar, for the grid (default 4).",
+            "format": "uint32",
+            "maximum": 16,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "end": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "onsets": {
+            "default": false,
+            "description": "Also list every onset's time.",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "As in `sample.info`.",
+            "type": "string"
+          },
+          "start": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
       "SampleInfoParams": {
         "description": "An audio file on the engine host.",
         "properties": {
@@ -6682,6 +6733,23 @@
           },
           "params": {
             "$ref": "#/$defs/SamplePeaksParams"
+          }
+        },
+        "required": [
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "Analyze an audio file on the engine host: tempo and bar grid, key,\nlevel, a timeline a bar a row, and its sections (to find a part of\na song by how it sounds).",
+        "properties": {
+          "method": {
+            "const": "sample.analyze",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/$defs/SampleAnalyzeParams"
           }
         },
         "required": [

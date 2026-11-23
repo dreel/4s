@@ -1123,6 +1123,58 @@ SEQ=$(s --json journal --limit 1 | python3 -c "import json,sys;print(json.load(s
 check "auditioning a region through the engine (not in the project)" "playing 0:01.500 - 0:01.800" s sample play $FX/song.mp3 --from 1.5 --to 1.8
 check "...and stopping it" "stopped" s sample stop
 check "...journals nothing" "seq=$SEQ" bash -c "echo seq=\$($BIN/4s --json journal --limit 1 | python3 -c \"import json,sys;print(json.load(sys.stdin)['entries'][-1]['seq'])\")"
+# Analysis (`sample analyze`): a made-up band at 126 bpm, 20 bars of 4/4.
+# Bars 1-8 and 13-20: an A minor chord over a kick on 1 and 3; bars 9-12
+# a drum break (kick, snare on 2 and 4, eighth-note hats, no chord).
+python3 - "$TMP/band.wav" <<'PY'
+import math, random, struct, sys, wave
+sr, bpm = 22050, 126.0
+beat = 60.0 / bpm
+n = int(sr * beat * 4 * 20)
+x = [0.0] * n
+rnd = random.Random(7)
+def hit(at, length, f):
+    a = int(at * sr)
+    for i in range(min(int(length * sr), n - a)):
+        x[a + i] += f(i / sr)
+for b in range(80):
+    bar, k, t = b // 4, b % 4, b * beat
+    brk = 8 <= bar < 12
+    if k in (0, 2):
+        hit(t, 0.15, lambda u: 0.6 * math.sin(2 * math.pi * (50 + 100 * math.exp(-u * 30)) * u) * math.exp(-u * 20))
+    if brk and k in (1, 3):
+        hit(t, 0.12, lambda u: 0.4 * (rnd.random() - 0.5) * math.exp(-u * 25))
+    if brk:
+        for h in (0.0, 0.5):
+            hit(t + h * beat, 0.04, lambda u: 0.25 * (rnd.random() - 0.5) * math.exp(-u * 80))
+for i in range(n):
+    bar = int(i / sr / (beat * 4))
+    if not 8 <= bar < 12:
+        u = i / sr
+        x[i] += sum(0.08 * math.sin(2 * math.pi * f * u) for f in (110.0, 220.0, 261.63, 329.63))
+w = wave.open(sys.argv[1], "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+w.writeframes(b"".join(struct.pack("<h", max(-32767, min(32767, int(v * 32767)))) for v in x)); w.close()
+PY
+check "analysis finds the tempo, the key, and the bar grid" "tempo 126" bash -c "$BIN/4s sample analyze '$TMP/band.wav' | tee '$TMP/band.txt' | grep -E 'tempo 12[56]\.' | sed 's/tempo 125\.[5-9][0-9]/tempo 126/; s/tempo 126\.[0-4][0-9]/tempo 126/'"
+check "...A minor" "key A minor" cat "$TMP/band.txt"
+check "...and the drum break as its own section: bars 9-12, the most punch and highs, the least tonal" "break 9-12" bash -c "$BIN/4s --json sample analyze '$TMP/band.wav' | python3 -c '
+import json, sys
+a = json.load(sys.stdin)
+s = a[\"sections\"]
+brk = max(s, key=lambda x: x[\"punch\"])
+first = a[\"rows\"][brk[\"first\"] - 1][\"start\"]
+bar = 4 * 60 / 126
+ok = abs(brk[\"start\"] - 8 * bar) < 0.15 and abs(brk[\"end\"] - 12 * bar) < 0.15 and brk is max(s, key=lambda x: x[\"high\"]) and brk is min(s, key=lambda x: x[\"tonal\"]) and brk[\"start\"] == first
+print(\"break %d-%d\" % (round(brk[\"start\"] / bar) + 1, round(brk[\"end\"] / bar)) if ok else s)
+'"
+check "...rows are bars, numbered, each a bar long" "20 bars" bash -c "$BIN/4s --json sample analyze '$TMP/band.wav' | python3 -c '
+import json, sys
+a = json.load(sys.stdin); r = a[\"rows\"]
+ok = a[\"row_unit\"] == \"bar\" and [x[\"n\"] for x in r] == list(range(1, len(r) + 1)) and all(abs(x[\"end\"] - x[\"start\"] - 4 * 60 / 126) < 0.06 for x in r)
+print(\"%d bars\" % len(r) if ok else r)
+'"
+check "...a span of it, with every beat" "beats: 15.238" bash -c "$BIN/4s sample analyze '$TMP/band.wav' --from 15 --to 23 --beats | grep -o 'beats: 15.2[0-9]*' | sed 's/15.2[0-9]*/15.238/'"
+check "...not past the file's end" "span runs from a start to a later end" s sample analyze "$TMP/band.wav" --from 60
 check "a region past the file's end is refused" "past the end of the file" s sampler load 3 $FX/song.mp3 --from 5 --to 6
 python3 - "$TMP/long.wav" <<'PY'
 import struct, sys

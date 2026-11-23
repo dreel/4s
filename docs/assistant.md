@@ -70,6 +70,8 @@ and waits for it to end before clearing the conversation.
 | `overview` | The project as text: tempo, transport, instruments, channels with volume, pan and inserts, seats and focus, MIDI devices. (`state.get`) |
 | `find_params {prefix?, query?}` | Matching params with current value, range, unit and label. (`param.list`, `state.get`) |
 | `set_params {changes, why}` | Sets params as one `batch`; returns `path old -> new`. |
+| `analyze_audio {instrument?, pad, start?, end?}` | What the file behind a sampler pad sounds like (the file the pad was cut from if the engine host has it, else its own): tempo, bar grid, key, sections, and a compact table a bar a row. (`sampler.get`, `sample.analyze`) |
+| `cut_sample {instrument?, pad, to_pad?, start, end, snap?}` | Loads seconds of that same file onto a pad, snapped to the nearest bar lines unless `snap: false`; returns the bars and exact times. (`sampler.load`) |
 | `rpc {method, params}` | Any allowed method (below). |
 | `describe {method?}` | A method's params schema and whether `rpc` may call it, or the list of methods. |
 
@@ -90,10 +92,19 @@ until the daemon classes it:
   on the engine host).
 
 - and never with a **file path on the engine host**: `sampler.load`,
-  `sample.info`, `sample.peaks` and `sample.play` are refused when given a
-  `path` (a name read from the project, or one it was talked into using,
+  `sample.info`, `sample.peaks`, `sample.analyze` and `sample.play` are
+  refused when given a `path` (a name read from the project, or one it was talked into using,
   must not load or read arbitrary files there). Loading a pad from an
-  upload id still works, and you load files yourself in the app. A test
+  upload id still works, and you load files yourself in the app.
+  `analyze_audio` and `cut_sample` reach only the files the project names
+  for a pad: its own file, or the file it was cut from (its `origin`,
+  which the sample editor opens too). The tool finds the path with
+  `sampler.get`; the model never gives one. The trade-off: `origin` is project data, so
+  a project from elsewhere can point a pad at any audio file on the
+  engine host, and the assistant can then read it and load a part of it
+  (only files that decode as audio; the sample editor opens the same
+  file). So "pull the drum break out of the song on pad 1" works once
+  you have put the song on a pad. A test
   checks that every method whose params describe a file path is refused
   or has its path param listed (`PATH_PARAMS` in `schema.cjs`).
 

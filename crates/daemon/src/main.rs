@@ -4,6 +4,7 @@
 //! Normally started in the background by `4s daemon start` or by the Electron
 //! app (see docs/lifecycle.md); running it directly keeps it in the foreground.
 
+mod analysis;
 mod audio;
 mod controller;
 mod core;

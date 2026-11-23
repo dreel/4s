@@ -163,6 +163,7 @@ async fn handle_text(
             Ok(json!({}))
         }
         Request::RenderOffline(p) => render(core, p, &format!("conn:{}", conn.id)).await,
+        Request::SampleAnalyze(p) => analyze(core, p).await,
         Request::DaemonInfo(_) => {
             let mut info = (*daemon.info).clone();
             info.uptime = daemon.started.elapsed().as_secs_f64();
@@ -251,6 +252,45 @@ fn subscribe(core: &Shared, conn: &mut Conn, tx: &mpsc::UnboundedSender<String>,
         }
     }));
     serde_json::to_value(SubscribeResult { seq }).unwrap()
+}
+
+/// `sample.analyze`: the file is decoded (or found in the cache) under
+/// the lock; the analysis runs off it.
+async fn analyze(core: &Shared, p: SampleAnalyzeParams) -> Result<Value, RpcError> {
+    // One analysis at a time, its decode included: a 20-minute song takes
+    // a few hundred MB while it runs. The permit goes with the work, so a
+    // dropped request does not free it while the analysis still runs.
+    static RUNNING: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> = std::sync::OnceLock::new();
+    let running = RUNNING.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone();
+    let one = running.acquire_owned().await.map_err(|e| RpcError::failed(format!("analysis: {e}")))?;
+    let (path, data, rate) = core.lock().unwrap().analysis_source(&p.path)?;
+    let seconds = data.len() as f64 / 2.0 / rate.max(1) as f64;
+    let start = p.start.unwrap_or(0.0);
+    let end = p.end.unwrap_or(seconds).min(seconds);
+    if !(start.is_finite() && end.is_finite()) || start < 0.0 || end <= start {
+        return Err(RpcError::invalid(format!("the span runs from a start to a later end, in seconds (the file is {seconds:.3} s)")));
+    }
+    if let Some(b) = p.beats_per_bar
+        && !(1..=16).contains(&b)
+    {
+        return Err(RpcError::invalid("beats_per_bar must be 1..16"));
+    }
+    tokio::task::spawn_blocking(move || {
+        let _one = one;
+        let a = crate::analysis::analyze(&crate::analysis::Request {
+            path: path.to_string_lossy().into_owned(),
+            data: &data,
+            rate,
+            start,
+            end,
+            beats_per_bar: p.beats_per_bar.unwrap_or(4),
+            list_onsets: p.onsets,
+            list_beats: p.beats,
+        });
+        serde_json::to_value(a).unwrap()
+    })
+    .await
+    .map_err(|e| RpcError::failed(format!("analysis failed: {e}")))
 }
 
 async fn render(core: &Shared, p: RenderParams, client: &str) -> Result<Value, RpcError> {

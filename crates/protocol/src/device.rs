@@ -252,6 +252,116 @@ pub struct SamplePeaks {
     pub peaks: Vec<[f32; 2]>,
 }
 
+/// What `sample.analyze` hears in a span of an audio file: its tempo, bar
+/// grid, key, level, and a timeline of rows (one a bar, or one a second
+/// when no steady beat is found) grouped into sections. Built for picking
+/// a part of a song by description ("the drum break about a minute in"):
+/// find the section, then load whole rows of it (`sampler.load` with the
+/// first row's `start` and the last row's `end`).
+///
+/// Band shares, `punch` and `tonal` are 0..1 and mean most next to each
+/// other in the same file: compare rows and sections, not files.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SampleAnalysis {
+    pub path: String,
+    /// The span analyzed, in seconds of the file.
+    pub start: f64,
+    pub end: f64,
+    /// The span's peak and RMS level, in dBFS.
+    pub peak_db: f64,
+    pub rms_db: f64,
+    /// The beat, if one is steady enough to find.
+    pub tempo: Option<Tempo>,
+    /// The key, if there is enough pitched sound to guess one.
+    pub key: Option<KeyEstimate>,
+    /// What a row is: `bar` (the beat grid's bars; a pickup before the
+    /// first bar line longer than 0.25 s is a row of its own, row 1, and
+    /// the last bar can be short; a shorter pickup is in no row) or
+    /// `second`.
+    pub row_unit: String,
+    pub rows: Vec<AnalysisRow>,
+    /// Runs of rows that sound alike, split where the sound changes.
+    pub sections: Vec<AnalysisSection>,
+    /// How many onsets (note or hit starts) the span has.
+    pub onset_count: u32,
+    /// Their times in seconds of the file (with `onsets: true`).
+    pub onsets: Option<Vec<f64>>,
+    /// Every beat's time in seconds of the file (with `beats: true`).
+    pub beats: Option<Vec<f64>>,
+}
+
+/// A beat found in audio (`sample.analyze`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Tempo {
+    /// Beats per minute, from the beat grid (60..200; a half- or
+    /// double-time reading is possible).
+    pub bpm: f64,
+    /// 0..1: how clearly the audio pulses at this tempo.
+    pub confidence: f64,
+    /// Beats in a bar (the `beats_per_bar` asked for; default 4).
+    pub beats_per_bar: u32,
+    /// The first bar line, in seconds of the file: the beat with the most
+    /// low-end hits on its bar lines (where the kick lands).
+    pub first_downbeat: f64,
+    pub beat_count: u32,
+}
+
+/// A key guessed from the pitch classes heard (`sample.analyze`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct KeyEstimate {
+    /// E.g. `A minor`, `F# major`.
+    pub name: String,
+    /// 0..1: how well the pitch classes fit that key's profile.
+    pub confidence: f64,
+}
+
+/// One bar (or second) of `sample.analyze`'s timeline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct AnalysisRow {
+    /// 1-based, in the span (a pickup row, if any, is 1).
+    pub n: u32,
+    /// Seconds of the file.
+    pub start: f64,
+    pub end: f64,
+    /// RMS level, dBFS.
+    pub rms_db: f64,
+    /// Shares of the energy below 200 Hz (kick, bass), 200 Hz to 2 kHz
+    /// (body, voice, most instruments), and above 2 kHz (hats, cymbals,
+    /// air); they add up to 1.
+    pub low: f64,
+    pub mid: f64,
+    pub high: f64,
+    /// Onsets in the row.
+    pub onsets: u32,
+    /// 0..1: how hard the onsets hit (drums and plucks punch; pads and
+    /// held notes do not).
+    pub punch: f64,
+    /// 0..1: how much the sound settles on a few pitch classes (chords,
+    /// melody) rather than spreading over all twelve (drums, noise).
+    pub tonal: f64,
+}
+
+/// A section of `sample.analyze`'s timeline: rows `first..=last`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct AnalysisSection {
+    /// `A`, `B`, ...: sections that sound alike share a label.
+    pub label: String,
+    pub first: u32,
+    pub last: u32,
+    /// Seconds of the file: the first row's start, the last row's end.
+    pub start: f64,
+    pub end: f64,
+    /// As in its rows, over the whole section; `onset_rate` is onsets a
+    /// second.
+    pub rms_db: f64,
+    pub low: f64,
+    pub mid: f64,
+    pub high: f64,
+    pub onset_rate: f64,
+    pub punch: f64,
+    pub tonal: f64,
+}
+
 /// What an audition plays (`sample.play`): the region as it was cut.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct SamplePlaying {
