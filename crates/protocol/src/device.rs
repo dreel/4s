@@ -274,9 +274,10 @@ pub struct SampleAnalysis {
     pub tempo: Option<Tempo>,
     /// The key, if there is enough pitched sound to guess one.
     pub key: Option<KeyEstimate>,
-    /// What a row is: `bar` (the beat grid's bars; the first and last can
-    /// be partial, and a pickup or tail of 0.25 s or less is in no row)
-    /// or `second`.
+    /// What a row is: `bar` (the beat grid's bars; a pickup before the
+    /// first bar line longer than 0.25 s is a row of its own, row 1, and
+    /// the last bar can be short; a shorter pickup is in no row) or
+    /// `second`.
     pub row_unit: String,
     pub rows: Vec<AnalysisRow>,
     /// Runs of rows that sound alike, split where the sound changes.
@@ -317,7 +318,7 @@ pub struct KeyEstimate {
 /// One bar (or second) of `sample.analyze`'s timeline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct AnalysisRow {
-    /// 1-based, in the span.
+    /// 1-based, in the span (a pickup row, if any, is 1).
     pub n: u32,
     /// Seconds of the file.
     pub start: f64,

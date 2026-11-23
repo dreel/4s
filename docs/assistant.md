@@ -99,7 +99,11 @@ until the daemon classes it:
   `analyze_audio` and `cut_sample` reach only the files the project names
   for a pad: its own file, or the file it was cut from (its `origin`,
   which the sample editor opens too). The tool finds the path with
-  `sampler.get`; the model never gives one. So "pull the drum break out of the song on pad 1" works once
+  `sampler.get`; the model never gives one. The trade-off: `origin` is project data, so
+  a project from elsewhere can point a pad at any audio file on the
+  engine host, and the assistant can then read it and load a part of it
+  (only files that decode as audio; the sample editor opens the same
+  file). So "pull the drum break out of the song on pad 1" works once
   you have put the song on a pad. A test
   checks that every method whose params describe a file path is refused
   or has its path param listed (`PATH_PARAMS` in `schema.cjs`).

@@ -5,7 +5,7 @@
  */
 export type AnalysisRow = { 
 /**
- * 1-based, in the span.
+ * 1-based, in the span (a pickup row, if any, is 1).
  */
 n: number, 
 /**

@@ -33,9 +33,10 @@ tempo: Tempo | null,
  */
 key: KeyEstimate | null, 
 /**
- * What a row is: `bar` (the beat grid's bars; the first and last can
- * be partial, and a pickup or tail of 0.25 s or less is in no row)
- * or `second`.
+ * What a row is: `bar` (the beat grid's bars; a pickup before the
+ * first bar line longer than 0.25 s is a row of its own, row 1, and
+ * the last bar can be short; a shorter pickup is in no row) or
+ * `second`.
  */
 row_unit: string, rows: Array<AnalysisRow>, 
 /**

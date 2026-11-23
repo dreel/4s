@@ -128,13 +128,15 @@ pub fn analyze(r: &Request) -> SampleAnalysis {
             for w in bar_starts.windows(2) {
                 bounds.push((w[0], w[1]));
             }
-            let last = *bar_starts.last().unwrap();
-            let last_end = (last + bar_len).min(span_end);
-            if last_end - last > 0.05 {
-                bounds.push((last, last_end));
+            // And forward to its end (beats the tracker dropped in a quiet
+            // outro), so only the last bar can be short.
+            let mut last = *bar_starts.last().unwrap();
+            while last + bar_len < span_end - 0.25 {
+                bounds.push((last, last + bar_len));
+                last += bar_len;
             }
-            if span_end - last_end > 0.25 {
-                bounds.push((last_end, span_end));
+            if span_end - last > 0.05 {
+                bounds.push((last, span_end));
             }
             let tempo = Tempo {
                 bpm: (bpm * 100.0).round() / 100.0,
@@ -219,10 +221,10 @@ pub fn analyze(r: &Request) -> SampleAnalysis {
         .collect();
 
     // Sections, from the rows' features.
-    let bounds = section_bounds(&rows, &accs.iter().map(|a| a.chroma).collect::<Vec<_>>());
+    let feats = features(&rows, &accs.iter().map(|a| a.chroma).collect::<Vec<_>>());
+    let bounds = section_bounds(&feats);
     let mut sections: Vec<AnalysisSection> = Vec::new();
     let mut protos: Vec<(String, Vec<f32>)> = Vec::new();
-    let feats = features(&rows, &accs.iter().map(|a| a.chroma).collect::<Vec<_>>());
     let typical = typical_distance(&feats);
     for w in bounds.windows(2) {
         let (i, j) = (w[0], w[1]);
@@ -666,18 +668,17 @@ fn typical_distance(f: &[Vec<f32>]) -> f32 {
 }
 
 /// Section boundaries as row indices (0 and the row count included).
-fn section_bounds(rows: &[AnalysisRow], chroma: &[[f64; 12]]) -> Vec<usize> {
-    let n = rows.len();
+fn section_bounds(f: &[Vec<f32>]) -> Vec<usize> {
+    let n = f.len();
     if n == 0 {
         return vec![0];
     }
-    let f = features(rows, chroma);
     let w = MIN_SECTION_ROWS;
     if n < 2 * w {
         return vec![0, n];
     }
     // Similarity: e^(-d / typical).
-    let typical = typical_distance(&f);
+    let typical = typical_distance(f);
     let sim = |i: usize, j: usize| (-dist(&f[i], &f[j]) / typical).exp();
     // Foote novelty at each boundary b (between rows b-1 and b): the
     // checkerboard kernel, Gaussian-tapered, over w rows each side.

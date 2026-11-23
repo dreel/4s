@@ -269,6 +269,10 @@ async fn analyze(core: &Shared, p: SampleAnalyzeParams) -> Result<Value, RpcErro
     {
         return Err(RpcError::invalid("beats_per_bar must be 1..16"));
     }
+    // One analysis at a time: a 20-minute song takes a few hundred MB
+    // while it runs.
+    static RUNNING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    let _one = RUNNING.acquire().await.map_err(|e| RpcError::failed(format!("analysis: {e}")))?;
     tokio::task::spawn_blocking(move || {
         let a = crate::analysis::analyze(&crate::analysis::Request {
             path: path.to_string_lossy().into_owned(),

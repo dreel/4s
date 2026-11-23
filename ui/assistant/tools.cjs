@@ -73,7 +73,7 @@ const TOOL_DEFS = [
   {
     name: "cut_sample",
     description:
-      "Load a part of the file behind a sampler pad (the same file `analyze_audio` reads) onto a pad: start and end in seconds of that file, snapped to the nearest bar lines of its beat grid (so it loops in time) unless snap is false. At most 60 s. Returns the bars (counted from the file's start) and the exact times; tell the user both. One undo step with the rest of the turn.",
+      "Load a part of the file behind a sampler pad (the same file `analyze_audio` reads) onto a pad: start and end in seconds of that file, snapped to the nearest bar lines of its beat grid (so it loops in time) unless snap is false. At most 60 s. Returns the bars (rows of the whole file's analysis: a pickup before the first bar line, if any, is bar 1) and the exact times; tell the user both. One undo step with the rest of the turn.",
     input_schema: {
       type: "object",
       properties: {
@@ -319,14 +319,21 @@ class Tools {
    */
   async analysis(path, start, end) {
     const whole = start == null && end == null;
-    if (whole && this.analyses.has(path)) return this.analyses.get(path);
+    // Keyed by what the file is now, so a file replaced at the same path
+    // is analyzed again.
+    let key = path;
+    if (whole) {
+      const info = await this.daemon.call("sample.info", { path }).catch(() => null);
+      key = `${path}|${info?.seconds}|${info?.format}`;
+      if (this.analyses.has(key)) return this.analyses.get(key);
+    }
     let a;
     try {
       a = await this.daemon.call("sample.analyze", { path, start, end, beats_per_bar: null, onsets: false, beats: false });
     } catch (e) {
       throw new ToolError(`sample.analyze: ${/** @type {Error} */ (e).message}`);
     }
-    if (whole) this.analyses.set(path, a);
+    if (whole) this.analyses.set(key, a);
     return a;
   }
 
