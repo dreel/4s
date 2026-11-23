@@ -710,8 +710,8 @@ pub struct ClipQuantizeParams {
     /// Clip in the instrument's pool; default: its selected clip.
     #[serde(default)]
     pub clip: Option<u32>,
-    /// Grid in ticks, e.g. `TICKS_PER_STEP` for 16ths.
-    #[schemars(range(min = 1))]
+    /// Grid in ticks, 1..`MAX_CLIP_TICKS`, e.g. `TICKS_PER_STEP` for 16ths.
+    #[schemars(range(min = 1, max = MAX_CLIP_TICKS))]
     pub grid: u32,
     /// How far to move each note toward the grid, 0..1 (default 1: onto it).
     #[serde(default)]
@@ -992,9 +992,8 @@ pub struct TriggerParams {
     #[serde(default)]
     #[schemars(range(max = 127))]
     pub note: Option<u8>,
-    /// 0..1 (not MIDI 1..127), defaults to 1.
+    /// 0..1, clamped (not MIDI 1..127); defaults to 1.
     #[serde(default)]
-    #[schemars(range(min = 0.0, max = 1.0))]
     pub velocity: Option<f32>,
 }
 
@@ -1007,10 +1006,9 @@ pub struct NoteParams {
     /// MIDI note (0..127; a drum machine plays the voice on that GM note).
     #[schemars(range(max = 127))]
     pub note: u8,
-    /// 0..1 (not MIDI 1..127), defaults to 1 (0.95 and up plays accented).
-    /// Ignored by note-off.
+    /// 0..1, clamped (not MIDI 1..127); defaults to 1 (0.95 and up plays
+    /// accented). Ignored by note-off.
     #[serde(default)]
-    #[schemars(range(min = 0.0, max = 1.0))]
     pub velocity: Option<f32>,
 }
 

@@ -143,7 +143,7 @@ class Assistant {
     const label = `assistant: ${text.trim().replace(/\s+/g, " ").slice(0, 48)}`;
     const model = this.opts.model();
     if (!key) {
-      this.log.write({ type: "done", turn, stop: "error", text, error: "no API key" });
+      this.log.write({ type: "done", turn, stop: "error", model, text, error: "no API key" });
       this.opts.emit({ type: "done", turn, stop: "error", label, changed: [], usage: this.usage, error: "Add an Anthropic API key in the assistant's settings." });
       return;
     }

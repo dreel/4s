@@ -3464,8 +3464,9 @@
             ]
           },
           "grid": {
-            "description": "Grid in ticks, e.g. `TICKS_PER_STEP` (24) for 16ths.",
+            "description": "Grid in ticks, 1..`MAX_CLIP_TICKS` (1536), e.g. `TICKS_PER_STEP` (24) for 16ths.",
             "format": "uint32",
+            "maximum": 1536,
             "minimum": 1,
             "type": "integer"
           },
@@ -4503,10 +4504,8 @@
           },
           "velocity": {
             "default": null,
-            "description": "0..1 (not MIDI 1..127), defaults to 1 (0.95 and up plays accented).\nIgnored by note-off.",
+            "description": "0..1, clamped (not MIDI 1..127); defaults to 1 (0.95 and up plays\naccented). Ignored by note-off.",
             "format": "float",
-            "maximum": 1.0,
-            "minimum": 0.0,
             "type": [
               "number",
               "null"
@@ -6226,10 +6225,8 @@
           },
           "velocity": {
             "default": null,
-            "description": "0..1 (not MIDI 1..127), defaults to 1.",
+            "description": "0..1, clamped (not MIDI 1..127); defaults to 1.",
             "format": "float",
-            "maximum": 1.0,
-            "minimum": 0.0,
             "type": [
               "number",
               "null"

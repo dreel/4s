@@ -11,7 +11,7 @@ instrument: string | null,
  */
 note: number, 
 /**
- * 0..1 (not MIDI 1..127), defaults to 1 (0.95 and up plays accented).
- * Ignored by note-off.
+ * 0..1, clamped (not MIDI 1..127); defaults to 1 (0.95 and up plays
+ * accented). Ignored by note-off.
  */
 velocity: number | null, };

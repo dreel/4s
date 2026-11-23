@@ -17,6 +17,6 @@ voice: Voice | null,
  */
 note: number | null, 
 /**
- * 0..1 (not MIDI 1..127), defaults to 1.
+ * 0..1, clamped (not MIDI 1..127); defaults to 1.
  */
 velocity: number | null, };
