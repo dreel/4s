@@ -98,7 +98,11 @@ export function SamplerEditor({ id }: { id: string }) {
               row={r}
               pad={k}
               selected={k === pad}
-              onSelect={() => setPad(k)}
+              onSelect={() => {
+                setPad(k);
+                // Back on a pad later, its editor shows its region again.
+                setCut((c) => (c && c.pad !== k ? null : c));
+              }}
               onCut={() => {
                 setPad(k);
                 setCut((c) => ({ pad: k, n: (c?.n ?? 0) + 1 }));
