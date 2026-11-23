@@ -7,8 +7,8 @@
 // the mix), and apply it to the pad (`sampler.load` with the region, one
 // undo step). The waveform comes from the engine (`sample.peaks`), a bin a
 // pixel, so a whole song costs no more than a hit. Opened on a song just
-// loaded (`whole`: the pad has its first MAX_REGION seconds), it shows all
-// of it and says to choose the part the pad plays.
+// loaded (`whole`: its path; the pad has its first MAX_REGION seconds), it
+// shows all of it and says to choose the part the pad plays.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SamplerPad } from "../generated/SamplerPad";
@@ -57,7 +57,7 @@ function useSource(pad: SamplerPad | undefined): Source | null {
 
 type Drag = { kind: "new"; from: number } | { kind: "start" } | { kind: "end" };
 
-export function SampleEditor({ id, pad: padNumber, whole = false }: { id: string; pad: number; whole?: boolean }) {
+export function SampleEditor({ id, pad: padNumber, whole = null }: { id: string; pad: number; whole?: string | null }) {
   const pad = useApp((s) => s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.find((p) => p.pad === padNumber));
   const source = useSource(pad);
   const [view, setView] = useState<[number, number]>([0, 1]);
@@ -75,7 +75,15 @@ export function SampleEditor({ id, pad: padNumber, whole = false }: { id: string
 
   // A new source: show the pad's region with some room around it (all of
   // a song just loaded, the first time).
-  const overview = useRef(whole);
+  /** The source is the song just loaded, still as it came: that file (the
+   * pad's own, not the one it held before), its first MAX_REGION s. */
+  const isSong = (src: Source) =>
+    whole !== null &&
+    pad?.path === whole &&
+    src.start === 0 &&
+    Math.abs(src.end - src.start - MAX_REGION) < 0.001 &&
+    src.seconds > MAX_REGION;
+  const overview = useRef(whole !== null);
   useEffect(() => {
     if (!source) return;
     const len = source.end - source.start;
@@ -83,7 +91,7 @@ export function SampleEditor({ id, pad: padNumber, whole = false }: { id: string
     const margin = Math.max(len, 0.05);
     // (Only once the source is the song: the pad's old sample can come
     // first, if the load's event is later than its reply.)
-    const song = source.start === 0 && Math.abs(len - MAX_REGION) < 0.001 && source.seconds > MAX_REGION;
+    const song = isSong(source);
     if (overview.current && song) {
       setView([0, source.seconds]);
       overview.current = false;
@@ -265,7 +273,7 @@ export function SampleEditor({ id, pad: padNumber, whole = false }: { id: string
         </span>
         {pad.origin && source.path === pad.origin.path && <span className="text-zinc-500">(the file it was cut from)</span>}
       </div>
-      {whole && source.start === 0 && Math.abs(source.end - MAX_REGION) < 0.001 && (
+      {isSong(source) && (
         <div className="text-xs text-amber-300/80" data-testid={`sample-cut-note-${id}-${padNumber}`}>
           This file is longer than a pad plays ({MAX_REGION} s), so the pad has its first {MAX_REGION} s. Select the part you want and apply it.
         </div>

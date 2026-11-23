@@ -31,8 +31,9 @@ function PadControls({
   pad: number;
   selected: boolean;
   onSelect: () => void;
-  /** The file was longer than a pad plays: the pad has its start. */
-  onCut: () => void;
+  /** The file (its path on the engine host) was longer than a pad plays:
+   * the pad has its start. */
+  onCut: (path: string) => void;
 }) {
   const sample = useApp((s) => s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.find((p) => p.pad === pad));
   const load = async (file: File | undefined) => {
@@ -43,7 +44,7 @@ function PadControls({
     // engine stops the region at the file's end), the start of a longer one.
     const info = await act(client.call("sampler.load", { instrument: id, pad, path: null, upload, start: 0, end: MAX_REGION }));
     const loaded = info?.pads.find((p) => p.pad === pad);
-    if (loaded && loaded.file_seconds > loaded.end - loaded.start + 0.001) onCut();
+    if (loaded && loaded.file_seconds > loaded.end - loaded.start + 0.001) onCut(loaded.path);
   };
   return (
     <div className="flex items-center gap-1 w-56 shrink-0">
@@ -83,7 +84,7 @@ export function SamplerEditor({ id }: { id: string }) {
   const [pad, setPad] = useState(1);
   /** The pad just loaded with the start of a longer file, whose editor
    * opens on the whole file; `n` counts loads, so each opens it anew. */
-  const [cut, setCut] = useState<{ pad: number; n: number } | null>(null);
+  const [cut, setCut] = useState<{ pad: number; n: number; path: string } | null>(null);
   const loaded = useApp((s) => !!s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.some((x) => x.pad === pad));
   const p = (name: string) => `${id}.${pad}.${name}`;
   return (
@@ -103,9 +104,9 @@ export function SamplerEditor({ id }: { id: string }) {
                 // Back on a pad later, its editor shows its region again.
                 setCut((c) => (c && c.pad !== k ? null : c));
               }}
-              onCut={() => {
+              onCut={(path) => {
                 setPad(k);
-                setCut((c) => ({ pad: k, n: (c?.n ?? 0) + 1 }));
+                setCut((c) => ({ pad: k, n: (c?.n ?? 0) + 1, path }));
               }}
             />
           );
@@ -122,7 +123,7 @@ export function SamplerEditor({ id }: { id: string }) {
         <ParamKnob path={p("release")} label="release" format={pct} />
         <ParamKnob path={p("choke")} label="choke" format={(v) => (Math.round(v) === 0 ? "off" : `${Math.round(v)}`)} />
       </section>
-      {loaded && <SampleEditor key={cut?.pad === pad ? `${pad}-${cut.n}` : `${pad}`} id={id} pad={pad} whole={cut?.pad === pad} />}
+      {loaded && <SampleEditor key={cut?.pad === pad ? `${pad}-${cut.n}` : `${pad}`} id={id} pad={pad} whole={cut?.pad === pad ? cut.path : null} />}
     </div>
   );
 }
