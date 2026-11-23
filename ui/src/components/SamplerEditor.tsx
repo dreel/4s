@@ -82,8 +82,8 @@ function PadControls({
 export function SamplerEditor({ id }: { id: string }) {
   const [pad, setPad] = useState(1);
   /** The pad just loaded with the start of a longer file, whose editor
-   * opens on the whole file. */
-  const [cut, setCut] = useState<number | null>(null);
+   * opens on the whole file; `n` counts loads, so each opens it anew. */
+  const [cut, setCut] = useState<{ pad: number; n: number } | null>(null);
   const loaded = useApp((s) => !!s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.some((x) => x.pad === pad));
   const p = (name: string) => `${id}.${pad}.${name}`;
   return (
@@ -101,7 +101,7 @@ export function SamplerEditor({ id }: { id: string }) {
               onSelect={() => setPad(k)}
               onCut={() => {
                 setPad(k);
-                setCut(k);
+                setCut((c) => ({ pad: k, n: (c?.n ?? 0) + 1 }));
               }}
             />
           );
@@ -118,7 +118,7 @@ export function SamplerEditor({ id }: { id: string }) {
         <ParamKnob path={p("release")} label="release" format={pct} />
         <ParamKnob path={p("choke")} label="choke" format={(v) => (Math.round(v) === 0 ? "off" : `${Math.round(v)}`)} />
       </section>
-      {loaded && <SampleEditor key={`${pad}-${cut === pad}`} id={id} pad={pad} whole={cut === pad} />}
+      {loaded && <SampleEditor key={cut?.pad === pad ? `${pad}-${cut.n}` : `${pad}`} id={id} pad={pad} whole={cut?.pad === pad} />}
     </div>
   );
 }

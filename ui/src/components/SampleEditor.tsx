@@ -83,7 +83,6 @@ export function SampleEditor({ id, pad: padNumber, whole = false }: { id: string
     const margin = Math.max(len, 0.05);
     if (overview.current) setView([0, source.seconds]);
     else setView([Math.max(0, source.start - margin), Math.min(source.seconds, source.end + margin)]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     overview.current = false;
   }, [source]);
 
