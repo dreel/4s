@@ -6,14 +6,16 @@
 // scroll; play the selection through the engine (`sample.play`, outside
 // the mix), and apply it to the pad (`sampler.load` with the region, one
 // undo step). The waveform comes from the engine (`sample.peaks`), a bin a
-// pixel, so a whole song costs no more than a hit.
+// pixel, so a whole song costs no more than a hit. Opened on a song just
+// loaded (`whole`: the pad has its first MAX_REGION seconds), it shows all
+// of it and says to choose the part the pad plays.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SamplerPad } from "../generated/SamplerPad";
 import { act, client, useApp } from "../store";
 
 /** A pad plays at most this long (the engine's limit). */
-const MAX_REGION = 60;
+export const MAX_REGION = 60;
 /** The narrowest view, in seconds. */
 const MIN_VIEW = 0.005;
 
@@ -55,7 +57,7 @@ function useSource(pad: SamplerPad | undefined): Source | null {
 
 type Drag = { kind: "new"; from: number } | { kind: "start" } | { kind: "end" };
 
-export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }) {
+export function SampleEditor({ id, pad: padNumber, whole = false }: { id: string; pad: number; whole?: boolean }) {
   const pad = useApp((s) => s.snapshot?.samplers.find((x) => x.instrument === id)?.pads.find((p) => p.pad === padNumber));
   const source = useSource(pad);
   const [view, setView] = useState<[number, number]>([0, 1]);
@@ -71,13 +73,18 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
   const canvas = useRef<HTMLCanvasElement>(null);
   const H = 120;
 
-  // A new source: show the pad's region with some room around it.
+  // A new source: show the pad's region with some room around it (all of
+  // a song just loaded, the first time).
+  const overview = useRef(whole);
   useEffect(() => {
     if (!source) return;
     const len = source.end - source.start;
     setSel([source.start, source.end]);
     const margin = Math.max(len, 0.05);
-    setView([Math.max(0, source.start - margin), Math.min(source.seconds, source.end + margin)]);
+    if (overview.current) setView([0, source.seconds]);
+    else setView([Math.max(0, source.start - margin), Math.min(source.seconds, source.end + margin)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    overview.current = false;
   }, [source]);
 
   // The canvas follows its box's width (the box is there once the source
@@ -255,6 +262,11 @@ export function SampleEditor({ id, pad: padNumber }: { id: string; pad: number }
         </span>
         {pad.origin && source.path === pad.origin.path && <span className="text-zinc-500">(the file it was cut from)</span>}
       </div>
+      {whole && source.start === 0 && Math.abs(source.end - MAX_REGION) < 0.001 && (
+        <div className="text-xs text-amber-300/80" data-testid={`sample-cut-note-${id}-${padNumber}`}>
+          This file is longer than a pad plays ({MAX_REGION} s), so the pad has its first {MAX_REGION} s. Select the part you want and apply it.
+        </div>
+      )}
       <div ref={box} className="relative w-full select-none">
         <div className="relative h-4 text-[9px] text-zinc-500">
           {ticks.map((t) => (

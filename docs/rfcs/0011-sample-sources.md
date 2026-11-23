@@ -108,5 +108,12 @@ Format 8 reads v7 sample paths as all of the file. Protocol 10 removes
   shift-wheel scrolls; `all` and `selection` zoom. `play`/`stop` audition
   the selection (a cursor follows it); `apply to pad` loads it into the pad
   (`sampler.load` with the region, one undo step).
+- A file chosen for a pad loads as `start 0, end 60`: all of a file up to
+  60 s (the region stops at the file's end), the first 60 s of a longer
+  one, so a whole song can go on a pad to cut a hit out of. Then the
+  editor opens on that pad showing the whole file, with a note that the
+  pad has its start. The daemon still refuses a long file with no region
+  (CLI `4s sampler load` without `--from`/`--to`), so nothing is cut
+  short without saying so.
 - Not built: snapping to zero crossings or transients, and slicing a
   region to pads (next).
