@@ -7,6 +7,8 @@ const { rpcAllowed, rpcRefusal, describeMethod, methods } = require("./schema.cj
 
 /** Longest tool result sent back to the model, in characters. */
 const MAX_RESULT = 12000;
+/** Most rows `analyze_audio` lists (about 7 minutes of bars at 100 bpm). */
+const MAX_ROWS = 180;
 /** Most params `find_params` lists. */
 const MAX_PARAMS = 80;
 
@@ -419,6 +421,11 @@ function analysisText(a, f) {
   out.push(`sections (${unit}; level dB, low/mid/high, onsets a second, punch, tonal):`);
   for (const s of a.sections)
     out.push(`${s.label} ${unit} ${s.first}-${s.last} ${s.start}-${s.end}s ${s.rms_db} ${s.low}/${s.mid}/${s.high} ${s.onset_rate}/s p${s.punch} t${s.tonal}`);
+  // A long song's rows would crowd the context: sections only, then a span.
+  if (a.rows.length > MAX_ROWS) {
+    out.push(`(${a.rows.length} ${unit}: call again with start/end around a section for its ${unit})`);
+    return out.join("\n");
+  }
   out.push(`${unit} (n start-end s, level dB, low/mid/high, onsets, punch, tonal):`);
   for (const r of a.rows) out.push(`${r.n} ${r.start}-${r.end} ${r.rms_db} ${r.low}/${r.mid}/${r.high} ${r.onsets} p${r.punch} t${r.tonal}`);
   return out.join("\n");

@@ -71,8 +71,8 @@ parameters; `sampler.load` reads an audio file on the engine host, or a
 region of one, into a pad, RFC 0011; `sample.upload` sends a file from a
 client in chunks, and a load of it is journaled as the load of the stored
 file; `sample.info` and `sample.peaks` describe a file and its waveform,
-`sample.analyze` its tempo, bar grid, key and sections (run off the core
-lock), and
+`sample.analyze` its tempo, bar grid, key and sections (the analysis
+runs off the core lock; a first decode does not yet), and
 `sample.play` / `sample.stop` audition a region outside the mix),
 the
 song (`song.*`: each track's arrangement, RFC 0008, and `song.back`
