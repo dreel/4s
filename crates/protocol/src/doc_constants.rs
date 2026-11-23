@@ -46,6 +46,8 @@ fn walk(v: &mut serde_json::Value, table: &[(&'static str, String)]) {
             for (k, child) in m.iter_mut() {
                 match child {
                     serde_json::Value::String(s) if k == "description" => {
+                        // Matched with its backticks, so `TICKS_PER_STEP`
+                        // never matches inside another name.
                         for (name, value) in table {
                             *s = s.replace(&format!("`{name}`"), &format!("`{name}` ({value})"));
                         }

@@ -132,6 +132,10 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   not at all (seat CC numbers and MIDI channels, `device.add` position,
   `sampler.pad`'s other params). Add
   `#[schemars(range(...))]` where the daemon checks one.
+- (2026-11-22, assistant tool failures, review) assistant session log: the
+  Electron e2e does not check the production wiring (a file under
+  `<data dir>/assistant/sessions` after a turn, a new one after New chat);
+  `assistant.test.cjs` covers the log with an injected `SessionLog`.
 - (2026-11-22, assistant tool failures) assistant session log: written in
   Electron main, so `4s` cannot show it, and a remote engine's host never
   has it. If agents need it, a `4s assistant log` would have to read the

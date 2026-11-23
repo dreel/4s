@@ -219,9 +219,9 @@ test("the session log has every tool call, refused and failed ones too, and new 
     assert.equal(files().length, 1);
     const read = (f) => fs.readFileSync(path.join(dir, f), "utf8");
     const records = read(files()[0]).trim().split("\n").map((l) => JSON.parse(l));
-    assert.deepEqual(records.map((r) => r.type), ["user", "reply", "tool", "tool", "tool", "reply", "done"]);
+    assert.deepEqual(records.map((r) => r.type), ["user", "context", "reply", "tool", "tool", "tool", "reply", "done"]);
     assert.equal(records[0].text, "four on the floor");
-    assert.match(records[0].header, /^\[4S context\]/);
+    assert.match(records[1].header, /^\[4S context\]/);
     const [refused, failed, ok] = records.filter((r) => r.type === "tool");
     assert.equal(refused.ok, false);
     assert.match(refused.error, /not allowed from the assistant/);

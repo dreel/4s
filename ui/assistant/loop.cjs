@@ -142,8 +142,9 @@ class Assistant {
     const turn = ++this.turn;
     const label = `assistant: ${text.trim().replace(/\s+/g, " ").slice(0, 48)}`;
     const model = this.opts.model();
+    this.log.write({ type: "user", turn, model, label, text });
     if (!key) {
-      this.log.write({ type: "done", turn, stop: "error", model, text, error: "no API key" });
+      this.log.write({ type: "done", turn, stop: "error", error: "no API key" });
       this.opts.emit({ type: "done", turn, stop: "error", label, changed: [], usage: this.usage, error: "Add an Anthropic API key in the assistant's settings." });
       return;
     }
@@ -160,7 +161,7 @@ class Assistant {
       await daemon.call("history.group_begin", { label });
       grouped = true;
       const head = await this.header(ctx);
-      this.log.write({ type: "user", turn, model, label, header: head, text });
+      this.log.write({ type: "context", turn, header: head });
       this.pushUser([{ type: "text", text: `${head}\n\n${text}` }]);
       stop = await this.loop(client, model, turn, abort.signal);
     } catch (e) {

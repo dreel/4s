@@ -105,8 +105,9 @@ instead.
 ## Session log
 
 Each chat is written to `<data dir>/assistant/sessions/<time>-<pid>.jsonl`
-for debugging, one JSON record a line: `user` (your message, the context
-header, the model), `reply` (the model's whole response: text, tool calls,
+for debugging, one JSON record a line: `user` (your message and the
+model, written first, before anything can fail), `context` (the context
+header), `reply` (the model's whole response: text, tool calls,
 stop reason, usage), `tool` (each call's input and its result or error,
 refused and failed calls too), `api_error`, and `done` (the turn's stop
 reason, changed keys, error, session usage). "New chat" starts a new file;
