@@ -81,9 +81,13 @@ export function SampleEditor({ id, pad: padNumber, whole = false }: { id: string
     const len = source.end - source.start;
     setSel([source.start, source.end]);
     const margin = Math.max(len, 0.05);
-    if (overview.current) setView([0, source.seconds]);
-    else setView([Math.max(0, source.start - margin), Math.min(source.seconds, source.end + margin)]);
-    overview.current = false;
+    // (Only once the source is the song: the pad's old sample can come
+    // first, if the load's event is later than its reply.)
+    const song = source.start === 0 && Math.abs(len - MAX_REGION) < 0.001 && source.seconds > MAX_REGION;
+    if (overview.current && song) {
+      setView([0, source.seconds]);
+      overview.current = false;
+    } else setView([Math.max(0, source.start - margin), Math.min(source.seconds, source.end + margin)]);
   }, [source]);
 
   // The canvas follows its box's width (the box is there once the source

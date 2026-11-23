@@ -1472,9 +1472,10 @@ test("sampler: load a WAV into a pad from this computer, play it from the step v
 
 test("sampler: a song longer than a pad plays loads its first 60 s and opens the editor on all of it, to cut a hit out", async () => {
   const { page, rpc } = h;
-  // A 90 s 16-bit mono WAV at 8 kHz: quiet, with a 220 Hz burst at 70..70.3 s.
+  // A 150 s 16-bit mono WAV at 8 kHz (longer than the 60 s margins the
+  // editor puts around a 0..60 region): quiet, with a 220 Hz burst at 70..70.3 s.
   const sr = 8000;
-  const n = sr * 90;
+  const n = sr * 150;
   const buf = Buffer.alloc(44 + n * 2);
   buf.write("RIFF", 0);
   buf.writeUInt32LE(36 + n * 2, 4);
@@ -1498,11 +1499,11 @@ test("sampler: a song longer than a pad plays loads its first 60 s and opens the
   await page.getByTestId("pad-load-cut-3").setInputFiles({ name: "song.wav", mimeType: "audio/wav", buffer: buf });
   await expect(page.getByTestId("pad-cut-3")).toContainText("song.wav");
   const [loaded] = (await rpc("sampler.get", { instrument: "cut" })).pads;
-  expect([loaded.pad, loaded.start, loaded.end, Math.round(loaded.file_seconds)]).toEqual([3, 0, 60, 90]);
+  expect([loaded.pad, loaded.start, loaded.end, Math.round(loaded.file_seconds)]).toEqual([3, 0, 60, 150]);
   // The editor opens on that pad, showing the whole song, and says why.
   const wave = page.getByTestId("sample-wave-cut-3");
   await expect(wave).toBeVisible();
-  await expect(wave).toHaveAttribute("data-view", /^0\.0000,90\.0/);
+  await expect(wave).toHaveAttribute("data-view", /^0\.0000,150\.0/);
   await expect(page.getByTestId("sample-cut-note-cut-3")).toBeVisible();
   // Choose the burst and apply it: the pad plays just that.
   // (The end first: a start past the end swaps them.)
@@ -1515,6 +1516,10 @@ test("sampler: a song longer than a pad plays loads its first 60 s and opens the
     .poll(async () => (await rpc("sampler.get", { instrument: "cut" })).pads.map((p) => [p.start, p.end]))
     .toEqual([[70, 70.3]]);
   await expect(page.getByTestId("sample-cut-note-cut-3")).toHaveCount(0);
+  // Back on the pad later, its editor shows its region, not the whole song.
+  await page.getByTestId("pad-cut-1").click();
+  await page.getByTestId("pad-cut-3").click();
+  await expect(wave).toHaveAttribute("data-view", "69.7000,70.6000");
   // A short file still loads whole, with no note.
   const mp3 = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "tests", "fixtures", "audio", "song.mp3");
   await page.getByTestId("pad-load-cut-4").setInputFiles(mp3);
@@ -1522,6 +1527,8 @@ test("sampler: a song longer than a pad plays loads its first 60 s and opens the
   const short = (await rpc("sampler.get", { instrument: "cut" })).pads.find((p) => p.pad === 4)!;
   expect(short.start).toBe(0);
   expect(short.end).toBeCloseTo(short.file_seconds, 3);
+  await expect(page.getByTestId("sample-wave-cut-4")).toBeVisible();
+  await expect(page.getByTestId("sample-cut-note-cut-4")).toHaveCount(0);
 });
 
 test("virtual Livid Block pads, LEDs, and knobs", async () => {
