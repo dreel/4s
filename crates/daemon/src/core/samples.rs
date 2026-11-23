@@ -325,6 +325,14 @@ impl Core {
         }
     }
 
+    /// A file's decoded audio for `sample.analyze` (which runs off the
+    /// lock): where it is, its interleaved stereo, and the rate.
+    pub(crate) fn analysis_source(&mut self, path: &str) -> Result<(PathBuf, Arc<[f32]>, u32), RpcError> {
+        let path = self.sample_path(path)?;
+        let s = self.source(&path)?;
+        Ok((path, s.data.clone(), s.rate))
+    }
+
     /// The file a finished upload was stored as.
     pub(super) fn uploaded(&self, token: &str) -> Result<PathBuf, RpcError> {
         self.uploads

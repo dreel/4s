@@ -102,6 +102,88 @@ test("tools: overview, find_params, set_params, rpc, describe", async () => {
   assert.equal(length.minimum, 1);
 });
 
+/** A made-up band at 126 bpm, 12 bars of 4/4, as a 16-bit mono WAV at
+ * 22.05 kHz: bars 1-4 and 9-12 an A minor chord over a kick on 1 and 3,
+ * bars 5-8 a drum break (kick, snare on 2 and 4, eighth-note hats). */
+function bandWav(file) {
+  const sr = 22050;
+  const beat = 60 / 126;
+  const n = Math.floor(sr * beat * 4 * 12);
+  const x = new Float64Array(n);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32) - 0.5;
+  const hit = (at, len, f) => {
+    const a = Math.floor(at * sr);
+    for (let i = 0; i < Math.min(Math.floor(len * sr), n - a); i++) x[a + i] += f(i / sr);
+  };
+  for (let b = 0; b < 48; b++) {
+    const bar = Math.floor(b / 4), k = b % 4, t = b * beat, brk = bar >= 4 && bar < 8;
+    if (k % 2 === 0) hit(t, 0.15, (u) => 0.6 * Math.sin(2 * Math.PI * (50 + 100 * Math.exp(-u * 30)) * u) * Math.exp(-u * 20));
+    if (brk && k % 2 === 1) hit(t, 0.12, (u) => 0.4 * rnd() * Math.exp(-u * 25));
+    if (brk) for (const h of [0, 0.5]) hit(t + h * beat, 0.04, (u) => 0.25 * rnd() * Math.exp(-u * 80));
+  }
+  for (let i = 0; i < n; i++) {
+    const bar = Math.floor(i / sr / (beat * 4));
+    if (bar < 4 || bar >= 8) for (const f of [110, 220, 261.63, 329.63]) x[i] += 0.08 * Math.sin((2 * Math.PI * f * i) / sr);
+  }
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sr, 24);
+  buf.writeUInt32LE(sr * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.max(-32767, Math.min(32767, Math.round(x[i] * 32767))), 44 + i * 2);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, buf);
+  return { bar: (4 * 60) / 126 };
+}
+
+/** A sampler with the band on pad 1. */
+async function bandOnPad() {
+  const file = path.join(dataDir, "samples", "band.wav");
+  const { bar } = bandWav(file);
+  await me.call("instrument.add", { type: "sampler", id: "smp", name: null, channel: null, no_channel: false });
+  await me.call("sampler.load", { instrument: "smp", pad: 1, path: file, upload: null, start: null, end: null });
+  return { file, bar };
+}
+
+test("tools: analyze_audio hears a pad's song; cut_sample loads whole bars of it; no paths from the model", async () => {
+  const { file, bar } = await bandOnPad();
+  const tools = new Tools(me, schema, USER);
+  const a = await tools.run("analyze_audio", { pad: 1 });
+  assert.match(a.text, /^band\.wav: 0:00\.000 - 0:22\.857/);
+  assert.match(a.text, /tempo 12[56]\.\d+ bpm/);
+  assert.match(a.text, /key A minor/);
+  // The break is a section of its own, bars 5-8, the most punch.
+  const sections = a.text.split("\n").filter((l) => /^[A-Z] bars \d+-\d+ /.test(l));
+  const punch = (l) => Number(/ p([\d.]+) /.exec(l)[1]);
+  const brk = sections.reduce((x, y) => (punch(y) > punch(x) ? y : x));
+  assert.match(brk, /^[A-Z] bars 5-8 /, a.text);
+  assert.deepEqual(a.chips, ["listened to band.wav"]);
+  // A rough region snaps to bar lines: bars 5-8 onto pad 2.
+  const c = await tools.run("cut_sample", { pad: 1, to_pad: 2, start: 4 * bar - 0.3, end: 8 * bar + 0.2 });
+  assert.match(c.text, /^smp pad 2 now plays band\.wav bars 5-8, /);
+  const p2 = (await me.call("sampler.get", { instrument: "smp" })).pads.find((p) => p.pad === 2);
+  assert.equal(p2.path, file);
+  assert.ok(Math.abs(p2.start - 4 * bar) < 0.06 && Math.abs(p2.end - 8 * bar) < 0.06, `${p2.start}..${p2.end}`);
+  // Its own times are the grid's, exactly.
+  assert.match(c.text, new RegExp(`start ${p2.start}, end ${p2.end}\\)$`));
+  // Unsnapped, the times as given; an empty pad; paths from the model are refused.
+  await tools.run("cut_sample", { pad: 1, to_pad: 3, start: 1.234, end: 2.5, snap: false });
+  const p3 = (await me.call("sampler.get", { instrument: "smp" })).pads.find((p) => p.pad === 3);
+  assert.ok(Math.abs(p3.start - 1.234) < 0.001 && Math.abs(p3.end - 2.5) < 0.001, `${p3.start}..${p3.end}`);
+  await assert.rejects(tools.run("analyze_audio", { pad: 9 }), /pad 9 is empty \(loaded pads: 1, 2, 3\)/);
+  await assert.rejects(tools.run("rpc", { method: "sample.analyze", params: { path: file } }), /file path is not allowed/);
+  await assert.rejects(tools.run("rpc", { method: "sampler.load", params: { instrument: "smp", pad: 4, path: "/etc/hosts" } }), /file path is not allowed/);
+});
+
 /** An assistant against the fake API, collecting its events. */
 async function harness(script, opts = {}) {
   const fake = await startFakeAnthropic(script);
@@ -346,5 +428,36 @@ test("settings: the key is stored encrypted, or for the session only without enc
     assert.equal(new Settings(dir, fakeStorage(true)).model(), "claude-opus-5-5");
   } finally {
     if (saved != null) process.env.ANTHROPIC_API_KEY = saved;
+  }
+});
+
+test("the clip finder: a drum break pulled out of a song on a pad, in one undo step", async () => {
+  const { bar } = await bandOnPad();
+  const h = await harness([
+    { match: "drum break", replies: [
+      { content: [{ type: "tool_use", name: "analyze_audio", input: { pad: 1 } }] },
+      { content: [{ type: "tool_use", name: "cut_sample", input: { pad: 1, to_pad: 2, start: 7.7, end: 15.1 } }] },
+      { content: [{ type: "text", text: "Pad 2 has the break, bars 5-8." }] },
+    ] },
+  ]);
+  try {
+    await h.a.send("put the drum break on pad 2");
+    const done = h.events.find((e) => e.type === "done");
+    assert.equal(done.stop, "end_turn", done.error);
+    const tools = h.events.filter((e) => e.type === "tool");
+    assert.deepEqual(tools.map((e) => e.ok), [true, true]);
+    // The model saw the timeline, and the cut it made.
+    const seen = h.fake.requests[1].body.messages.at(-1).content[0].content;
+    assert.match(seen, /bars 5-8 /);
+    const cut = h.fake.requests[2].body.messages.at(-1).content[0].content;
+    assert.match(cut, /pad 2 now plays band\.wav bars 5-8/);
+    const p2 = (await me.call("sampler.get", { instrument: "smp" })).pads.find((p) => p.pad === 2);
+    assert.ok(Math.abs(p2.start - 4 * bar) < 0.06 && Math.abs(p2.end - 8 * bar) < 0.06, `${p2.start}..${p2.end}`);
+    assert.deepEqual(done.changed, ["sample:smp.2"]);
+    assert.equal((await me.call("history.get")).undo[0], "assistant: put the drum break on pad 2");
+    await me.call("history.undo");
+    assert.equal((await me.call("sampler.get", { instrument: "smp" })).pads.some((p) => p.pad === 2), false);
+  } finally {
+    await h.close();
   }
 });

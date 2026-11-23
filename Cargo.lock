@@ -497,6 +497,7 @@ dependencies = [
  "hound",
  "libc",
  "midir",
+ "realfft",
  "rtrb",
  "rubato",
  "serde",

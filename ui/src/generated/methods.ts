@@ -82,6 +82,8 @@ import type { Recording } from "./Recording";
 import type { RenderParams } from "./RenderParams";
 import type { RenderResult } from "./RenderResult";
 import type { RouteSetParams } from "./RouteSetParams";
+import type { SampleAnalysis } from "./SampleAnalysis";
+import type { SampleAnalyzeParams } from "./SampleAnalyzeParams";
 import type { SampleInfo } from "./SampleInfo";
 import type { SampleInfoParams } from "./SampleInfoParams";
 import type { SamplePeaks } from "./SamplePeaks";
@@ -152,6 +154,7 @@ export interface Methods {
   "sample.upload": { params: SampleUploadParams; result: SampleUploadResult };
   "sample.info": { params: SampleInfoParams; result: SampleInfo };
   "sample.peaks": { params: SamplePeaksParams; result: SamplePeaks };
+  "sample.analyze": { params: SampleAnalyzeParams; result: SampleAnalysis };
   "sample.play": { params: SamplePlayParams; result: SamplePlaying };
   "sample.stop": { params: Empty; result: Empty };
   "sampler.clear": { params: SamplerPadParams; result: SamplerInfo };
@@ -268,6 +271,7 @@ export const METHODS: MethodName[] = [
   "sample.upload",
   "sample.info",
   "sample.peaks",
+  "sample.analyze",
   "sample.play",
   "sample.stop",
   "sampler.clear",

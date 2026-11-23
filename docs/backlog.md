@@ -543,5 +543,24 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   swaps the two (the selection is kept sorted), so typing 70 then 70.3
   into a 0..60 selection gives 60..70.3. Keep the length or move the end
   along instead.
+- (2026-11-23, sample analysis) neural extras, left out of the classic
+  DSP in `crates/daemon/src/analysis.rs`: a beat and downbeat tracker
+  (Beat This!) for swung, live or odd-meter music where autocorrelation
+  plus dynamic programming drifts, and stem separation (Demucs) to cut
+  drums out from under a full mix. Both are large models: decide where they
+  run (engine host, a sidecar) and their licenses first.
+- (2026-11-23, sample analysis) the meter is only what `beats_per_bar`
+  says (default 4); a 3/4 or 6/8 song gets 4-beat bars. Guess it from the
+  beat-level self-similarity, or let the UI and assistant ask.
+- (2026-11-23, sample analysis) a song is decoded under the core lock the
+  first time it is analyzed (as for `sample.info`/`peaks`; the analysis
+  itself runs off it). A first analysis of a long FLAC holds the lock for
+  the decode, about a second for 6 minutes. Decode off the lock too.
+- (2026-11-23, sample analysis) the bar phase (which beat is "1") comes
+  from kick flux plus where the band balance changes; a song that keeps
+  its kick on 1 and 3 and never changes parts on a bar line can come out
+  two beats off. A "shift the grid by a beat" option on `cut_sample` and
+  `sample.analyze` would let the user correct it.
+
 
 ## Process

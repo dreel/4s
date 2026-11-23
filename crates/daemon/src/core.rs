@@ -2751,6 +2751,7 @@ impl Core {
             | Request::EventsSubscribe(_)
             | Request::EventsUnsubscribe(_)
             | Request::RenderOffline(_)
+            | Request::SampleAnalyze(_)
             | Request::DaemonInfo(_)
             | Request::DaemonShutdown(_) => Err(RpcError::failed("handled by connection")),
             Request::HistoryUndo(_)

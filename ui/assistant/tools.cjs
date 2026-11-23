@@ -55,9 +55,43 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: "analyze_audio",
+    description:
+      "Listen to the audio file behind a sampler pad (the whole song a pad was cut from, if the engine host still has it; else the pad's own file): its tempo and bar grid, key, level, its sections (runs of bars that sound alike; alike sections share a letter), and a table a bar a row. Columns: level in dBFS; low/mid/high, the shares of energy below 200 Hz (kick, bass), 200 Hz-2 kHz (body, voice, most instruments) and above 2 kHz (hats, cymbals); onsets (note or hit starts); punch 0..1 (how hard they hit: drums high, pads low); tonal 0..1 (chords and melody high, drums and noise low). Compare rows within the file, not against fixed numbers. Use it to find a part of a song by description, e.g. a drum break is bars with many onsets, high punch and high-band share, and low tonal; then cut it with `cut_sample`. Give start/end (seconds) to look at a span only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        instrument: { type: "string", description: "The sampler's id (default: the first sampler)" },
+        pad: { type: "integer", description: "The pad whose file to analyze, 1..16" },
+        start: { type: "number", description: "Seconds into the file (default 0)" },
+        end: { type: "number", description: "Seconds into the file (default: its end)" },
+      },
+      required: ["pad"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cut_sample",
+    description:
+      "Load a part of the file behind a sampler pad (the same file `analyze_audio` reads) onto a pad: start and end in seconds of that file, snapped to the nearest bar lines of its beat grid (so it loops in time) unless snap is false. At most 60 s. Returns the bars and the exact times; tell the user both. One undo step with the rest of the turn.",
+    input_schema: {
+      type: "object",
+      properties: {
+        instrument: { type: "string", description: "The sampler's id (default: the first sampler)" },
+        pad: { type: "integer", description: "The pad whose file to cut from, 1..16" },
+        to_pad: { type: "integer", description: "The pad to load the cut onto (default: the same pad)" },
+        start: { type: "number", description: "Seconds into the file" },
+        end: { type: "number", description: "Seconds into the file" },
+        snap: { type: "boolean", description: "Snap to bar lines (default true)" },
+      },
+      required: ["pad", "start", "end"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "rpc",
     description:
-      "Call any allowed 4S RPC method, for structural edits and reads that the other tools do not cover: add or remove devices (`device.add`), edit clips and notes (`clip.*`), instruments, channels, routing, sends, modulation, seats and MIDI. Use `describe` first if unsure of a method's params. Refused: project file operations (new/load/import/save), undo history, the daemon and connection, journal export, uploads, renders, and file paths on the engine host (e.g. loading a sample by path); ask the user to do those.",
+      "Call any allowed 4S RPC method, for structural edits and reads that the other tools do not cover: add or remove devices (`device.add`), edit clips and notes (`clip.*`), instruments, channels, routing, sends, modulation, seats and MIDI. Use `describe` first if unsure of a method's params. Refused: project file operations (new/load/import/save), undo history, the daemon and connection, journal export, uploads, renders, and file paths on the engine host (e.g. loading a sample by path; use `analyze_audio` and `cut_sample` for files already on a pad); ask the user to do those.",
     input_schema: {
       type: "object",
       properties: {
@@ -156,6 +190,9 @@ class Tools {
     this.daemon = daemon;
     this.schema = schema;
     this.user = user;
+    /** Whole-file analyses by path, for `cut_sample`'s bar lines (a
+     * project's files do not change under it in a chat). @type {Map<string, any>} */
+    this.analyses = new Map();
   }
 
   /**
@@ -176,6 +213,10 @@ class Tools {
         return this.findParams(input);
       case "set_params":
         return this.setParams(input);
+      case "analyze_audio":
+        return this.analyzeAudio(input);
+      case "cut_sample":
+        return this.cutSample(input);
       case "rpc":
         return this.rpc(input);
       case "describe": {
@@ -243,6 +284,93 @@ class Tools {
     return { text: lines.join("\n"), chips: lines };
   }
 
+  /**
+   * The file behind a pad, which `analyze_audio` and `cut_sample` work on:
+   * the file it was cut from if the engine host still has it, else its
+   * own. Only files already in the project, never a path from the model.
+   * @param {any} input
+   * @returns {Promise<{ instrument: string, path: string, name: string }>}
+   */
+  async padFile(input) {
+    if (input.instrument != null && typeof input.instrument !== "string") throw new ToolError("instrument must be a string");
+    if (!Number.isInteger(input.pad)) throw new ToolError("pad must be an integer 1..16");
+    let info;
+    try {
+      info = await this.daemon.call("sampler.get", { instrument: input.instrument ?? null });
+    } catch (e) {
+      throw new ToolError(`sampler.get: ${/** @type {Error} */ (e).message}`);
+    }
+    const pad = info.pads.find((/** @type {any} */ p) => p.pad === input.pad);
+    if (!pad) {
+      const loaded = info.pads.map((/** @type {any} */ p) => p.pad).join(", ") || "none";
+      throw new ToolError(`${info.instrument} pad ${input.pad} is empty (loaded pads: ${loaded}); ask the user to load the song onto a pad in the app`);
+    }
+    if (pad.origin) {
+      const there = await this.daemon.call("sample.info", { path: pad.origin.path }).then(() => true, () => false);
+      if (there) return { instrument: info.instrument, path: pad.origin.path, name: pad.origin.path.split(/[\\/]/).pop() };
+    }
+    return { instrument: info.instrument, path: pad.path, name: pad.name };
+  }
+
+  /**
+   * `sample.analyze` of a file, whole files kept for snapping.
+   * @param {string} path @param {number | null} start @param {number | null} end
+   */
+  async analysis(path, start, end) {
+    const whole = start == null && end == null;
+    if (whole && this.analyses.has(path)) return this.analyses.get(path);
+    let a;
+    try {
+      a = await this.daemon.call("sample.analyze", { path, start, end, beats_per_bar: null, onsets: false, beats: false });
+    } catch (e) {
+      throw new ToolError(`sample.analyze: ${/** @type {Error} */ (e).message}`);
+    }
+    if (whole) this.analyses.set(path, a);
+    return a;
+  }
+
+  /** @param {any} input */
+  async analyzeAudio(input) {
+    for (const k of ["start", "end"])
+      if (input[k] != null && (typeof input[k] !== "number" || !Number.isFinite(input[k]))) throw new ToolError(`${k} must be seconds`);
+    const f = await this.padFile(input);
+    const a = await this.analysis(f.path, input.start ?? null, input.end ?? null);
+    return { text: analysisText(a, f), chips: [`listened to ${f.name}`] };
+  }
+
+  /** @param {any} input */
+  async cutSample(input) {
+    for (const k of ["start", "end"])
+      if (typeof input[k] !== "number" || !Number.isFinite(input[k])) throw new ToolError(`${k} must be seconds`);
+    const to = input.to_pad ?? input.pad;
+    if (!Number.isInteger(to)) throw new ToolError("to_pad must be an integer 1..16");
+    const f = await this.padFile(input);
+    let [start, end] = [input.start, input.end];
+    let bars = "";
+    if (input.snap !== false) {
+      const a = await this.analysis(f.path, null, null);
+      if (a.row_unit !== "bar") throw new ToolError("no steady beat in this file to snap to; call again with snap: false");
+      // Bar lines: each row's start, and the last row's end.
+      const lines = [...a.rows.map((/** @type {any} */ r) => r.start), a.rows.at(-1).end];
+      const nearest = (/** @type {number} */ t) => lines.reduce((best, x, i) => (Math.abs(x - t) < Math.abs(lines[best] - t) ? i : best), 0);
+      const i = nearest(start);
+      let j = nearest(end);
+      if (j <= i) j = Math.min(i + 1, lines.length - 1);
+      if (j <= i) throw new ToolError("that is past the last bar line");
+      [start, end] = [lines[i], lines[j]];
+      bars = j - i === 1 ? `bar ${i + 1}` : `bars ${i + 1}-${j}`;
+    }
+    if (end - start > 60) throw new ToolError(`that is ${(end - start).toFixed(1)} s${bars ? ` (${bars})` : ""}; a pad plays at most 60 s: choose fewer bars`);
+    try {
+      await this.daemon.call("sampler.load", { instrument: f.instrument, pad: to, path: f.path, upload: null, start, end });
+    } catch (e) {
+      throw new ToolError(`sampler.load: ${/** @type {Error} */ (e).message}`);
+    }
+    const span = `${clock(start)} - ${clock(end)}`;
+    const text = `${f.instrument} pad ${to} now plays ${f.name} ${bars ? `${bars}, ` : ""}${span} (${(end - start).toFixed(3)} s; start ${start}, end ${end})`;
+    return { text, chips: [`pad ${to} <- ${bars ? `${bars} ` : ""}(${span})`] };
+  }
+
   /** @param {any} input */
   async rpc(input) {
     const { method } = input;
@@ -263,6 +391,29 @@ class Tools {
     const readOnly = this.schema.read_only_methods.includes(method);
     return { text, chips: readOnly ? [] : [rpcChip(method, params)] };
   }
+}
+
+/** Seconds as `m:ss.mmm`. @param {number} t */
+function clock(t) {
+  const ms = Math.round(Math.max(0, t) * 1000);
+  return `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}.${String(ms % 1000).padStart(3, "0")}`;
+}
+
+/** `analyze_audio`'s text: the overview, sections, and a compact table a
+ * row (bars, or seconds with no steady beat).
+ * @param {any} a @param {{ name: string }} f */
+function analysisText(a, f) {
+  const out = [`${f.name}: ${clock(a.start)} - ${clock(a.end)}, peak ${a.peak_db} dB, level ${a.rms_db} dB, ${a.onset_count} onsets`];
+  const t = a.tempo;
+  out.push(t ? `tempo ${t.bpm} bpm (confidence ${t.confidence}), ${t.beats_per_bar} beats a bar, first bar line ${t.first_downbeat} s` : "no steady beat: rows are seconds");
+  out.push(a.key ? `key ${a.key.name} (confidence ${a.key.confidence})` : "key: none");
+  const unit = a.row_unit === "bar" ? "bars" : "secs";
+  out.push(`sections (${unit}; level dB, low/mid/high, onsets a second, punch, tonal):`);
+  for (const s of a.sections)
+    out.push(`${s.label} ${unit} ${s.first}-${s.last} ${s.start}-${s.end}s ${s.rms_db} ${s.low}/${s.mid}/${s.high} ${s.onset_rate}/s p${s.punch} t${s.tonal}`);
+  out.push(`${unit} (n start-end s, level dB, low/mid/high, onsets, punch, tonal):`);
+  for (const r of a.rows) out.push(`${r.n} ${r.start}-${r.end} ${r.rms_db} ${r.low}/${r.mid}/${r.high} ${r.onsets} p${r.punch} t${r.tonal}`);
+  return out.join("\n");
 }
 
 /** A short chip for an edit made through `rpc`, e.g. `+ compressor on ch 1`.

@@ -219,7 +219,8 @@ enum Cmd {
     },
     /// Audio files on the engine host (RFC 0011): `4s sample info
     /// song.mp3` (length, format), `4s sample peaks song.mp3 --from 1:20
-    /// --to 1:30` (its waveform), `4s sample upload song.flac` (send it).
+    /// --to 1:30` (its waveform), `4s sample analyze song.flac` (tempo,
+    /// bars, key, sections), `4s sample upload song.flac` (send it).
     Sample {
         #[command(subcommand)]
         cmd: SampleCmd,
@@ -544,6 +545,33 @@ enum SampleCmd {
         #[arg(long, default_value_t = 64)]
         bins: u32,
     },
+    /// What a file sounds like: its tempo and bar grid, key, level, and
+    /// sections (runs of bars that sound alike), each with its level,
+    /// band shares (low < 200 Hz, mid, high > 2 kHz), onsets a second,
+    /// punch (how hard they hit) and tonal (chords and melody vs drums
+    /// and noise). `--rows` lists every bar. To cut a part out, load
+    /// whole bars of it: `4s sampler load 1 song.flac --from <a bar's
+    /// start> --to <a later bar's end>`. A file here is sent first, as
+    /// for `info`.
+    Analyze {
+        file: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        /// Beats in a bar (default 4).
+        #[arg(long)]
+        beats_per_bar: Option<u32>,
+        /// List every bar (or second, with no steady beat).
+        #[arg(long)]
+        rows: bool,
+        /// List every onset's time.
+        #[arg(long)]
+        onsets: bool,
+        /// List every beat's time.
+        #[arg(long)]
+        beats: bool,
+    },
     /// Send a file on this machine to the engine host, and print where it
     /// is stored there.
     Upload { file: String },
@@ -572,6 +600,72 @@ enum ModCmd {
     },
     /// Remove a route.
     Unroute { source: String, target: String },
+}
+
+/// `sample analyze`'s report: the overview, sections, and (with `rows`)
+/// every row.
+fn print_analysis(a: &SampleAnalysis, rows: bool) {
+    let name = std::path::Path::new(&a.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    println!("{name}  {} - {}  peak {:.1} dB  rms {:.1} dB", fmt_time(a.start), fmt_time(a.end), a.peak_db, a.rms_db);
+    match &a.tempo {
+        Some(t) => println!(
+            "tempo {:.2} bpm (confidence {:.2}), {} beats a bar, first bar line at {}, {} beats",
+            t.bpm,
+            t.confidence,
+            t.beats_per_bar,
+            fmt_time(t.first_downbeat),
+            t.beat_count
+        ),
+        None => println!("tempo: no steady beat (rows are seconds)"),
+    }
+    match &a.key {
+        Some(k) => println!("key {} (confidence {:.2})", k.name, k.confidence),
+        None => println!("key: none"),
+    }
+    println!("{} onsets", a.onset_count);
+    let unit = if a.row_unit == "bar" { "bars" } else { "secs" };
+    println!("sections");
+    for s in &a.sections {
+        println!(
+            "  {:<3} {unit} {:>3}-{:<3}  {} - {}  rms {:>6.1} dB  low {:.2} mid {:.2} high {:.2}  onsets {:>4.1}/s  punch {:.2}  tonal {:.2}",
+            s.label,
+            s.first,
+            s.last,
+            fmt_time(s.start),
+            fmt_time(s.end),
+            s.rms_db,
+            s.low,
+            s.mid,
+            s.high,
+            s.onset_rate,
+            s.punch,
+            s.tonal
+        );
+    }
+    if rows {
+        println!("{unit}");
+        for r in &a.rows {
+            println!(
+                "  {:>4}  {} - {}  rms {:>6.1} dB  low {:.2} mid {:.2} high {:.2}  onsets {:>2}  punch {:.2}  tonal {:.2}",
+                r.n,
+                fmt_time(r.start),
+                fmt_time(r.end),
+                r.rms_db,
+                r.low,
+                r.mid,
+                r.high,
+                r.onsets,
+                r.punch,
+                r.tonal
+            );
+        }
+    }
+    if let Some(o) = &a.onsets {
+        println!("onsets: {}", o.iter().map(|t| format!("{t:.3}")).collect::<Vec<_>>().join(" "));
+    }
+    if let Some(b) = &a.beats {
+        println!("beats: {}", b.iter().map(|t| format!("{t:.3}")).collect::<Vec<_>>().join(" "));
+    }
 }
 
 /// Seconds as `m:ss.mmm`.
@@ -1510,7 +1604,11 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
             // A file here is sent, then named by where it was stored: the
             // engine host resolves `uploads` paths to the finished upload.
             let file = match cmd {
-                SampleCmd::Info { file } | SampleCmd::Peaks { file, .. } | SampleCmd::Upload { file } | SampleCmd::Play { file, .. } => file,
+                SampleCmd::Info { file }
+                | SampleCmd::Peaks { file, .. }
+                | SampleCmd::Analyze { file, .. }
+                | SampleCmd::Upload { file }
+                | SampleCmd::Play { file, .. } => file,
                 SampleCmd::Stop => unreachable!("planned above"),
             };
             let (mut requests, path) = match upload_requests(file)? {
@@ -1524,6 +1622,14 @@ fn plan(cmd: &Cmd) -> Result<Vec<Request>> {
                     start: from.as_deref().map(time_arg).transpose()?,
                     end: to.as_deref().map(time_arg).transpose()?,
                     bins: *bins,
+                })),
+                SampleCmd::Analyze { from, to, beats_per_bar, onsets, beats, .. } => requests.push(Request::SampleAnalyze(SampleAnalyzeParams {
+                    path,
+                    start: from.as_deref().map(time_arg).transpose()?,
+                    end: to.as_deref().map(time_arg).transpose()?,
+                    beats_per_bar: *beats_per_bar,
+                    onsets: *onsets,
+                    beats: *beats,
                 })),
                 SampleCmd::Play { from, to, .. } => requests.push(Request::SamplePlay(SamplePlayParams {
                     path,
@@ -2582,6 +2688,7 @@ fn present(cmd: &Cmd, results: &[Value], json: bool) -> Result<()> {
                 p.peaks.iter().map(|b| bars[((b[0].abs().max(b[1].abs()).min(1.0)) * 8.0).round() as usize]).collect();
             println!("|{line}|");
         }
+        Cmd::Sample { cmd: SampleCmd::Analyze { rows, .. } } => print_analysis(&serde_json::from_value(last)?, *rows),
         Cmd::Sample { cmd: SampleCmd::Play { .. } } => {
             let p: SamplePlaying = serde_json::from_value(last)?;
             println!("playing {} - {}", fmt_time(p.start), fmt_time(p.end));
@@ -3186,7 +3293,7 @@ mod tests {
         let commands = [
             "status", "state", "params", "get mixer.1.volume", "set drums.kick.level 35%",
             "instrument types", "instrument list", "instrument add tb303 --id bass", "instrument rm bass",
-            "send 1 2 50%", "sampler", "sampler load 1 /nope.wav", "sampler load 1 Cargo.toml", "sampler load 1 /nope.mp3 --from 1:23.4 --to 1:23.65", "sampler clear 1", "sample info /nope.mp3", "sample peaks /nope.mp3 --bins 8", "sample upload Cargo.toml", "sample play /nope.mp3 --from 1 --to 1.2", "sample stop", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
+            "send 1 2 50%", "sampler", "sampler load 1 /nope.wav", "sampler load 1 Cargo.toml", "sampler load 1 /nope.mp3 --from 1:23.4 --to 1:23.65", "sampler clear 1", "sample info /nope.mp3", "sample peaks /nope.mp3 --bins 8", "sample analyze /nope.mp3 --from 1 --to 30 --rows", "sample upload Cargo.toml", "sample play /nope.mp3 --from 1 --to 1.2", "sample stop", "mod", "mod route lfo.1 bass.cutoff 40%", "mod unroute lfo.1 bass.cutoff", "device types", "device list", "device add delay --on 1", "device rm delay", "device mv delay --on master",
             "channel add --name Hat", "channel rm 2", "channel rename 1 Kit", "channel move 2 1", "route drums.closed_hat 2",
             "mixer", "notes bass C2", "notes bass", "note bass 3 D#2!~", "key C2 --for 0.1", "trigger --note C2",
             "play", "stop", "tempo 128", "pattern", "pattern show kick",

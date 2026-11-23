@@ -71,11 +71,14 @@ function rpcAllowed(s, method) {
 /** Params that name a file on the engine host. The assistant may not pass
  * them: a name it read from the project (or was talked into using) must
  * not load or read arbitrary files there. A sample you loaded yourself can
- * still be edited; a pad can still be loaded from an upload id. */
+ * still be edited; a pad can still be loaded from an upload id; and
+ * `analyze_audio` and `cut_sample` (tools.cjs) work on the file behind a
+ * pad, found from the project, never a path the model gives. */
 const PATH_PARAMS = {
   "sampler.load": "path",
   "sample.info": "path",
   "sample.peaks": "path",
+  "sample.analyze": "path",
   "sample.play": "path",
 };
 

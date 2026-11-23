@@ -405,6 +405,29 @@ pub struct SamplePeaksParams {
     pub bins: u32,
 }
 
+/// Analyze `start..end` seconds of an audio file (default: all of it,
+/// up to the 20 minutes a source can be): tempo and bar grid, key, level,
+/// a timeline a bar a row, and its sections. See `SampleAnalysis`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct SampleAnalyzeParams {
+    /// As in `sample.info`.
+    pub path: String,
+    #[serde(default)]
+    pub start: Option<f64>,
+    #[serde(default)]
+    pub end: Option<f64>,
+    /// Beats in a bar, for the grid (default 4).
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 16))]
+    pub beats_per_bar: Option<u32>,
+    /// Also list every onset's time.
+    #[serde(default)]
+    pub onsets: bool,
+    /// Also list every beat's time.
+    #[serde(default)]
+    pub beats: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct SamplerPadParams {
     #[serde(default)]
@@ -1388,6 +1411,10 @@ api! {
     SampleInfo = "sample.info" (SampleInfoParams) -> crate::device::SampleInfo;
     /// A waveform overview of an audio file on the engine host.
     SamplePeaks = "sample.peaks" (SamplePeaksParams) -> crate::device::SamplePeaks;
+    /// Analyze an audio file on the engine host: tempo and bar grid, key,
+    /// level, a timeline a bar a row, and its sections (to find a part of
+    /// a song by how it sounds).
+    SampleAnalyze = "sample.analyze" (SampleAnalyzeParams) -> crate::device::SampleAnalysis;
     /// Audition a region of an audio file on the engine host (not in the
     /// mix, not recorded, not saved).
     SamplePlay = "sample.play" (SamplePlayParams) -> crate::device::SamplePlaying;
@@ -1618,7 +1645,7 @@ impl Method {
             Hello | StateGet | EventsSubscribe | EventsUnsubscribe | ParamList | ParamGet
             | InstrumentTypes | InstrumentList | PatternGet | PatternGetNotes | HistoryGet
             | JournalGet | JournalExport | ControllerGet | MidiPorts | ProjectList | RenderOffline
-            | EngineStatus | DaemonInfo | DaemonShutdown | SeatList | ClipGet | MidiModels | SongGet | StepGet | DeviceTypes | DeviceList | SamplerGet | SampleInfo | SamplePeaks | SampleUpload | SamplePlay | SampleStop => true,
+            | EngineStatus | DaemonInfo | DaemonShutdown | SeatList | ClipGet | MidiModels | SongGet | StepGet | DeviceTypes | DeviceList | SamplerGet | SampleInfo | SamplePeaks | SampleAnalyze | SampleUpload | SamplePlay | SampleStop => true,
             ParamSet | TransportPlay | TransportStop | TransportRecord | TransportLocate | ClipNew
             | ClipDuplicate | ClipRename | ClipDelete | ClipSelect | ClipLaunch | SongPlace | SongRemove
             | SongMove | SongBack
@@ -1648,6 +1675,7 @@ impl Method {
                 | EventsSubscribe
                 | EventsUnsubscribe
                 | RenderOffline
+                | SampleAnalyze
                 | DaemonInfo
                 | DaemonShutdown
                 | HistoryUndo
