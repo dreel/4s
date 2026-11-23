@@ -57,7 +57,7 @@ const TOOL_DEFS = [
   {
     name: "analyze_audio",
     description:
-      "Listen to the audio file behind a sampler pad (the whole song a pad was cut from, if the engine host still has it; else the pad's own file): its tempo and bar grid, key, level, its sections (runs of bars that sound alike; alike sections share a letter), and a table a bar a row. Columns: level in dBFS; low/mid/high, the shares of energy below 200 Hz (kick, bass), 200 Hz-2 kHz (body, voice, most instruments) and above 2 kHz (hats, cymbals); onsets (note or hit starts); punch 0..1 (how hard they hit: drums high, pads low); tonal 0..1 (chords and melody high, drums and noise low). Compare rows within the file, not against fixed numbers. Use it to find a part of a song by description, e.g. a drum break is bars with many onsets, high punch and high-band share, and low tonal; then cut it with `cut_sample`. Give start/end (seconds) to look at a span only.",
+      "Listen to the audio file behind a sampler pad (the whole song a pad was cut from, if the engine host still has it; else the pad's own file): its tempo and bar grid, key, level, its sections (runs of bars that sound alike; alike sections share a letter), and a table a bar a row. Columns: level in dBFS; low/mid/high, the shares of energy below 200 Hz (kick, bass), 200 Hz-2 kHz (body, voice, most instruments) and above 2 kHz (hats, cymbals); onsets (note or hit starts); punch 0..1 (how hard they hit: drums high, pads low); tonal 0..1 (chords and melody high, drums and noise low). Compare rows within the file, not against fixed numbers. With start/end, rows are numbered from the span's start, while `cut_sample` reports bars counted from the file's start; go by the times. Use it to find a part of a song by description, e.g. a drum break is bars with many onsets, high punch and high-band share, and low tonal; then cut it with `cut_sample`. Give start/end (seconds) to look at a span only.",
     input_schema: {
       type: "object",
       properties: {
@@ -73,7 +73,7 @@ const TOOL_DEFS = [
   {
     name: "cut_sample",
     description:
-      "Load a part of the file behind a sampler pad (the same file `analyze_audio` reads) onto a pad: start and end in seconds of that file, snapped to the nearest bar lines of its beat grid (so it loops in time) unless snap is false. At most 60 s. Returns the bars and the exact times; tell the user both. One undo step with the rest of the turn.",
+      "Load a part of the file behind a sampler pad (the same file `analyze_audio` reads) onto a pad: start and end in seconds of that file, snapped to the nearest bar lines of its beat grid (so it loops in time) unless snap is false. At most 60 s. Returns the bars (counted from the file's start) and the exact times; tell the user both. One undo step with the rest of the turn.",
     input_schema: {
       type: "object",
       properties: {
@@ -286,8 +286,9 @@ class Tools {
 
   /**
    * The file behind a pad, which `analyze_audio` and `cut_sample` work on:
-   * the file it was cut from if the engine host still has it, else its
-   * own. Only files already in the project, never a path from the model.
+   * the file it was cut from if the engine host still has it (its
+   * `origin`, the file the sample editor opens too), else its own. Only
+   * files the project names for a pad, never a path from the model.
    * @param {any} input
    * @returns {Promise<{ instrument: string, path: string, name: string }>}
    */

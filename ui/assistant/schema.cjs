@@ -73,7 +73,8 @@ function rpcAllowed(s, method) {
  * not load or read arbitrary files there. A sample you loaded yourself can
  * still be edited; a pad can still be loaded from an upload id; and
  * `analyze_audio` and `cut_sample` (tools.cjs) work on the file behind a
- * pad, found from the project, never a path the model gives. */
+ * pad (its own, or the `origin` it was cut from, as the sample editor
+ * does), found from the project, never a path the model gives. */
 const PATH_PARAMS = {
   "sampler.load": "path",
   "sample.info": "path",

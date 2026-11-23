@@ -21,8 +21,9 @@
 //!   the rows' self-similarity) peak-picked, at least four rows apart;
 //!   alike sections share a label.
 //!
-//! It runs off the core lock (the server spawns it), on a copy-free view
-//! of a cached source.
+//! It runs off the core lock (the server spawns it) on the cached
+//! source's `Arc<[f32]>`, cloned under the lock: keep it an owned `Arc`,
+//! never a borrow taken under the lock.
 
 use fours_protocol::{AnalysisRow, AnalysisSection, KeyEstimate, SampleAnalysis, Tempo};
 use realfft::RealFftPlanner;

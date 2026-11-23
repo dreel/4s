@@ -275,7 +275,8 @@ pub struct SampleAnalysis {
     /// The key, if there is enough pitched sound to guess one.
     pub key: Option<KeyEstimate>,
     /// What a row is: `bar` (the beat grid's bars; the first and last can
-    /// be partial) or `second`.
+    /// be partial, and a pickup or tail of 0.25 s or less is in no row)
+    /// or `second`.
     pub row_unit: String,
     pub rows: Vec<AnalysisRow>,
     /// Runs of rows that sound alike, split where the sound changes.
