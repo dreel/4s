@@ -49,13 +49,19 @@ pub const SLIDE_LEN: u32 = TICKS_PER_STEP + 1;
 /// One note in a clip.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS, JsonSchema)]
 pub struct ClipEvent {
-    /// Start, in ticks from the clip's start (`PPQ` per quarter note).
+    /// Start, in ticks from the clip's start (`PPQ` per quarter note,
+    /// `TICKS_PER_STEP` per 16th step); under the clip's length.
     pub tick: u32,
     /// Length in ticks (at least 1).
+    #[schemars(range(min = 1))]
     pub len: u32,
-    /// MIDI note; a drum machine plays the voice on that GM note.
+    /// MIDI note, 0..127; a drum machine plays the voice on that GM note:
+    /// `GM_DRUM_NOTES`.
+    #[schemars(range(max = 127))]
     pub note: u8,
-    /// 1..127.
+    /// MIDI velocity, 1..127 (`VEL_ON` plays as a step that is on,
+    /// `VEL_ACCENT_MIN` and up as accented).
+    #[schemars(range(min = 1, max = 127))]
     pub velocity: u8,
 }
 

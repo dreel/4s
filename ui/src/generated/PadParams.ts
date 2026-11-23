@@ -2,11 +2,11 @@
 
 export type PadParams = { 
 /**
- * 0-based row (track).
+ * 0-based row (track), 0..7.
  */
 row: number, 
 /**
- * 0-based column within the current page.
+ * 0-based column within the current page, 0..7.
  */
 col: number, 
 /**

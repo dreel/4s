@@ -695,7 +695,8 @@ pub struct ClipLengthParams {
     /// Clip in the instrument's pool; default: its selected clip.
     #[serde(default)]
     pub clip: Option<u32>,
-    /// Ticks (1..`MAX_CLIP_TICKS`).
+    /// Ticks, 1..`MAX_CLIP_TICKS`; `TICKS_PER_BAR` is one bar.
+    #[schemars(range(min = 1, max = MAX_CLIP_TICKS))]
     pub length: u32,
 }
 
@@ -706,10 +707,12 @@ pub struct ClipQuantizeParams {
     /// Clip in the instrument's pool; default: its selected clip.
     #[serde(default)]
     pub clip: Option<u32>,
-    /// Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).
+    /// Grid in ticks, e.g. `TICKS_PER_STEP` for 16ths.
+    #[schemars(range(min = 1))]
     pub grid: u32,
     /// How far to move each note toward the grid, 0..1 (default 1: onto it).
     #[serde(default)]
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub strength: Option<f32>,
     /// Only these notes (default: all of them).
     #[serde(default)]
@@ -724,8 +727,9 @@ pub struct ClipNewParams {
     /// Default: its id.
     #[serde(default)]
     pub name: Option<String>,
-    /// Ticks; default: one bar (`DEFAULT_CLIP_LENGTH`).
+    /// Ticks, 1..`MAX_CLIP_TICKS`; default: one bar (`DEFAULT_CLIP_LENGTH`).
     #[serde(default)]
+    #[schemars(range(min = 1, max = MAX_CLIP_TICKS))]
     pub length: Option<u32>,
     /// Make it the selected clip (default true).
     #[serde(default)]
@@ -870,18 +874,23 @@ pub struct RecordParams {
     pub instrument: Option<String>,
     #[serde(default)]
     pub mode: Option<RecordMode>,
-    /// Record quantize grid in ticks (24 = a 16th); 0 turns it off.
+    /// Record quantize grid in ticks (`TICKS_PER_STEP` = a 16th), up to
+    /// `MAX_CLIP_TICKS`; 0 turns it off.
     #[serde(default)]
+    #[schemars(range(max = MAX_CLIP_TICKS))]
     pub quantize: Option<u32>,
     /// How far record quantize moves notes toward the grid, 0..1.
     #[serde(default)]
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub strength: Option<f32>,
     /// Bars of metronome before recording starts from a stop (0..4).
     #[serde(default)]
+    #[schemars(range(max = 4))]
     pub count_in: Option<u32>,
     /// Extra input latency to compensate, in milliseconds (0..500): notes
     /// are placed this much earlier.
     #[serde(default)]
+    #[schemars(range(min = 0.0, max = 500.0))]
     pub offset_ms: Option<f32>,
 }
 
@@ -889,10 +898,14 @@ pub struct RecordParams {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct RenderNote {
     /// Seconds from play (after any count-in).
+    #[schemars(range(min = 0.0))]
     pub time: f64,
+    /// MIDI note, 0..127.
+    #[schemars(range(max = 127))]
     pub note: u8,
-    /// 1..127 (default 100).
+    /// MIDI velocity, 1..127 (default 100).
     #[serde(default)]
+    #[schemars(range(min = 1, max = 127))]
     pub velocity: Option<u8>,
     /// Seconds held (default a 16th at 120 bpm, 0.125).
     #[serde(default)]
@@ -914,7 +927,10 @@ pub struct PatternSetParams {
     #[serde(default)]
     pub instrument: Option<String>,
     pub voice: Voice,
-    /// Step levels from step 0; missing trailing steps are cleared.
+    /// One level per 16th step from step 0: 0 off, 1 on, 2 accent. Levels,
+    /// not velocities (`clip.add` takes velocities). At most `MAX_STEPS`;
+    /// missing trailing steps are cleared.
+    #[schemars(length(max = MAX_STEPS), inner(range(max = 2)))]
     pub steps: Vec<u8>,
 }
 
@@ -924,9 +940,11 @@ pub struct SetStepParams {
     #[serde(default)]
     pub instrument: Option<String>,
     pub voice: Voice,
-    /// 0-based step index.
+    /// 0-based 16th step, under `MAX_STEPS`.
+    #[schemars(range(max = MAX_STEPS - 1))]
     pub step: u32,
     /// 0 = off, 1 = on, 2 = accent.
+    #[schemars(range(max = 2))]
     pub level: u8,
 }
 
@@ -966,12 +984,14 @@ pub struct TriggerParams {
     /// Drum voice to play (drum instruments).
     #[serde(default)]
     pub voice: Option<Voice>,
-    /// MIDI note to play for half a step (a drum machine plays the voice
-    /// on that GM note).
+    /// MIDI note (0..127) to play for half a step (a drum machine plays
+    /// the voice on that GM note).
     #[serde(default)]
+    #[schemars(range(max = 127))]
     pub note: Option<u8>,
-    /// 0..1, defaults to 1.
+    /// 0..1 (not MIDI 1..127), defaults to 1.
     #[serde(default)]
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub velocity: Option<f32>,
 }
 
@@ -982,9 +1002,12 @@ pub struct NoteParams {
     #[serde(default)]
     pub instrument: Option<String>,
     /// MIDI note (0..127; a drum machine plays the voice on that GM note).
+    #[schemars(range(max = 127))]
     pub note: u8,
-    /// 0..1, defaults to 1 (0.95 and up plays accented). Ignored by note-off.
+    /// 0..1 (not MIDI 1..127), defaults to 1 (0.95 and up plays accented).
+    /// Ignored by note-off.
     #[serde(default)]
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub velocity: Option<f32>,
 }
 
@@ -992,9 +1015,11 @@ pub struct NoteParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PadParams {
-    /// 0-based row (track).
+    /// 0-based row (track), 0..7.
+    #[schemars(range(max = 7))]
     pub row: u32,
-    /// 0-based column within the current page.
+    /// 0-based column within the current page, 0..7.
+    #[schemars(range(max = 7))]
     pub col: u32,
     /// true = press, false = release. Omit for a full tap.
     #[serde(default)]
@@ -1003,9 +1028,11 @@ pub struct PadParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct KnobParams {
-    /// 0-based knob index.
+    /// 0-based knob index, 0..7.
+    #[schemars(range(max = 7))]
     pub index: u32,
     /// Normalized position 0..1 (as from a 0..127 MIDI CC).
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub value: f64,
 }
 
@@ -1403,9 +1430,10 @@ api! {
 
     /// Read a drum pattern (one voice or all).
     PatternGet = "pattern.get" (PatternGetParams) -> PatternResult;
-    /// Replace one voice's steps.
+    /// Replace one drum voice's 16th steps in the selected clip, as levels
+    /// (0 off, 1 on, 2 accent).
     PatternSet = "pattern.set" (PatternSetParams) -> TrackPattern;
-    /// Set one step's level.
+    /// Set one drum step's level (0 off, 1 on, 2 accent).
     PatternSetStep = "pattern.set_step" (SetStepParams) -> StepResult;
     /// Toggle one step between off and on.
     PatternToggleStep = "pattern.toggle_step" (ToggleStepParams) -> StepResult;

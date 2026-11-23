@@ -660,7 +660,9 @@ enum ChannelCmd {
 enum PatternCmd {
     /// Show the pattern (all voices or one).
     Show { voice: Option<String> },
-    /// Replace a voice's steps, e.g. `4s pattern set kick "x---x---X---x---"`.
+    /// Replace a voice's steps, e.g. `4s pattern set kick "x---x---X---x---"`:
+    /// one character per 16th, `x` (or `1`) on, `X` (or `2`, `!`) accent,
+    /// `-` (or `.`, `0`) off; spaces and `|` are ignored.
     Set {
         voice: String,
         #[arg(allow_hyphen_values = true)]

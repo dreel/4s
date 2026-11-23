@@ -16,7 +16,8 @@ arm: boolean | null,
  */
 instrument: string | null, mode: RecordMode | null, 
 /**
- * Record quantize grid in ticks (24 = a 16th); 0 turns it off.
+ * Record quantize grid in ticks (`TICKS_PER_STEP` = a 16th), up to
+ * `MAX_CLIP_TICKS`; 0 turns it off.
  */
 quantize: number | null, 
 /**

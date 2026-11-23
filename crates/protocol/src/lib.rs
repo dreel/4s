@@ -5,6 +5,7 @@
 pub mod api;
 pub mod clip;
 pub mod device;
+pub mod doc_constants;
 pub mod layout;
 pub mod project;
 pub mod types;

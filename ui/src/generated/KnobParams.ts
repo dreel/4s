@@ -2,7 +2,7 @@
 
 export type KnobParams = { 
 /**
- * 0-based knob index.
+ * 0-based knob index, 0..7.
  */
 index: number, 
 /**

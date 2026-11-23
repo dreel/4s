@@ -6,6 +6,6 @@ export type ClipLengthParams = { instrument: string | null,
  */
 clip: number | null, 
 /**
- * Ticks (1..`MAX_CLIP_TICKS`).
+ * Ticks, 1..`MAX_CLIP_TICKS`; `TICKS_PER_BAR` is one bar.
  */
 length: number, };
