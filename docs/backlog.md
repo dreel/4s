@@ -93,6 +93,23 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
 
 ## Follow-ups
 
+- (2026-11-07, #60 review) assistant parity: there is no CLI equivalent
+  (`4s ask "make the kick punchier"`) of the panel; RFC 0013 open question
+  4. It would need the loop outside Electron (a Node CLI over
+  `ui/assistant/`, or the loop in the daemon).
+- (2026-11-07, assistant-loop branch) assistant packaging: `ui/assistant/`
+  reads `schema/4s.schema.json` from the repo, or from
+  `<resources>/schema/` when packaged; there is no packaging config yet, so
+  a packaged app must ship the schema there (`schema.cjs`).
+- (2026-11-07, assistant-loop branch) assistant `describe`: returns a
+  method's params schema only; the schema has no result types (they are
+  only in `ui/src/generated/methods.ts`). Add results to the schema if the
+  model needs them.
+- (2026-11-07, assistant-loop branch) assistant conversation: kept in memory
+  in main and lost on restart; RFC 0013 phase C persists it per project and
+  trims it past a token budget (no trimming yet, so a very long chat grows
+  every request).
+
 - (2026-10-18, midi-focus branch) MPK: the mod wheel moves `focus.cutoff`,
   so with the drums focused and the keys playing a synth through
   `@pitched`, the wheel moves nothing; a `@pitched.cutoff` CC target would

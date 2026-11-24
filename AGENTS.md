@@ -12,7 +12,10 @@ and agents can drive and verify every part of it.
 2. **The UI is thin.** An Electron app (React + Tailwind) renders daemon state
    and sends commands. No business logic in the UI.
 3. **One API, two clients.** Every UI action is an RPC that is also available
-   from the CLI, 1:1. The CLI is the primary agentic interface.
+   from the CLI, 1:1. The CLI is the primary agentic interface. The in-app
+   assistant ([docs/assistant.md](docs/assistant.md), RFC 0013) is a
+   UI-only client of that same API: it only calls RPCs (each also in the
+   CLI), so it adds no capability the CLI lacks.
 4. **Close the loop.** Every component must be drivable and verifiable end-to-end
    by an agent: headless audio renders, a virtual controller, scripted UI tests.
 5. **Modular by design.** Instruments, mixer channels, effects, and MIDI devices
@@ -45,6 +48,7 @@ and agents can drive and verify every part of it.
 - [Journal](docs/journal.md) -- what happened and who did it, undo/redo, reproducing bugs by replaying recordings, recordings as tests
 - [Livid Block](docs/hardware/livid-block.md) -- controller notes and mapping
 - [Akai MPK mini IV](docs/hardware/akai-mpk-mini-iv.md) -- device model, ports, default layout
+- [Assistant](docs/assistant.md) -- the in-app assistant: loop in Electron main, tools, rpc allowlist, key storage, fake-API tests
 - [Backlog](docs/backlog.md) -- noticed but not done: possible bugs, follow-ups, doc/code mismatches
 
 ## Build, run, verify
