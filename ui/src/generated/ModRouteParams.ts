@@ -6,6 +6,6 @@
  */
 export type ModRouteParams = { source: string, target: string, 
 /**
- * -1..1.
+ * How far the source moves the target, -1..1 of its range.
  */
 depth: number, };

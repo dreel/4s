@@ -7,7 +7,7 @@ export type SetStepParams = {
  */
 instrument: string | null, voice: Voice, 
 /**
- * 0-based step index.
+ * 0-based 16th step, under `MAX_STEPS`.
  */
 step: number, 
 /**

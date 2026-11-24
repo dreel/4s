@@ -112,6 +112,9 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 - The app's assistant panel (Cmd-K, [docs/assistant.md](docs/assistant.md))
   runs a Claude tool loop in Electron main; its e2e
   (`ui/e2e/assistant.spec.ts`) uses a fake Anthropic server, so no key.
+  Each chat is logged to `<data-dir>/assistant/sessions/*.jsonl` (every
+  tool call with its input and result or error); read it when debugging
+  the assistant.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history;

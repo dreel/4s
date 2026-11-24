@@ -13,6 +13,7 @@ const { loadSchema, methods, rpcAllowed, rpcRefusal, PATH_PARAMS } = require("./
 const { Tools } = require("./tools.cjs");
 const { Assistant, MAX_TOOL_CALLS } = require("./loop.cjs");
 const { Settings } = require("./settings.cjs");
+const { SessionLog } = require("./log.cjs");
 const { startFakeAnthropic } = require("../e2e/fake-anthropic.cjs");
 
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -92,6 +93,13 @@ test("tools: overview, find_params, set_params, rpc, describe", async () => {
   const d = JSON.parse((await tools.run("describe", { method: "device.add" })).text);
   assert.equal(d.allowed, true);
   assert.ok(d.params.properties.type);
+  // What a step is, and the constants' values, reach the model.
+  const steps = JSON.parse((await tools.run("describe", { method: "pattern.set" })).text).params.properties.steps;
+  assert.match(steps.description, /0 off, 1 on, 2 accent/);
+  assert.equal(steps.items.maximum, 2);
+  const length = JSON.parse((await tools.run("describe", { method: "clip.length" })).text).params.properties.length;
+  assert.match(length.description, /`MAX_CLIP_TICKS` \(\d+\)/);
+  assert.equal(length.minimum, 1);
 });
 
 /** An assistant against the fake API, collecting its events. */
@@ -107,6 +115,7 @@ async function harness(script, opts = {}) {
     model: () => opts.model ?? "claude-sonnet-5-5",
     emit: (e) => events.push(e),
     baseURL: fake.url,
+    ...(opts.log ? { log: opts.log } : {}),
   });
   return { a, fake, events, close: async () => { daemon.close(); await fake.close(); } };
 }
@@ -185,6 +194,51 @@ test("a refused method is reported to the model and changes nothing", async () =
     assert.equal((await me.call("history.get")).undo.length, 0);
   } finally {
     await h.close();
+  }
+});
+
+test("the session log has every tool call, refused and failed ones too, and new chat starts a new file", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "4s-assistant-log-"));
+  const h = await harness(
+    [
+      { match: "four on the floor", replies: [
+        { content: [
+          { type: "tool_use", name: "rpc", input: { method: "project.load", params: { name: "song" } } },
+          { type: "tool_use", name: "rpc", input: { method: "pattern.set", params: { voice: "kick", steps: [255, 0, 0, 0] } } },
+          { type: "tool_use", name: "rpc", input: { method: "pattern.set", params: { voice: "kick", steps: [2, 0, 0, 0, 1, 0, 0, 0] } } },
+        ] },
+        { content: [{ type: "text", text: "Kick on the beat." }] },
+      ] },
+      { match: "again", replies: [{ content: [{ type: "text", text: "Hello again." }] }] },
+    ],
+    { log: new SessionLog(dir), key: "sk-secret-test-key" },
+  );
+  try {
+    await h.a.send("four on the floor");
+    const files = () => fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort();
+    assert.equal(files().length, 1);
+    const read = (f) => fs.readFileSync(path.join(dir, f), "utf8");
+    const records = read(files()[0]).trim().split("\n").map((l) => JSON.parse(l));
+    assert.deepEqual(records.map((r) => r.type), ["user", "context", "reply", "tool", "tool", "tool", "reply", "done"]);
+    assert.equal(records[0].text, "four on the floor");
+    assert.match(records[1].header, /^\[4S context\]/);
+    const [refused, failed, ok] = records.filter((r) => r.type === "tool");
+    assert.equal(refused.ok, false);
+    assert.match(refused.error, /not allowed from the assistant/);
+    assert.equal(failed.ok, false);
+    // The daemon's error says what a step level is, so the model can fix the call.
+    assert.match(failed.error, /0 \(off\), 1 \(on\), or 2 \(accent\)/);
+    assert.deepEqual(failed.input.params.steps, [255, 0, 0, 0]);
+    assert.equal(ok.ok, true);
+    assert.equal(records.at(-1).stop, "end_turn");
+    assert.ok(!read(files()[0]).includes("sk-secret-test-key"), "the API key is never logged");
+
+    await h.a.reset();
+    await h.a.send("again");
+    assert.equal(files().length, 2);
+  } finally {
+    await h.close();
+    await me.call("pattern.clear", {});
   }
 });
 

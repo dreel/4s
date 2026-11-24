@@ -7,7 +7,7 @@ export type ClipQuantizeParams = { instrument: string | null,
  */
 clip: number | null, 
 /**
- * Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).
+ * Grid in ticks, 1..`MAX_CLIP_TICKS`, e.g. `TICKS_PER_STEP` for 16ths.
  */
 grid: number, 
 /**

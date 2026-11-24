@@ -10,7 +10,7 @@ instrument: string | null,
  */
 name: string | null, 
 /**
- * Ticks; default: one bar (`DEFAULT_CLIP_LENGTH`).
+ * Ticks, 1..`MAX_CLIP_TICKS`; default: one bar (`DEFAULT_CLIP_LENGTH`).
  */
 length: number | null, 
 /**

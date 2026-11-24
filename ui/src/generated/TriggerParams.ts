@@ -12,11 +12,11 @@ instrument: string | null,
  */
 voice: Voice | null, 
 /**
- * MIDI note to play for half a step (a drum machine plays the voice
- * on that GM note).
+ * MIDI note (0..127) to play for half a step (a drum machine plays
+ * the voice on that GM note).
  */
 note: number | null, 
 /**
- * 0..1, defaults to 1.
+ * 0..1, clamped (not MIDI 1..127); defaults to 1.
  */
 velocity: number | null, };

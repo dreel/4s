@@ -247,14 +247,14 @@
           },
           "lanes": {
             "default": [],
-            "description": "Automation lanes (RFC 0010), at most `MAX_LANES`.",
+            "description": "Automation lanes (RFC 0010), at most `MAX_LANES` (8).",
             "items": {
               "$ref": "#/$defs/Lane"
             },
             "type": "array"
           },
           "length": {
-            "description": "Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.",
+            "description": "Length in ticks (1..`MAX_CLIP_TICKS` (1536)): where it loops.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
@@ -278,27 +278,27 @@
           "len": {
             "description": "Length in ticks (at least 1).",
             "format": "uint32",
-            "minimum": 0,
+            "minimum": 1,
             "type": "integer"
           },
           "note": {
-            "description": "MIDI note; a drum machine plays the voice on that GM note.",
+            "description": "MIDI note, 0..127; a drum machine plays the voice on that GM note:\n`GM_DRUM_NOTES` (kick 36, snare 38, clap 39, closed_hat 42, open_hat 46, low_tom 45, high_tom 50, cowbell 56).",
             "format": "uint8",
-            "maximum": 255,
+            "maximum": 127,
             "minimum": 0,
             "type": "integer"
           },
           "tick": {
-            "description": "Start, in ticks from the clip's start (`PPQ` per quarter note).",
+            "description": "Start, in ticks from the clip's start (`PPQ` (96) per quarter note,\n`TICKS_PER_STEP` (24) per 16th step); under the clip's length.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
           },
           "velocity": {
-            "description": "1..127.",
+            "description": "MIDI velocity, 1..127 (`VEL_ON` (89) plays as a step that is on,\n`VEL_ACCENT_MIN` (121) and up as accented).",
             "format": "uint8",
-            "maximum": 255,
-            "minimum": 0,
+            "maximum": 127,
+            "minimum": 1,
             "type": "integer"
           }
         },
@@ -634,7 +634,7 @@
             "type": "object"
           },
           {
-            "description": "A note pattern changed (all `MAX_STEPS` steps).",
+            "description": "A note pattern changed (all `MAX_STEPS` (64) steps).",
             "properties": {
               "instrument": {
                 "type": "string"
@@ -3249,27 +3249,27 @@
           "len": {
             "description": "Length in ticks (at least 1).",
             "format": "uint32",
-            "minimum": 0,
+            "minimum": 1,
             "type": "integer"
           },
           "note": {
-            "description": "MIDI note; a drum machine plays the voice on that GM note.",
+            "description": "MIDI note, 0..127; a drum machine plays the voice on that GM note:\n`GM_DRUM_NOTES` (kick 36, snare 38, clap 39, closed_hat 42, open_hat 46, low_tom 45, high_tom 50, cowbell 56).",
             "format": "uint8",
-            "maximum": 255,
+            "maximum": 127,
             "minimum": 0,
             "type": "integer"
           },
           "tick": {
-            "description": "Start, in ticks from the clip's start (`PPQ` per quarter note).",
+            "description": "Start, in ticks from the clip's start (`PPQ` (96) per quarter note,\n`TICKS_PER_STEP` (24) per 16th step); under the clip's length.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
           },
           "velocity": {
-            "description": "1..127.",
+            "description": "MIDI velocity, 1..127 (`VEL_ON` (89) plays as a step that is on,\n`VEL_ACCENT_MIN` (121) and up as accented).",
             "format": "uint8",
-            "maximum": 255,
-            "minimum": 0,
+            "maximum": 127,
+            "minimum": 1,
             "type": "integer"
           }
         },
@@ -3388,9 +3388,10 @@
             ]
           },
           "length": {
-            "description": "Ticks (1..`MAX_CLIP_TICKS`).",
+            "description": "Ticks, 1..`MAX_CLIP_TICKS` (1536); `TICKS_PER_BAR` (384) is one bar.",
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 1536,
+            "minimum": 1,
             "type": "integer"
           }
         },
@@ -3411,9 +3412,10 @@
           },
           "length": {
             "default": null,
-            "description": "Ticks; default: one bar (`DEFAULT_CLIP_LENGTH`).",
+            "description": "Ticks, 1..`MAX_CLIP_TICKS` (1536); default: one bar (`DEFAULT_CLIP_LENGTH` (384)).",
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 1536,
+            "minimum": 1,
             "type": [
               "integer",
               "null"
@@ -3462,9 +3464,10 @@
             ]
           },
           "grid": {
-            "description": "Grid in ticks, e.g. 24 for 16ths (`TICKS_PER_STEP`).",
+            "description": "Grid in ticks, 1..`MAX_CLIP_TICKS` (1536), e.g. `TICKS_PER_STEP` (24) for 16ths.",
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 1536,
+            "minimum": 1,
             "type": "integer"
           },
           "instrument": {
@@ -3478,6 +3481,8 @@
             "default": null,
             "description": "How far to move each note toward the grid, 0..1 (default 1: onto it).",
             "format": "float",
+            "maximum": 1.0,
+            "minimum": 0.0,
             "type": [
               "number",
               "null"
@@ -4056,13 +4061,14 @@
       "KnobParams": {
         "properties": {
           "index": {
-            "description": "0-based knob index.",
+            "description": "0-based knob index, 0..7.",
             "format": "uint32",
+            "maximum": 7,
             "minimum": 0,
             "type": "integer"
           },
           "value": {
-            "description": "Normalized position 0..1 (as from a 0..127 MIDI CC).",
+            "description": "Normalized position 0..1, clamped (as from a 0..127 MIDI CC).",
             "format": "double",
             "type": "number"
           }
@@ -4164,7 +4170,7 @@
             "type": "string"
           },
           "points": {
-            "description": "1..`MAX_LANE_POINTS`, ticks below `MAX_CLIP_TICKS` (points past the\nclip's loop never play); sorted and made unique by tick (the last of\na tick wins), values clamped to the parameter's range.",
+            "description": "1..`MAX_LANE_POINTS` (64), ticks below `MAX_CLIP_TICKS` (1536) (points past the\nclip's loop never play); sorted and made unique by tick (the last of\na tick wins), values clamped to the parameter's range.",
             "items": {
               "$ref": "#/$defs/LanePoint"
             },
@@ -4372,8 +4378,10 @@
         "description": "Route a modulator output to a parameter (or set an existing route's\ndepth).",
         "properties": {
           "depth": {
-            "description": "-1..1.",
+            "description": "How far the source moves the target, -1..1 of its range.",
             "format": "float",
+            "maximum": 1.0,
+            "minimum": -1.0,
             "type": "number"
           },
           "source": {
@@ -4490,13 +4498,13 @@
           "note": {
             "description": "MIDI note (0..127; a drum machine plays the voice on that GM note).",
             "format": "uint8",
-            "maximum": 255,
+            "maximum": 127,
             "minimum": 0,
             "type": "integer"
           },
           "velocity": {
             "default": null,
-            "description": "0..1, defaults to 1 (0.95 and up plays accented). Ignored by note-off.",
+            "description": "0..1, clamped (not MIDI 1..127); defaults to 1 (0.95 and up plays\naccented). Ignored by note-off.",
             "format": "float",
             "type": [
               "number",
@@ -4598,8 +4606,9 @@
       "PadParams": {
         "properties": {
           "col": {
-            "description": "0-based column within the current page.",
+            "description": "0-based column within the current page, 0..7.",
             "format": "uint32",
+            "maximum": 7,
             "minimum": 0,
             "type": "integer"
           },
@@ -4612,8 +4621,9 @@
             ]
           },
           "row": {
-            "description": "0-based row (track).",
+            "description": "0-based row (track), 0..7.",
             "format": "uint32",
+            "maximum": 7,
             "minimum": 0,
             "type": "integer"
           }
@@ -4724,13 +4734,14 @@
             ]
           },
           "steps": {
-            "description": "Step levels from step 0; missing trailing steps are cleared.",
+            "description": "One level per 16th step from step 0: 0 off, 1 on, 2 accent. Levels,\nnot velocities (`clip.add` takes velocities). At most `MAX_STEPS` (64);\nmissing trailing steps are cleared.",
             "items": {
               "format": "uint8",
-              "maximum": 255,
+              "maximum": 2,
               "minimum": 0,
               "type": "integer"
             },
+            "maxItems": 64,
             "type": "array"
           },
           "voice": {
@@ -5167,6 +5178,7 @@
             "default": null,
             "description": "Bars of metronome before recording starts from a stop (0..4).",
             "format": "uint32",
+            "maximum": 4,
             "minimum": 0,
             "type": [
               "integer",
@@ -5196,6 +5208,8 @@
             "default": null,
             "description": "Extra input latency to compensate, in milliseconds (0..500): notes\nare placed this much earlier.",
             "format": "float",
+            "maximum": 500.0,
+            "minimum": 0.0,
             "type": [
               "number",
               "null"
@@ -5203,8 +5217,9 @@
           },
           "quantize": {
             "default": null,
-            "description": "Record quantize grid in ticks (24 = a 16th); 0 turns it off.",
+            "description": "Record quantize grid in ticks (`TICKS_PER_STEP` (24) = a 16th), up to\n`MAX_CLIP_TICKS` (1536); 0 turns it off.",
             "format": "uint32",
+            "maximum": 1536,
             "minimum": 0,
             "type": [
               "integer",
@@ -5215,6 +5230,8 @@
             "default": null,
             "description": "How far record quantize moves notes toward the grid, 0..1.",
             "format": "float",
+            "maximum": 1.0,
+            "minimum": 0.0,
             "type": [
               "number",
               "null"
@@ -5236,22 +5253,24 @@
             ]
           },
           "note": {
+            "description": "MIDI note, 0..127.",
             "format": "uint8",
-            "maximum": 255,
+            "maximum": 127,
             "minimum": 0,
             "type": "integer"
           },
           "time": {
             "description": "Seconds from play (after any count-in).",
             "format": "double",
+            "minimum": 0.0,
             "type": "number"
           },
           "velocity": {
             "default": null,
-            "description": "1..127 (default 100).",
+            "description": "MIDI velocity, 1..127 (default 100).",
             "format": "uint8",
-            "maximum": 255,
-            "minimum": 0,
+            "maximum": 127,
+            "minimum": 1,
             "type": [
               "integer",
               "null"
@@ -5413,7 +5432,8 @@
           "bins": {
             "description": "1..4096.",
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 4096,
+            "minimum": 1,
             "type": "integer"
           },
           "end": {
@@ -5476,7 +5496,7 @@
         "description": "Send a file to the engine host in chunks (from a client on another\nmachine): the same `upload` id for each, at increasing `offset`s, the\nlast with `done`. The finished file is checked (it must decode) and\nstored under `<data dir>/samples/`.",
         "properties": {
           "data": {
-            "description": "This chunk, base64 (at most `MAX_UPLOAD_BYTES` decoded).",
+            "description": "This chunk, base64 (at most `MAX_UPLOAD_BYTES` (11534336) decoded).",
             "type": "string"
           },
           "done": {
@@ -5538,9 +5558,10 @@
             ]
           },
           "pad": {
-            "description": "1..16.",
+            "description": "1..`SAMPLER_PADS` (16).",
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 16,
+            "minimum": 1,
             "type": "integer"
           },
           "path": {
@@ -5893,13 +5914,14 @@
           "level": {
             "description": "0 = off, 1 = on, 2 = accent.",
             "format": "uint8",
-            "maximum": 255,
+            "maximum": 2,
             "minimum": 0,
             "type": "integer"
           },
           "step": {
-            "description": "0-based step index.",
+            "description": "0-based 16th step, under `MAX_STEPS` (64).",
             "format": "uint32",
+            "maximum": 63,
             "minimum": 0,
             "type": "integer"
           },
@@ -6006,7 +6028,7 @@
             ]
           },
           "start": {
-            "description": "Song tick (`TICKS_PER_BAR` per bar).",
+            "description": "Song tick (`TICKS_PER_BAR` (384) per bar).",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
@@ -6192,9 +6214,9 @@
           },
           "note": {
             "default": null,
-            "description": "MIDI note to play for half a step (a drum machine plays the voice\non that GM note).",
+            "description": "MIDI note (0..127) to play for half a step (a drum machine plays\nthe voice on that GM note).",
             "format": "uint8",
-            "maximum": 255,
+            "maximum": 127,
             "minimum": 0,
             "type": [
               "integer",
@@ -6203,7 +6225,7 @@
           },
           "velocity": {
             "default": null,
-            "description": "0..1, defaults to 1.",
+            "description": "0..1, clamped (not MIDI 1..127); defaults to 1.",
             "format": "float",
             "type": [
               "number",
@@ -6975,7 +6997,7 @@
         "type": "object"
       },
       {
-        "description": "Replace one voice's steps.",
+        "description": "Replace one drum voice's 16th steps in the selected clip, as levels\n(0 off, 1 on, 2 accent).",
         "properties": {
           "method": {
             "const": "pattern.set",
@@ -6992,7 +7014,7 @@
         "type": "object"
       },
       {
-        "description": "Set one step's level.",
+        "description": "Set one drum step's level (0 off, 1 on, 2 accent).",
         "properties": {
           "method": {
             "const": "pattern.set_step",
@@ -8290,14 +8312,14 @@
           },
           "lanes": {
             "default": [],
-            "description": "Automation lanes (RFC 0010), at most `MAX_LANES`.",
+            "description": "Automation lanes (RFC 0010), at most `MAX_LANES` (8).",
             "items": {
               "$ref": "#/$defs/Lane"
             },
             "type": "array"
           },
           "length": {
-            "description": "Length in ticks (1..`MAX_CLIP_TICKS`): where it loops.",
+            "description": "Length in ticks (1..`MAX_CLIP_TICKS` (1536)): where it loops.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
@@ -8321,27 +8343,27 @@
           "len": {
             "description": "Length in ticks (at least 1).",
             "format": "uint32",
-            "minimum": 0,
+            "minimum": 1,
             "type": "integer"
           },
           "note": {
-            "description": "MIDI note; a drum machine plays the voice on that GM note.",
+            "description": "MIDI note, 0..127; a drum machine plays the voice on that GM note:\n`GM_DRUM_NOTES` (kick 36, snare 38, clap 39, closed_hat 42, open_hat 46, low_tom 45, high_tom 50, cowbell 56).",
             "format": "uint8",
-            "maximum": 255,
+            "maximum": 127,
             "minimum": 0,
             "type": "integer"
           },
           "tick": {
-            "description": "Start, in ticks from the clip's start (`PPQ` per quarter note).",
+            "description": "Start, in ticks from the clip's start (`PPQ` (96) per quarter note,\n`TICKS_PER_STEP` (24) per 16th step); under the clip's length.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
           },
           "velocity": {
-            "description": "1..127.",
+            "description": "MIDI velocity, 1..127 (`VEL_ON` (89) plays as a step that is on,\n`VEL_ACCENT_MIN` (121) and up as accented).",
             "format": "uint8",
-            "maximum": 255,
-            "minimum": 0,
+            "maximum": 127,
+            "minimum": 1,
             "type": "integer"
           }
         },
@@ -9171,7 +9193,7 @@
             "type": "object"
           },
           {
-            "description": "Always `MAX_STEPS` long.",
+            "description": "Always `MAX_STEPS` (64) long.",
             "properties": {
               "kind": {
                 "const": "notes",
@@ -9578,7 +9600,7 @@
         "type": "object"
       },
       "TrackPattern": {
-        "description": "Steps for one track. Each entry is 0 (off), 1 (on), or 2 (accent).\nAlways `MAX_STEPS` long; the clip's length sets how many are played.",
+        "description": "Steps for one track. Each entry is 0 (off), 1 (on), or 2 (accent).\nAlways `MAX_STEPS` (64) long; the clip's length sets how many are played.",
         "properties": {
           "steps": {
             "items": {

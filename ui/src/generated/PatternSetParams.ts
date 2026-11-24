@@ -7,6 +7,8 @@ export type PatternSetParams = {
  */
 instrument: string | null, voice: Voice, 
 /**
- * Step levels from step 0; missing trailing steps are cleared.
+ * One level per 16th step from step 0: 0 off, 1 on, 2 accent. Levels,
+ * not velocities (`clip.add` takes velocities). At most `MAX_STEPS`;
+ * missing trailing steps are cleared.
  */
 steps: Array<number>, };

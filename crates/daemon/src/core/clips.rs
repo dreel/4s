@@ -667,7 +667,7 @@ impl Core {
             return Err(RpcError::invalid(format!("at most {MAX_STEPS} steps")));
         }
         if steps.iter().any(|s| *s > STEP_ACCENT) {
-            return Err(RpcError::invalid("step levels must be 0, 1, or 2"));
+            return Err(RpcError::invalid("step levels must be 0 (off), 1 (on), or 2 (accent); for velocities use clip.add"));
         }
         let mut full = [STEP_OFF; MAX_STEPS];
         full[..steps.len()].copy_from_slice(steps);

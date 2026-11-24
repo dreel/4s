@@ -5,7 +5,8 @@
  */
 export type ClipEvent = { 
 /**
- * Start, in ticks from the clip's start (`PPQ` per quarter note).
+ * Start, in ticks from the clip's start (`PPQ` per quarter note,
+ * `TICKS_PER_STEP` per 16th step); under the clip's length.
  */
 tick: number, 
 /**
@@ -13,10 +14,12 @@ tick: number,
  */
 len: number, 
 /**
- * MIDI note; a drum machine plays the voice on that GM note.
+ * MIDI note, 0..127; a drum machine plays the voice on that GM note:
+ * `GM_DRUM_NOTES`.
  */
 note: number, 
 /**
- * 1..127.
+ * MIDI velocity, 1..127 (`VEL_ON` plays as a step that is on,
+ * `VEL_ACCENT_MIN` and up as accented).
  */
 velocity: number, };

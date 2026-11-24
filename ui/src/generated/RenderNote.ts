@@ -7,9 +7,13 @@ export type RenderNote = {
 /**
  * Seconds from play (after any count-in).
  */
-time: number, note: number, 
+time: number, 
 /**
- * 1..127 (default 100).
+ * MIDI note, 0..127.
+ */
+note: number, 
+/**
+ * MIDI velocity, 1..127 (default 100).
  */
 velocity: number | null, 
 /**
