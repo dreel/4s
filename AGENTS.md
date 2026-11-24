@@ -109,6 +109,9 @@ scripts/check.sh                             # all tests: Rust, codegen, CLI e2e
 - `4s instrument add poly` adds an eight-voice synth (`synth.*`); a chord
   is several notes on one step: `4s clip add synth 0 C4 --len 96`, then the
   same for E4 and G4.
+- The app's assistant panel (Cmd-K, [docs/assistant.md](docs/assistant.md))
+  runs a Claude tool loop in Electron main; its e2e
+  (`ui/e2e/assistant.spec.ts`) uses a fake Anthropic server, so no key.
 - `4s journal` lists every state-changing request (who, from where, what it
   changed), including MIDI input and undo/redo; use it to see what actually
   happened in a session. `4s undo` / `4s redo` act on your own history;
