@@ -193,6 +193,24 @@ tracker exists (AGENTS.md, "Log what you notice but don't do").
   doc (one key per clip event) twice per message; diff only the touched keys.
 - (2026-10-09, #25 follow-up) `cc learn` from an endless encoder stores an
   absolute map; add a way to learn relative mode, or say so in the help.
+- (2026-11-22, MIDI scan fix) `midi.ports`, `midi.connect` (and its
+  `replaces` check), `find_input` and auto-connect's own `connect` still call
+  CoreMIDI while holding the core lock, and `list_ports` serializes on its
+  kept clients' mutex; if the system MIDI service stops answering, a scan
+  stuck inside CoreMIDI holds that mutex, and those requests (and everything
+  queued behind the core lock) hang. List ports before taking the core lock
+  there too, or bound the CoreMIDI calls with a timeout.
+- (2026-11-22, MIDI scan fix) the scan's kept CoreMIDI clients are made new
+  only when every connected port vanishes at once; a daemon with nothing
+  connected keeps clients made before a MIDIServer restart, which list no
+  ports, so a device plugged in later is not auto-connected until the daemon
+  restarts. Rebuild them when the list has been empty for a while. And when
+  the scan does rebuild them and the connected ports are listed again, their
+  connections (made under the old server) are likely dead but still count as
+  connected, so auto-connect skips them; drop and remake them there.
+- (2026-11-22, MIDI scan fix) the CLI e2e covers the scan (`virtual_block`
+  unplugged and pruned), but not the MIDIServer hang or restart that
+  motivated the fix: no harness reproduces those.
 - (2026-10-09, #24/#25 follow-up) auto-connect of model ports and
   auto-reconnect of hand-connected ports have no e2e (the e2e daemons run
   with `--no-midi`).

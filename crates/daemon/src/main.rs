@@ -229,7 +229,20 @@ fn run(args: Args) -> Result<()> {
         let auto = !args.no_midi;
         std::thread::Builder::new().name("4s-midi-scan".into()).spawn(move || {
             loop {
-                core.lock().unwrap().midi_autoconnect(auto);
+                // List ports without the core lock: if CoreMIDI blocks, only
+                // this thread waits, not every request.
+                let started = core.lock().unwrap().midi_scan_start(auto);
+                if let Some(connected) = started {
+                    let (mut inputs, _) = midi::list_ports();
+                    if inputs.is_empty() && !connected.is_empty() {
+                        // Every connected port gone at once: unplugged, or
+                        // the MIDI server restarted under our clients. New
+                        // clients tell which (a one-off cost either way).
+                        midi::reset_lister();
+                        inputs = midi::list_ports().0;
+                    }
+                    core.lock().unwrap().midi_autoconnect(&inputs, &connected, auto);
+                }
                 std::thread::sleep(Duration::from_secs(2));
             }
         })?;

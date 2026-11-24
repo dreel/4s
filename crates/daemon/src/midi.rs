@@ -5,6 +5,7 @@
 use anyhow::{Context, Result, anyhow};
 use fours_protocol::{DeviceProfile, MidiConnection};
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+use std::sync::Mutex;
 use std::sync::mpsc::Sender;
 
 const CLIENT: &str = "4S";
@@ -66,13 +67,33 @@ pub fn start_device_watcher() {
 #[cfg(not(target_os = "macos"))]
 pub fn start_device_watcher() {}
 
+/// The clients `list_ports` enumerates through, made once and kept. Making
+/// (and dropping) a CoreMIDI client on every hotplug scan, every 2 s for the
+/// life of every daemon, wore down macOS's MIDIServer until it stopped
+/// answering, and the scan hung inside CoreMIDI.
+static LISTER: Mutex<Option<(MidiInput, MidiOutput)>> = Mutex::new(None);
+
+/// Drop the kept listing clients so the next `list_ports` makes new ones:
+/// clients made before macOS's MIDIServer restarted list nothing.
+pub fn reset_lister() {
+    let old = LISTER.lock().unwrap_or_else(|e| e.into_inner()).take();
+    drop(old); // disposed without the mutex: a wedged MIDIServer can block it
+}
+
+/// The names of the MIDI input and output ports present now. This can block
+/// if the system's MIDI service does, so call it without holding the core
+/// lock where possible.
 pub fn list_ports() -> (Vec<String>, Vec<String>) {
-    let inputs = MidiInput::new(CLIENT)
-        .map(|m| m.ports().iter().filter_map(|p| m.port_name(p).ok()).collect())
-        .unwrap_or_default();
-    let outputs = MidiOutput::new(CLIENT)
-        .map(|m| m.ports().iter().filter_map(|p| m.port_name(p).ok()).collect())
-        .unwrap_or_default();
+    let mut lister = LISTER.lock().unwrap_or_else(|e| e.into_inner());
+    let (mi, mo) = match &mut *lister {
+        Some(l) => l,
+        empty => match (MidiInput::new(CLIENT), MidiOutput::new(CLIENT)) {
+            (Ok(i), Ok(o)) => empty.insert((i, o)),
+            _ => return Default::default(),
+        },
+    };
+    let inputs = mi.ports().iter().filter_map(|p| mi.port_name(p).ok()).collect();
+    let outputs = mo.ports().iter().filter_map(|p| mo.port_name(p).ok()).collect();
     (inputs, outputs)
 }
 
@@ -88,6 +109,11 @@ fn find_port(names: &[String], query: &str) -> Option<String> {
 impl Midi {
     pub fn connections(&self) -> Vec<MidiConnection> {
         self.conns.iter().map(|c| c.info.clone()).collect()
+    }
+
+    /// The connected input ports.
+    pub fn connected_inputs(&self) -> Vec<String> {
+        self.conns.iter().map(|c| c.info.input.clone()).collect()
     }
 
     pub fn is_connected(&self, input: &str) -> bool {
@@ -201,10 +227,14 @@ impl Midi {
         }
     }
 
-    /// Drop connections whose ports no longer exist. Returns true if any were removed.
-    pub fn prune(&mut self, inputs: &[String]) -> bool {
+    /// Drop connections to ports that were connected when `inputs` was
+    /// listed (`listed_with`) and are gone from it; a port connected since
+    /// is kept, as the list may be older than the connection (one dropped
+    /// and remade by hand while the list was taken is not). Returns true if
+    /// any were removed.
+    pub fn prune(&mut self, inputs: &[String], listed_with: &[String]) -> bool {
         let before = self.conns.len();
-        self.conns.retain(|c| inputs.contains(&c.info.input));
+        self.conns.retain(|c| inputs.contains(&c.info.input) || !listed_with.contains(&c.info.input));
         before != self.conns.len()
     }
 
